@@ -347,6 +347,16 @@ class AgentBridgeService:
             governance=self.governance,
             keyword_extractor=OpenAIChatProbeKeywordExtractor(store=store, history=retrieval_probe_history),
         )
+        from agent_bridge.dsh.config import DshConfigService
+        from agent_bridge.dsh.service import DshRuntimeService
+
+        self.dsh_configs = DshConfigService(store=store, admins=admins, access=self.access)
+        self.dsh = DshRuntimeService(
+            paths=paths,
+            configs=self.dsh_configs,
+            access=self.access,
+            admins=admins,
+        )
         self.plugin_update_scheduler = PluginUpdateScheduler(service=self, store=store, admins=admins)
         self.workflow_scheduler = WorkflowScheduler(
             service=self.workflows,
@@ -404,11 +414,18 @@ class AgentBridgeService:
                 recovered,
             )
         service.model_evaluations.recover_interrupted_runs()
+        recovered_dsh = service.dsh.recover()
+        if recovered_dsh["kept"] or recovered_dsh["cleaned"]:
+            logger.info(
+                "DSH Runtime 遗留实例识别完成 kept=%d cleaned=%d",
+                recovered_dsh["kept"],
+                recovered_dsh["cleaned"],
+            )
         migrate_toml_backends_to_db(paths, service.store)
         service.registry = create_registry_from_db(paths, service.store)
         logger.info(
             "AgentBridgeService 装配完成 子服务=governance/capabilities/agents/codegraph/"
-            "memory/retrieval_probe/workflows/skills/scripts/model_evaluations 后端数=%d",
+            "memory/retrieval_probe/workflows/skills/scripts/model_evaluations/dsh 后端数=%d",
             len(service.registry.list_slugs()) if service.registry else 0,
         )
         return service

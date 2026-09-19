@@ -10,6 +10,7 @@ import { Input } from '../../components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../../components/ui/dialog'
 import { Badge } from '../../components/ui/badge'
 import StatusBadge from '../../components/StatusBadge.vue'
+import DshConfigSection from '../../components/dsh/DshConfigSection.vue'
 import { alert, confirm } from '../../composables/useConfirm'
 
 const loading = ref(true)
@@ -1068,6 +1069,9 @@ async function deleteBackend(slug: string) {
         </div>
       </CardContent>
     </Card>
+
+    <!-- DSH Web Runtime 配置 -->
+    <DshConfigSection />
 
     <!-- 知识库管理 -->
     <Card>

@@ -91,9 +91,10 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
         service.plugin_update_scheduler.start()
         service.doc_sync_scheduler.start()
         service.workflow_scheduler.start()
+        service.dsh.start()
         asyncio.create_task(service.business_ledgers.load_all_async())
         logger.info(
-            "调度器已启动 codegraph/understand/plugin_update/doc_sync/workflow"
+            "调度器已启动 codegraph/understand/plugin_update/doc_sync/workflow/dsh"
         )
         yield
         logger.info("Agent Bridge 服务停止 root=%s", resolved_paths.root)
@@ -105,6 +106,11 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
         except Exception:
             logger.warning("停止 claude-mem worker 失败", exc_info=True)
         service.model_evaluations.stop_all()
+        try:
+            service.dsh.stop_all()
+        except Exception:
+            logger.warning("停止 DSH Runtime 失败", exc_info=True)
+        service.dsh.stop()
         service.codegraph_scheduler.stop()
         service.understand_scheduler.stop()
         service.plugin_update_scheduler.stop()
@@ -252,6 +258,8 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
             service.memory.admins = reloaded
             service.business_ledgers.admins = reloaded
             service.plugin_update_scheduler._admins = reloaded
+            service.dsh.admins = reloaded
+            service.dsh_configs.admins = reloaded
             return await call_next(request)
 
     def save_upload(file: UploadFile) -> Path:
@@ -353,6 +361,9 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
 
     from agent_bridge.api.routes.onboarding import create_onboarding_routes
     app.include_router(create_onboarding_routes(service, actor), prefix="/api/v1")
+
+    from agent_bridge.api.routes.dsh import create_dsh_routes
+    app.include_router(create_dsh_routes(service, actor), prefix="/api/v1")
 
     # MCP streamable HTTP endpoint
     from agent_bridge.capability_hub.gateway.metamcp import setup_mcp_route

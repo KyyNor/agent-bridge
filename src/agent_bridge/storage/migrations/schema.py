@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 import time
@@ -434,6 +435,45 @@ def apply_followup_schema(store: Any, conn: sqlite3.Connection) -> None:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS dsh_group_configs (
+          group_key TEXT PRIMARY KEY,
+          linux_user TEXT NOT NULL DEFAULT '',
+          default_model TEXT NOT NULL DEFAULT '',
+          api_key TEXT NOT NULL DEFAULT '',
+          updated_by TEXT NOT NULL DEFAULT '',
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS dsh_runtime_config (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          web_command TEXT NOT NULL DEFAULT '',
+          idle_timeout_minutes INTEGER NOT NULL DEFAULT 0,
+          base_url TEXT NOT NULL DEFAULT '',
+          available_models_json TEXT NOT NULL DEFAULT '[]',
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    # Base URL 与可用模型是全局公共配置；早期版本曾按组保存。迁移必须先回填
+    # 全局行再删列，否则升级会静默丢掉用户已保存的模型接入配置（DSH 会退回
+    # 内置供应商）。回填只填全局行的空字段，不覆盖管理员已保存的新值。
+    store._ensure_columns(
+        conn,
+        "dsh_runtime_config",
+        {
+            "base_url": "TEXT NOT NULL DEFAULT ''",
+            "available_models_json": "TEXT NOT NULL DEFAULT '[]'",
+        },
+    )
+    store._ensure_columns(conn, "dsh_group_configs", {"default_model": "TEXT NOT NULL DEFAULT ''"})
+    _backfill_dsh_public_llm_config(conn)
+    store._drop_column(conn, "dsh_group_configs", "base_url")
+    store._drop_column(conn, "dsh_group_configs", "available_models_json")
     store._ensure_columns(
         conn,
         "model_evaluation_runs",
@@ -722,6 +762,62 @@ def apply_followup_schema(store: Any, conn: sqlite3.Connection) -> None:
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_script_runs_script ON script_runs(script_key, created_at DESC)")
     store._ensure_columns(conn, "workflow_tasks", {"type": "TEXT NOT NULL DEFAULT ''", "priority_flag": "TEXT"})
+
+
+def _parse_dsh_models(raw: Any) -> list[str]:
+    try:
+        parsed = json.loads(str(raw or "[]"))
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [str(item) for item in parsed if str(item)]
+
+
+def _backfill_dsh_public_llm_config(conn: sqlite3.Connection) -> None:
+    """把早期按组保存的 Base URL / 可用模型回填到全局公共接入行。
+
+    删列前执行：只填全局行为空的字段（不覆盖管理员已保存的新值），多个小组的
+    模型取保序并集。
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(dsh_group_configs)").fetchall()}
+    if not {"base_url", "available_models_json"} <= columns:
+        return
+    group_rows = conn.execute(
+        "SELECT base_url, available_models_json FROM dsh_group_configs"
+    ).fetchall()
+    base_url = ""
+    models: list[str] = []
+    for raw_base_url, raw_models in group_rows:
+        if not base_url and str(raw_base_url or "").strip():
+            base_url = str(raw_base_url).strip()
+        for model in _parse_dsh_models(raw_models):
+            if model not in models:
+                models.append(model)
+    if not base_url and not models:
+        return
+    current = conn.execute(
+        "SELECT base_url, available_models_json FROM dsh_runtime_config WHERE id = 1"
+    ).fetchone()
+    if current is None:
+        conn.execute(
+            "INSERT INTO dsh_runtime_config (id, base_url, available_models_json) VALUES (1, ?, ?)",
+            (base_url, json.dumps(models, ensure_ascii=False)),
+        )
+    else:
+        merged_base_url = str(current[0] or "").strip() or base_url
+        merged_models = _parse_dsh_models(current[1]) or models
+        if merged_base_url == str(current[0] or "") and merged_models == _parse_dsh_models(current[1]):
+            return
+        conn.execute(
+            "UPDATE dsh_runtime_config SET base_url = ?, available_models_json = ? WHERE id = 1",
+            (merged_base_url, json.dumps(merged_models, ensure_ascii=False)),
+        )
+    logger.info(
+        "DSH 公共模型接入已从组配置回填 base_url_set=%s models=%s",
+        bool(base_url),
+        len(models),
+    )
 
 
 def migrate_knowledge_folders(store: Any, conn: sqlite3.Connection) -> None:
