@@ -280,6 +280,36 @@ class DshRuntimeService:
             self._write_state(normalized_user, state)
             return str(captured["auth_path"]), str(captured["auth_query"])
 
+    def refresh_workspace_auth(self, user_id: str) -> tuple[str, str] | None:
+        """重扫运行日志中的最新 ``dsh web:`` 横幅，更新已轮换的鉴权入口。
+
+        DSH 的启动 token 绑定进程内 owner，Connection 重载会静默轮换 token 并
+        重印横幅；启动时捕获的入口可能已过期（表现为交换 401）。本方法返回
+        按最新横幅刷新后的入口；横幅与已存入口一致时只回读、不落盘。日志缺失
+        或无横幅时返回 None，调用方应沿用既有入口继续处理。
+        """
+        normalized_user = self._require_user_id(user_id)
+        with self._lock:
+            state = self._read_state(normalized_user)
+            if not state:
+                return None
+            captured = self._capture_auth_entry(state)
+            if captured is None:
+                return None
+            new_path = str(captured["auth_path"])
+            new_query = str(captured["auth_query"])
+            old_path = str(state.get("auth_path") or "")
+            old_query = str(state.get("auth_query") or "")
+            if new_path == old_path and new_query == old_query:
+                return old_path, old_query
+            state.update(captured)
+            self._write_state(normalized_user, state)
+            logger.info(
+                "DSH 启动 token 已轮换，按最新横幅刷新鉴权入口 user=%s",
+                normalized_user,
+            )
+            return new_path, new_query
+
     # -- 启动与回收 --
 
     def _start_runtime(
@@ -539,7 +569,11 @@ class DshRuntimeService:
 
     @staticmethod
     def _capture_auth_entry(state: dict[str, Any]) -> dict[str, str] | None:
-        """从 DSH 启动日志解析 ``dsh web: http://…/?token=…`` 鉴权入口。"""
+        """从 DSH 运行日志解析 ``dsh web: http://…/?token=…`` 鉴权入口。
+
+        DSH 会在 token 轮换（Connection 重载）时重印横幅，因此以日志中
+        最后一条横幅为当前有效入口。
+        """
         log_path = Path(str(state.get("log_path") or ""))
         if not log_path or not log_path.exists():
             return None

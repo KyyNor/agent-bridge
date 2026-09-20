@@ -411,6 +411,39 @@ def test_dsh_request_cookies_narrows_to_dsh_scope() -> None:
     assert _dsh_request_cookies("", authority=authority) is None
 
 
+def test_refresh_workspace_auth_picks_latest_banner(service, tmp_path) -> None:
+    """token 轮换后重扫日志以最后一条横幅为准，并幂等落盘。"""
+    log = tmp_path / "dsh.log"
+    log.write_text(
+        "dsh web: http://127.0.0.1:48400/?token=first-token\n"
+        "…连接重载…\n"
+        "dsh web: http://127.0.0.1:48400/?token=second-token\n",
+        encoding="utf-8",
+    )
+    service.dsh._write_state(
+        "user1",
+        {
+            "user_id": "user1",
+            "group_key": "groupa",
+            "linux_user": "groupa",
+            "pid": 424242,
+            "port": 48400,
+            "config_dir": "",
+            "log_path": str(log),
+            "profile_key": None,
+            "started_at": time.time(),
+            "last_access_at": time.time(),
+            "auth_path": "/",
+            "auth_query": "token=first-token",
+        },
+    )
+    # 横幅已轮换：返回最新入口并更新状态
+    assert service.dsh.refresh_workspace_auth("user1") == ("/", "token=second-token")
+    assert service.dsh.workspace_auth("user1") == ("/", "token=second-token")
+    # 横幅未再变化：幂等返回，不重复落盘语义
+    assert service.dsh.refresh_workspace_auth("user1") == ("/", "token=second-token")
+
+
 def test_workspace_escape_path_routing_rules() -> None:
     """DSH 前端的根绝对路径请求按 Referer / 同源 WS 归属工作台。"""
 
@@ -445,12 +478,20 @@ def test_workspace_escape_path_routing_rules() -> None:
 
 
 class _FakeDshService:
-    def __init__(self, target: str | None, *, auth: tuple[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        target: str | None,
+        *,
+        auth: tuple[str, str] | None = None,
+        refreshed_auth: tuple[str, str] | None = None,
+    ) -> None:
         self._target = target
         self._auth = auth
+        self._refreshed_auth = refreshed_auth
         self.ensure_calls: list[str] = []
         self.touch_calls: list[str] = []
         self.auth_calls: list[str] = []
+        self.refresh_calls: list[str] = []
 
     def require_runtime_target(self, user_id: str) -> str | None:
         if self._target is not None:
@@ -464,6 +505,10 @@ class _FakeDshService:
     def workspace_auth(self, user_id: str) -> tuple[str, str] | None:
         self.auth_calls.append(user_id)
         return self._auth
+
+    def refresh_workspace_auth(self, user_id: str) -> tuple[str, str] | None:
+        self.refresh_calls.append(user_id)
+        return self._refreshed_auth if self._refreshed_auth is not None else self._auth
 
 
 class _FakeBridgeService:
@@ -658,16 +703,93 @@ def test_workspace_proxy_narrows_forwarded_cookies(respx_mock) -> None:
     assert "cookie" not in bare.calls[-1].request.headers
 
 
-def test_workspace_proxy_relays_upstream_when_token_exchange_fails(respx_mock) -> None:
-    """换取失败（token 过期等）时如实回放 DSH 响应，不伪造成功。"""
+def test_workspace_proxy_recovers_rotated_launch_token(respx_mock) -> None:
+    """回归：DSH 的启动 token 随 Connection 重载静默轮换并重印横幅。
+
+    状态里捕获的 token 过期后交换 401；代理必须重扫日志取最新 token 重试，
+    浏览器仍直接拿到 200 与新鲜 Cookie。
+    """
+    target = "http://127.0.0.1:48400"
+    authority = "127.0.0.1:48400"
+    name = dsh_session_cookie_name(authority)
+    dsh = _FakeDshService(
+        target,
+        auth=("/", "token=stale-token"),
+        refreshed_auth=("/", "token=rotated-token"),
+    )
+    stale = respx_mock.get(f"{target}/?token=stale-token").mock(
+        return_value=httpx.Response(401, text="dsh web authentication required")
+    )
+    rotated = respx_mock.get(f"{target}/?token=rotated-token").mock(
+        return_value=httpx.Response(
+            303,
+            headers={
+                "location": "/",
+                "set-cookie": f"{name}=fresh; Path=/; HttpOnly; SameSite=Strict",
+            },
+        )
+    )
+    follow = respx_mock.get(f"{target}/").mock(return_value=httpx.Response(200, text="<html>app"))
+
+    scope = _http_scope("/agent-workspace/", origin="http://bridge.internal:8080")
+    status, headers, body = _drive(_middleware(dsh), scope)
+
+    assert stale.called and rotated.called and follow.called
+    assert dsh.refresh_calls == ["user1"]
+    # 浏览器直接拿到 200 与新鲜 Cookie，token 轮换被完全吸收在服务端
+    assert status == 200
+    assert body == b"<html>app"
+    assert headers["set-cookie"] == f"{name}=fresh; Path=/; HttpOnly; SameSite=Strict"
+    assert follow.calls[-1].request.headers["cookie"] == f"{name}=fresh"
+
+
+def test_workspace_proxy_falls_back_to_valid_session_without_token_replay(respx_mock) -> None:
+    """token 失效但浏览器会话仍有效：直连代理返回 200，绝不回放带 token 的 303。
+
+    真实 DSH 对“已认证 + token 查询”只回去掉查询串的 303 且不下发 Set-Cookie；
+    旧实现把该响应回放给浏览器，导致 /agent-workspace/ 无限重定向。
+    """
+    target = "http://127.0.0.1:48400"
+    authority = "127.0.0.1:48400"
+    name = dsh_session_cookie_name(authority)
+    dsh = _FakeDshService(target, auth=("/", "token=dead-token"))
+    exchange = respx_mock.get(f"{target}/?token=dead-token").mock(
+        return_value=httpx.Response(401, text="dsh web authentication required")
+    )
+    direct = respx_mock.get(f"{target}/").mock(return_value=httpx.Response(200, text="<html>app"))
+
+    scope = _http_scope(
+        "/agent-workspace/", cookie=f"{name}=valid-session", origin="http://bridge.internal:8080"
+    )
+    status, _, body = _drive(_middleware(dsh), scope)
+
+    assert exchange.called and direct.called
+    # 重扫无新横幅（返回同一入口）时不做第二次交换
+    assert dsh.refresh_calls == ["user1"]
+    # 浏览器直接 200：兜底请求不带 token 查询串，只带 DSH 自己的会话 Cookie
+    assert status == 200
+    assert body == b"<html>app"
+    request = direct.calls[-1].request
+    assert "token=" not in str(request.url)
+    assert request.headers["cookie"] == f"{name}=valid-session"
+
+
+def test_workspace_proxy_surfaces_401_when_exchange_and_session_both_dead(respx_mock) -> None:
+    """token 与浏览器会话双双失效（如清了 Cookie）：如实回放 DSH 的 401，不循环。"""
     target = "http://127.0.0.1:48400"
     dsh = _FakeDshService(target, auth=("/", "token=expired"))
     respx_mock.get(f"{target}/?token=expired").mock(
         return_value=httpx.Response(401, text="dsh web authentication required")
     )
+    direct = respx_mock.get(f"{target}/").mock(
+        return_value=httpx.Response(401, text="dsh web authentication required")
+    )
     status, _, body = _drive(_middleware(dsh), _http_scope("/agent-workspace/"))
     assert status == 401
     assert b"authentication required" in body
+    # 401 来自不带 token 的直连代理，而不是对交换响应的回放
+    assert direct.called
+    assert "token=" not in str(direct.calls[-1].request.url)
 
 
 def test_workspace_proxy_routes_escaped_root_requests(respx_mock) -> None:

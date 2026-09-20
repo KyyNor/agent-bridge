@@ -217,13 +217,15 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
   authority 的 `dsh-auth-*` 会话与其余 `dsh-` 前缀应用 Cookie；`agent_bridge_admin`、
   PostHog 等平台/统计 Cookie 不透传给上游，收敛后无剩余时删除 Cookie 头。
 - DSH 首访鉴权在代理层完成：根导航（`GET`/`HEAD` `/`）且 URL 未带 `token=` 时，
-  代理先在服务端用捕获的 `?token=` 换取会话 Cookie（DSH 的 303 在服务端吞掉，
-  浏览器只看到 200 与新鲜 Cookie），再携带该 Cookie 转发最终页面；换取请求
-  不带任何浏览器 Cookie——真实 DSH 在命中旧会话 Cookie 时可能只回 303 而不再
-  下发 Set-Cookie，带旧 Cookie 换取会让浏览器在 `/agent-workspace/` 上无限
-  重定向。换取不到 Cookie 时如实回放上游响应。DSH 会话 Cookie 由进程内密钥
-  签名，runtime 重启后旧 Cookie 必然失效，因此**不能**依据“浏览器已带 Cookie”
-  跳过换取，否则会永久卡在 `dsh web authentication required`。
+  代理先在服务端用 `?token=` 换取会话 Cookie（DSH 的 303 在服务端吞掉，浏览器
+  只看到 200 与新鲜 Cookie），再携带该 Cookie 转发最终页面；换取请求不带任何
+  浏览器 Cookie。DSH 的启动 token 绑定进程内 owner，Connection 重载会静默轮换
+  并重印 `dsh web:` 横幅，而签名密钥持久化在 DSH_HOME（会话 Cookie 可跨进程
+  重启存活、有效期约 30 天）；因此换取失败时必须经 `refresh_workspace_auth`
+  重扫运行日志取最新横幅重试一次，仍换取不到则不带 token 直接代理原请求——
+  浏览器既有会话有效则 200，否则如实收到 401。**绝不**把带 token 查询的响应
+  回放给浏览器：真实 DSH 对“已认证 + token 查询”只回去掉查询串的 303 且不下发
+  Set-Cookie，回放会让 `/agent-workspace/` 无限重定向。
 - 能力平面接入位于 `dsh/workspace.py`：`DshWorkspaceCapabilityRegistry` 按用户唯一
   签发 24 小时 capability（绑定 user/profile/group）；`WorkspaceSelection` 表达
   “本次进入选定的平面”，`profile_key=None` 表示不注入 MCP（会清除覆盖文件）。
