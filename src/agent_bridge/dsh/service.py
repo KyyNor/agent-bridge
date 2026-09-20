@@ -550,6 +550,15 @@ class DshRuntimeService:
                 "DSH 模型接入未配置 Base URL（全局与公共模型配置均为空）config_dir=%s，DSH 将使用自身默认供应商",
                 config_dir,
             )
+        elif written is None and not binding.get("available_models"):
+            # Base URL 已解析（含公共模型配置回落）但全局可用模型为空：供应商
+            # 条目与 apiKeyEnv 均不落盘，组级 API Key 不会生效，必须留痕。
+            logger.warning(
+                "DSH 模型接入已解析 Base URL（source=%s）但全局可用模型列表为空，"
+                "跳过供应商注入，组级 API Key 不会生效 config_dir=%s，请在 DSH 运行配置中补充可用模型",
+                str(binding.get("base_url_source") or "-"),
+                config_dir,
+            )
         return written
 
     def _build_env(
