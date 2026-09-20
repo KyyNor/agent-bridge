@@ -455,6 +455,31 @@ class DshRuntimeService:
         env["DSH_HOME"] = str(config_dir)
         return env
 
+    def _run_dsh_plugin_command(
+        self,
+        runner: Callable[..., tuple[int, str]],
+        *,
+        user_id: str,
+        command: list[str],
+        env: dict[str, str],
+        cwd: Path,
+        identity: LinuxIdentity,
+    ) -> tuple[int, str] | None:
+        """执行一条一次性 dsh 插件命令；进程异常时返回 None（已记日志）。"""
+        try:
+            return runner(
+                command=command,
+                env=env,
+                cwd=cwd,
+                identity=identity,
+                timeout_seconds=PLUGIN_INSTALL_TIMEOUT_SECONDS,
+            )
+        except Exception as exc:
+            logger.error(
+                "DSH 插件命令异常 user=%s command=%s 原因=%s", user_id, command[1:], exc
+            )
+            return None
+
     def _install_plugins(
         self,
         user_id: str,
@@ -467,9 +492,10 @@ class DshRuntimeService:
         """在 web 进程启动前按名单补装插件（幂等、可断点续装）。
 
         ``_start_runtime`` 在持有服务锁的情况下同步调用本方法：安装完成后
-        才启动 DSH Web，浏览器首访即可用到全部插件。成功条目立即写入
-        marker；失败/超时条目不写 marker、不阻塞启动，下次 runtime 启动
-        自动重试。名单为空或全部就位时零开销（只读两个小文件）。
+        才启动 DSH Web，浏览器首访即可用到全部插件。安装前先初始化 profile
+        并放行原生依赖的构建脚本（pnpm 10 默认拦截，见 ``ensure_build_
+        approvals``）；成功条目立即写入 marker，失败/超时条目不写 marker、
+        不阻塞启动，下次 runtime 启动自动重试。名单为空时零开销。
         """
         if not specs:
             return
@@ -480,6 +506,27 @@ class DshRuntimeService:
             )
             return
         env = self._plugin_env(identity, config_dir)
+        cwd = identity.home if identity.home.is_dir() else config_dir
+        profile_dir = plugins.profile_dir_for(config_dir)
+        # profile 模板（package.json + pnpm-workspace.yaml）由 dsh 在首次插件
+        # 命令时生成；先落初始化，才能在其上放行原生依赖构建。
+        if not (profile_dir / "package.json").exists():
+            init = self._run_dsh_plugin_command(
+                runner,
+                user_id=user_id,
+                command=plugins.build_profile_install_command(dsh_binary),
+                env=env,
+                cwd=cwd,
+                identity=identity,
+            )
+            if init is None or init[0] != 0:
+                logger.warning(
+                    "DSH profile 初始化失败 user=%s profile=%s exit=%s（继续尝试插件安装）",
+                    user_id,
+                    profile_dir,
+                    init[0] if init is not None else "-",
+                )
+        approvals_changed = plugins.ensure_build_approvals(profile_dir)
         installed = plugins.read_installed_specs(config_dir)
         succeeded: list[str] = list(installed)
         marker_path = plugins.plugin_marker_path(config_dir)
@@ -497,21 +544,18 @@ class DshRuntimeService:
                 )
                 break
             attempted += 1
-            command = plugins.build_install_command(dsh_binary, spec)
             started = time.monotonic()
-            try:
-                exit_code, output = runner(
-                    command=command,
-                    env=env,
-                    cwd=identity.home if identity.home.is_dir() else config_dir,
-                    identity=identity,
-                    timeout_seconds=PLUGIN_INSTALL_TIMEOUT_SECONDS,
-                )
-            except Exception as exc:
-                logger.error(
-                    "DSH 插件安装异常 user=%s plugin=%s 原因=%s", user_id, spec, exc
-                )
+            result = self._run_dsh_plugin_command(
+                runner,
+                user_id=user_id,
+                command=plugins.build_install_command(dsh_binary, spec),
+                env=env,
+                cwd=cwd,
+                identity=identity,
+            )
+            if result is None:
                 continue
+            exit_code, output = result
             elapsed = time.monotonic() - started
             if exit_code != 0:
                 logger.warning(
@@ -529,6 +573,24 @@ class DshRuntimeService:
             logger.info(
                 "DSH 插件安装完成 user=%s plugin=%s 耗时=%.1fs", user_id, spec, elapsed
             )
+        if approvals_changed and attempted == 0:
+            # 依赖在放行前已就位，pnpm 不会随 add 补跑被拦下的构建脚本：
+            # 补一次 install 同步，让原生依赖（node-pty 等）在启动前编译好。
+            sync = self._run_dsh_plugin_command(
+                runner,
+                user_id=user_id,
+                command=plugins.build_profile_install_command(dsh_binary),
+                env=env,
+                cwd=cwd,
+                identity=identity,
+            )
+            if sync is not None and sync[0] != 0:
+                logger.warning(
+                    "DSH profile 依赖构建同步失败 user=%s exit=%s 输出尾部=%s",
+                    user_id,
+                    sync[0],
+                    sync[1][-500:] or "(空)",
+                )
         if attempted and set(specs) <= set(succeeded):
             logger.info("DSH 插件名单已全部就位 user=%s count=%d", user_id, len(specs))
 

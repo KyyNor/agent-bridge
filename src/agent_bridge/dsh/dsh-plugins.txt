@@ -10,5 +10,5 @@
 @linxin666/dsh-client-ui-git-graph@0.3.23
 @anionex/dsh-turn-rewind@0.3.8
 dsh-better-sidebar@0.19.1
-dsh-context@0.53.4
+dsh-context@0.53.3
 deepseek-idesign@0.2.2

@@ -461,6 +461,36 @@ def test_packaged_plugin_list_is_pinned() -> None:
         assert version[0].isdigit(), f"插件版本未钉住（浮动 tag 或范围）：{spec}"
 
 
+def _seed_profile(config_dir: Path, *, approvals: list[str] | None = None) -> Path:
+    """模拟 dsh 已初始化的 profile（package.json + pnpm-workspace.yaml）。"""
+    profile = config_dir / "profiles" / "web"
+    profile.mkdir(parents=True, exist_ok=True)
+    (profile / "package.json").write_text('{"name":"dsh-profile-web","private":true}', encoding="utf-8")
+    payload = "packages:\n  - .\n\nnodeLinker: hoisted\n"
+    if approvals is not None:
+        payload += "\nonlyBuiltDependencies:\n" + "".join(f"  - {item}\n" for item in approvals)
+    (profile / "pnpm-workspace.yaml").write_text(payload, encoding="utf-8")
+    return profile
+
+
+def test_ensure_build_approvals_merges_and_is_idempotent(tmp_path) -> None:
+    """放行原生依赖构建：补齐缺口、保留已有条目与其他键，内容不变时不触盘。"""
+    from agent_bridge.dsh import plugins
+
+    config_dir = tmp_path / "dsh-home"
+    profile = _seed_profile(config_dir, approvals=["esbuild"])
+    yaml_path = profile / "pnpm-workspace.yaml"
+
+    assert plugins.ensure_build_approvals(profile) is True
+    saved = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+    assert saved["onlyBuiltDependencies"] == ["esbuild", "node-pty"]
+    assert saved["packages"] == ["."] and saved["nodeLinker"] == "hoisted"
+
+    assert plugins.ensure_build_approvals(profile) is False
+    # profile 尚未初始化（dsh 会先写模板）时不建文件
+    assert plugins.ensure_build_approvals(tmp_path / "missing-profile") is False
+
+
 def test_install_plugins_records_marker_and_retries_failures(
     service, home, passwd_lookup
 ) -> None:
@@ -474,6 +504,7 @@ def test_install_plugins_records_marker_and_retries_failures(
     identity = resolve_linux_identity("groupa", service.dsh._passwd_lookup)
     config_dir = home / "groupa" / ".config" / "dsh" / "user1"
     config_dir.mkdir(parents=True)
+    profile = _seed_profile(config_dir)
     specs = ["dsh-context", "deepseek-idesign"]
 
     service.dsh._install_plugins(
@@ -487,6 +518,9 @@ def test_install_plugins_records_marker_and_retries_failures(
     env = launcher.once_calls[0]["env"]
     assert env["DSH_HOME"] == str(config_dir)
     assert "AGENT_BRIDGE_DSH_API_KEY" not in env
+    # 原生依赖构建已在安装前放行（node-pty 无 Linux 预编译，必须本地构建）
+    approved = yaml.safe_load((profile / "pnpm-workspace.yaml").read_text(encoding="utf-8"))
+    assert approved["onlyBuiltDependencies"] == ["node-pty"]
     marker = config_dir / "agent-bridge-plugins.txt"
     assert plugins.read_installed_specs(config_dir) == ["dsh-context"]
     assert oct(marker.stat().st_mode & 0o777) == "0o600"
@@ -497,6 +531,65 @@ def test_install_plugins_records_marker_and_retries_failures(
     )
     assert [call["command"][-1] for call in launcher.once_calls[2:]] == ["deepseek-idesign"]
     assert plugins.read_installed_specs(config_dir) == ["dsh-context", "deepseek-idesign"]
+
+
+def test_install_plugins_initializes_profile_before_approvals_and_adds(
+    service, home, passwd_lookup
+) -> None:
+    """首次初始化顺序：profile 模板 → 放行构建 → 逐个 add。"""
+    from agent_bridge.dsh import plugins
+    from agent_bridge.dsh.launcher import resolve_linux_identity
+
+    launcher = install_fake_launcher(service, home, passwd_lookup)
+    identity = resolve_linux_identity("groupa", service.dsh._passwd_lookup)
+    config_dir = home / "groupa" / ".config" / "dsh" / "user1"
+    config_dir.mkdir(parents=True)
+
+    def handler(command: list[str]) -> tuple[int, str]:
+        if command[-1] == "install":  # dsh 初始化 profile 模板
+            _seed_profile(config_dir)
+        return 0, "ok"
+
+    launcher.once_handler = handler
+    service.dsh._install_plugins(
+        "user1", identity=identity, config_dir=config_dir, dsh_binary="dsh", specs=["dsh-context"]
+    )
+    assert [call["command"] for call in launcher.once_calls] == [
+        ["dsh", "plugin", "--profile", "web", "install"],
+        ["dsh", "plugin", "--profile", "web", "add", "dsh-context"],
+    ]
+    approved = yaml.safe_load(
+        (config_dir / "profiles" / "web" / "pnpm-workspace.yaml").read_text(encoding="utf-8")
+    )
+    assert approved["onlyBuiltDependencies"] == ["node-pty"]
+    assert plugins.read_installed_specs(config_dir) == ["dsh-context"]
+
+
+def test_install_plugins_syncs_pending_builds_when_approvals_added(
+    service, home, passwd_lookup
+) -> None:
+    """依赖在放行前已就位：补一次 profile install 触发被拦下的原生构建。"""
+    from agent_bridge.dsh import plugins
+    from agent_bridge.dsh.launcher import resolve_linux_identity
+
+    launcher = install_fake_launcher(service, home, passwd_lookup)
+    launcher.once_handler = lambda command: (0, "ok")
+    identity = resolve_linux_identity("groupa", service.dsh._passwd_lookup)
+    config_dir = home / "groupa" / ".config" / "dsh" / "user1"
+    config_dir.mkdir(parents=True)
+    _seed_profile(config_dir)  # 无放行条目
+    plugins.write_installed_specs(config_dir, ["dsh-context"])  # 名单已就位
+
+    service.dsh._install_plugins(
+        "user1", identity=identity, config_dir=config_dir, dsh_binary="dsh", specs=["dsh-context"]
+    )
+    assert [call["command"] for call in launcher.once_calls] == [
+        ["dsh", "plugin", "--profile", "web", "install"],
+    ]
+    approved = yaml.safe_load(
+        (config_dir / "profiles" / "web" / "pnpm-workspace.yaml").read_text(encoding="utf-8")
+    )
+    assert approved["onlyBuiltDependencies"] == ["node-pty"]
 
 
 def test_plugins_install_before_web_start_and_only_once(
@@ -512,13 +605,15 @@ def test_plugins_install_before_web_start_and_only_once(
     monkeypatch.setattr(plugins, "plugin_list_path", lambda: list_path)
     launcher = install_fake_launcher(service, home, passwd_lookup)
     patch_lifecycle(service, monkeypatch, launcher=launcher)
+    config_dir = home / "groupa" / ".config" / "dsh" / "user1"
+    config_dir.mkdir(parents=True)
+    _seed_profile(config_dir)
 
     service.dsh.ensure_running("user1")
     assert len(launcher.once_calls) == 2
     # 竞态回归：所有安装动作都发生在 web 进程 start 之前
     first_start_index = next(i for i, entry in enumerate(launcher.order) if entry[0] == "start")
     assert all(entry[0] == "install" for entry in launcher.order[:first_start_index])
-    config_dir = home / "groupa" / ".config" / "dsh" / "user1"
     assert plugins.read_installed_specs(config_dir) == ["dsh-context", "deepseek-idesign"]
 
     # 重启 runtime：marker 齐全，直接启动、不再执行任何安装命令
@@ -547,6 +642,7 @@ def test_install_plugins_stops_at_total_budget(service, home, passwd_lookup, mon
     identity = resolve_linux_identity("groupa", service.dsh._passwd_lookup)
     config_dir = home / "groupa" / ".config" / "dsh" / "user1"
     config_dir.mkdir(parents=True)
+    _seed_profile(config_dir, approvals=["node-pty"])  # 放行已就位，隔离预算行为
 
     service.dsh._install_plugins(
         "user1",

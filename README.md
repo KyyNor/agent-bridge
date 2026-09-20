@@ -112,6 +112,14 @@ settings（主题、onboarding 等）原样保留。
 失败或超出总预算的条目不阻塞启动、会在下次 runtime 启动时自动重试，从名单
 移除条目不会卸载已装插件。
 
+原生依赖构建：安装前先初始化 profile 并在其 `pnpm-workspace.yaml` 放行原生依赖的
+构建脚本（`BUILD_DEPENDENCIES`，当前为 node-pty）——pnpm 10 默认拦截依赖的
+install/postinstall 脚本且安装仍返回成功，原生模块因此没有编译产物、依赖它的
+插件在运行期不可用；依赖先于放行就位时会补一次 profile 同步触发构建。
+node-pty 只随包附带 win32/darwin 预编译产物，**Linux 必须本地 node-gyp 构建**：
+内网部署需预置 python3/make/g++ 与匹配 Node 版本的 headers（`npm_config_nodedir`
+或预热 `~/.cache/node-gyp/<node版本>/`），否则 dsh-better-sidebar 这类插件不可用。
+
 生命周期语义：`POST /api/v1/dsh/runtime/ensure` 按需启动或复用实例（每个业务用户
 仅一个）；`GET /api/v1/dsh/runtime` 查询状态；`POST /api/v1/dsh/runtime/stop`
 显式停止。调度线程周期性停止超过空闲阈值的实例；服务重启时自动识别上一进程

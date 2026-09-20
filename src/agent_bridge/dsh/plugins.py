@@ -16,6 +16,8 @@ import logging
 import os
 from pathlib import Path
 
+import yaml
+
 logger = logging.getLogger(__name__)
 
 # 插件安装目标 profile：与 ``dsh web`` 前端一致。
@@ -24,14 +26,62 @@ PLUGIN_PROFILE = "web"
 PLUGIN_LIST_FILENAME = "dsh-plugins.txt"
 # 已安装 marker 文件（相对 DSH_HOME）。
 PLUGIN_MARKER_FILENAME = "agent-bridge-plugins.txt"
+# 需要放行安装期构建的原生依赖（随版本维护）：pnpm 10 默认拦截依赖的
+# install/postinstall 脚本，被拦下时 node-pty 等原生模块没有编译产物，
+# 依赖它的插件在运行期不可用。node-pty 只随包附带 win32/darwin 预编译，
+# Linux 必须走 node-gyp 构建（内网部署需预置工具链与 Node headers 缓存）。
+BUILD_DEPENDENCIES = ("node-pty",)
 
 
 def plugin_list_path() -> Path:
     return Path(__file__).parent / PLUGIN_LIST_FILENAME
 
 
+def profile_dir_for(dsh_home: Path, profile: str = PLUGIN_PROFILE) -> Path:
+    return Path(dsh_home) / "profiles" / profile
+
+
 def plugin_marker_path(dsh_home: Path) -> Path:
     return Path(dsh_home) / PLUGIN_MARKER_FILENAME
+
+
+def build_profile_install_command(dsh_binary: str) -> list[str]:
+    """构造 profile 初始化/同步命令：``<dsh> plugin --profile web install``。"""
+    return [dsh_binary, "plugin", "--profile", PLUGIN_PROFILE, "install"]
+
+
+def ensure_build_approvals(profile_dir: Path) -> bool:
+    """确保 profile 放行原生依赖的构建脚本；需要变更时返回 True。
+
+    pnpm 10 对依赖的 install/postinstall 脚本默认只警告不执行
+    （``Ignored build scripts``），原生模块因此缺少编译产物且安装仍退出 0。
+    合并语义：保留 ``pnpm-workspace.yaml`` 其余键与用户已放行条目，只补齐
+    缺失项；profile 尚未初始化（dsh 会先建模板文件）或内容未变化时返回
+    False 且不触盘。
+    """
+    path = profile_dir / "pnpm-workspace.yaml"
+    if not path.exists():
+        return False
+    try:
+        loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        logger.warning("DSH profile pnpm-workspace.yaml 读取失败 path=%s 原因=%s", path, exc)
+        return False
+    payload = dict(loaded) if isinstance(loaded, dict) else {}
+    approved = payload.get("onlyBuiltDependencies")
+    approved_list = [str(item) for item in approved] if isinstance(approved, list) else []
+    missing = [dep for dep in BUILD_DEPENDENCIES if dep not in approved_list]
+    if not missing:
+        return False
+    payload["onlyBuiltDependencies"] = [*approved_list, *missing]
+    path.write_text(
+        yaml.safe_dump(payload, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    logger.info(
+        "DSH profile 已放行依赖构建 path=%s dependencies=%s", path, ",".join(missing)
+    )
+    return True
 
 
 def parse_plugin_list(text: str) -> list[str]:
