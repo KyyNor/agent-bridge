@@ -27,6 +27,8 @@ class FakeLauncher:
         self.starts: list[dict] = []
         self.once_calls: list[dict] = []
         self.once_handler = None
+        # 跨方法的执行顺序（“先装后启”的竞态断言依赖它）
+        self.order: list[tuple[str, object]] = []
 
     def start(self, *, command, env, cwd, log_path, identity):
         process = FakeProcess(self.next_pid)
@@ -48,6 +50,7 @@ class FakeLauncher:
                 "port": port,
             }
         )
+        self.order.append(("start", process.pid))
         return process
 
     def run_once(self, *, command, env, cwd, identity, timeout_seconds):
@@ -59,6 +62,7 @@ class FakeLauncher:
                 "timeout": timeout_seconds,
             }
         )
+        self.order.append(("install", command[-1]))
         if self.once_handler is not None:
             return self.once_handler(list(command))
         return 0, "installed"
@@ -480,38 +484,63 @@ def test_install_plugins_records_marker_and_retries_failures(
     assert plugins.read_installed_specs(config_dir) == ["dsh-context", "deepseek-idesign"]
 
 
-def test_schedule_plugin_install_runs_after_ready_and_only_once(
+def test_plugins_install_before_web_start_and_only_once(
     service, home, passwd_lookup, monkeypatch
 ) -> None:
-    """runtime 就绪后按名单首装；全部就位后的再次启动与空名单零执行。"""
+    """插件必须在 web 进程启动前装完（运行中的 DSH 不热加载），且只装一次。"""
     from agent_bridge.dsh import plugins
 
     configure_runtime(service)
     list_path = service.paths.config_dir / "dsh-plugins.txt"
     list_path.parent.mkdir(parents=True, exist_ok=True)
     list_path.write_text("dsh-context\ndeepseek-idesign\n", encoding="utf-8")
-    # 后台线程同步化，便于断言执行顺序
-    monkeypatch.setattr(
-        service.dsh, "_launch_plugin_worker", lambda name, target: target()
-    )
     launcher = install_fake_launcher(service, home, passwd_lookup)
     patch_lifecycle(service, monkeypatch, launcher=launcher)
 
     service.dsh.ensure_running("user1")
     assert len(launcher.once_calls) == 2
+    # 竞态回归：所有安装动作都发生在 web 进程 start 之前
+    first_start_index = next(i for i, entry in enumerate(launcher.order) if entry[0] == "start")
+    assert all(entry[0] == "install" for entry in launcher.order[:first_start_index])
     config_dir = home / "groupa" / ".config" / "dsh" / "user1"
     assert plugins.read_installed_specs(config_dir) == ["dsh-context", "deepseek-idesign"]
 
-    # 重启 runtime：marker 齐全，不再执行任何安装命令
+    # 重启 runtime：marker 齐全，直接启动、不再执行任何安装命令
     service.dsh._stop_state(service.dsh._read_state("user1"), "user1")
     service.dsh.ensure_running("user1")
     assert len(launcher.once_calls) == 2
+    second_start_index = len(launcher.order) - 1
+    assert launcher.order[second_start_index][0] == "start"
 
     # 名单清空后同样零执行
     list_path.unlink()
     service.dsh._stop_state(service.dsh._read_state("user1"), "user1")
     service.dsh.ensure_running("user1")
     assert len(launcher.once_calls) == 2
+
+
+def test_install_plugins_stops_at_total_budget(service, home, passwd_lookup, monkeypatch) -> None:
+    """安装总预算耗尽后停止尝试，不影响后续启动；已装条目保留。"""
+    from agent_bridge.dsh import plugins
+    from agent_bridge.dsh.launcher import resolve_linux_identity
+    from agent_bridge.dsh import service as service_module
+
+    launcher = install_fake_launcher(service, home, passwd_lookup)
+    launcher.once_handler = lambda command: (0, "ok")
+    monkeypatch.setattr(service_module, "PLUGIN_INSTALL_TOTAL_BUDGET_SECONDS", 0.0)
+    identity = resolve_linux_identity("groupa", service.dsh._passwd_lookup)
+    config_dir = home / "groupa" / ".config" / "dsh" / "user1"
+    config_dir.mkdir(parents=True)
+
+    service.dsh._install_plugins(
+        "user1",
+        identity=identity,
+        config_dir=config_dir,
+        dsh_binary="dsh",
+        specs=["dsh-context", "deepseek-idesign"],
+    )
+    assert launcher.once_calls == []
+    assert plugins.read_installed_specs(config_dir) == []
 
 
 def test_command_template_renders_patch_placeholder(service) -> None:

@@ -43,8 +43,9 @@ from agent_bridge.dsh.workspace import WORKSPACE_PROXY_PREFIX
 
 logger = logging.getLogger(__name__)
 
-# ensure_running 最长可等待启动探测窗口（60s）加回收余量。
-ENSURE_TIMEOUT_SECONDS = 90.0
+# ensure_running 最长等待：启动探测窗口（60s）加回收余量，并覆盖首次初始化
+# 时先于 web 进程同步执行的插件安装（冷缓存下载较慢，超时后重试可续装）。
+ENSURE_TIMEOUT_SECONDS = 240.0
 _WS_CLOSE_TIMEOUT_SECONDS = 5.0
 _EXCHANGE_TIMEOUT_SECONDS = 30.0
 

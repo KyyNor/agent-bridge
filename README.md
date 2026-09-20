@@ -105,10 +105,12 @@ settings（主题、onboarding 等）原样保留。
 
 插件首装：`<AGENT_BRIDGE_ROOT>/config/dsh-plugins.txt` 维护要为新初始化 DSH
 安装的插件名单（每行一个 spec，如 `@scope/name@latest`，支持 `#` 注释；文件
-缺失或为空则不安装，修改后按需读取、无需重启）。runtime 就绪后在后台以目标
-Linux 用户身份逐个执行 `dsh plugin --profile web add <spec>`，成功条目记入
-`<DSH_HOME>/agent-bridge-plugins.txt`；已就位的条目不会重装，失败的条目会在
-下次 runtime 启动时自动重试，从名单移除条目不会卸载已装插件。
+缺失或为空则不安装，修改后按需读取、无需重启）。插件在 **web 进程启动之前**
+以目标 Linux 用户身份逐个执行 `dsh plugin --profile web add <spec>` 安装完毕
+（运行中的 DSH 不会热加载 profile 变更，先启动后安装会出现首访无插件的竞态），
+成功条目记入 `<DSH_HOME>/agent-bridge-plugins.txt`；已就位的条目不会重装，
+失败或超出总预算的条目不阻塞启动、会在下次 runtime 启动时自动重试，从名单
+移除条目不会卸载已装插件。
 
 生命周期语义：`POST /api/v1/dsh/runtime/ensure` 按需启动或复用实例（每个业务用户
 仅一个）；`GET /api/v1/dsh/runtime` 查询状态；`POST /api/v1/dsh/runtime/stop`

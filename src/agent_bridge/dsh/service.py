@@ -60,6 +60,9 @@ DSH_STOP_GRACE_SECONDS = 5.0
 REAP_INTERVAL_SECONDS = 60.0
 # 单个插件安装（含 npm/pnpm 下载）的最长等待；超时按失败处理、下次启动重试。
 PLUGIN_INSTALL_TIMEOUT_SECONDS = 240.0
+# 一次 runtime 启动内插件安装的总预算：安装先于 web 进程同步执行，冷缓存下
+# 必须封顶以免长时间占用服务锁；超出部分留待下次启动补装。
+PLUGIN_INSTALL_TOTAL_BUDGET_SECONDS = 600.0
 
 STATE_DIR_NAME = "dsh-runtimes"
 LOG_DIR_NAME = "dsh-runtimes"
@@ -102,8 +105,6 @@ class DshRuntimeService:
         self._passwd_lookup = passwd_lookup
         self.capabilities = DshWorkspaceCapabilityRegistry()
         self._lock = threading.RLock()
-        # 插件首装进行中的用户集合：同一用户的并发 ensure_running 只触发一次安装。
-        self._plugin_installing: set[str] = set()
         self._reaper_stop = threading.Event()
         self._reaper_thread: threading.Thread | None = None
         # 本进程启动的子进程句柄；用于停止时 wait() 回收，避免僵尸进程被
@@ -338,6 +339,16 @@ class DshRuntimeService:
         )
         env = self._build_env(identity, config_dir, model_binding)
         log_path = self._log_path(user_id)
+        # 插件必须先于 web 进程安装完毕：运行中的 DSH 不会热加载 profile 变更，
+        # 后装插件只会在下次重启后出现（首访竞态）。失败不阻塞启动，未就位
+        # 条目下次启动自动重试。
+        self._install_plugins(
+            user_id,
+            identity=identity,
+            config_dir=config_dir,
+            dsh_binary=self._dsh_binary(str(runtime_config.get("web_command") or "")),
+            specs=plugins.read_plugin_list(self.paths.config_dir),
+        )
         logger.info(
             "DSH Runtime 开始启动 user=%s group=%s linux_user=%s port=%s config_dir=%s",
             user_id,
@@ -409,12 +420,6 @@ class DshRuntimeService:
             port,
             time.time() - now,
         )
-        self._schedule_plugin_install(
-            user_id,
-            identity=identity,
-            config_dir=config_dir,
-            dsh_binary=self._dsh_binary(str(runtime_config.get("web_command") or "")),
-        )
         return state
 
     def _stop_state(self, state: dict[str, Any], user_id: str) -> bool:
@@ -450,46 +455,6 @@ class DshRuntimeService:
         env["DSH_HOME"] = str(config_dir)
         return env
 
-    def _schedule_plugin_install(
-        self,
-        user_id: str,
-        *,
-        identity: LinuxIdentity,
-        config_dir: Path,
-        dsh_binary: str,
-    ) -> None:
-        """runtime 就绪后按名单补装插件；全部就位或名单为空时零开销。
-
-        安装在后台线程执行，不阻塞工作台首次访问；失败条目不写入 marker，
-        下次 runtime 启动自动重试。
-        """
-        specs = plugins.read_plugin_list(self.paths.config_dir)
-        if not specs:
-            return
-        installed = set(plugins.read_installed_specs(config_dir))
-        missing = [spec for spec in specs if spec not in installed]
-        if not missing:
-            return
-        with self._lock:
-            if user_id in self._plugin_installing:
-                return
-            self._plugin_installing.add(user_id)
-
-        def worker() -> None:
-            try:
-                self._install_plugins(
-                    user_id, identity=identity, config_dir=config_dir,
-                    dsh_binary=dsh_binary, specs=specs,
-                )
-            finally:
-                with self._lock:
-                    self._plugin_installing.discard(user_id)
-
-        self._launch_plugin_worker(f"dsh-plugin-install-{user_id}", worker)
-
-    def _launch_plugin_worker(self, name: str, target: Callable[[], None]) -> None:
-        threading.Thread(target=target, name=name, daemon=True).start()
-
     def _install_plugins(
         self,
         user_id: str,
@@ -499,7 +464,15 @@ class DshRuntimeService:
         dsh_binary: str,
         specs: list[str],
     ) -> None:
-        """逐个安装名单中尚未记录的插件，成功即更新 marker（幂等、可断点续装）。"""
+        """在 web 进程启动前按名单补装插件（幂等、可断点续装）。
+
+        ``_start_runtime`` 在持有服务锁的情况下同步调用本方法：安装完成后
+        才启动 DSH Web，浏览器首访即可用到全部插件。成功条目立即写入
+        marker；失败/超时条目不写 marker、不阻塞启动，下次 runtime 启动
+        自动重试。名单为空或全部就位时零开销（只读两个小文件）。
+        """
+        if not specs:
+            return
         runner = getattr(self._launcher, "run_once", None)
         if runner is None:
             logger.warning(
@@ -510,9 +483,20 @@ class DshRuntimeService:
         installed = plugins.read_installed_specs(config_dir)
         succeeded: list[str] = list(installed)
         marker_path = plugins.plugin_marker_path(config_dir)
+        attempted = 0
+        budget_deadline = time.monotonic() + PLUGIN_INSTALL_TOTAL_BUDGET_SECONDS
         for spec in specs:
             if spec in installed:
                 continue
+            if time.monotonic() >= budget_deadline:
+                logger.warning(
+                    "DSH 插件安装超出总预算 %.0fs，剩余条目下次启动重试 user=%s 剩余=%d",
+                    PLUGIN_INSTALL_TOTAL_BUDGET_SECONDS,
+                    user_id,
+                    sum(1 for item in specs if item not in succeeded),
+                )
+                break
+            attempted += 1
             command = plugins.build_install_command(dsh_binary, spec)
             started = time.monotonic()
             try:
@@ -545,7 +529,7 @@ class DshRuntimeService:
             logger.info(
                 "DSH 插件安装完成 user=%s plugin=%s 耗时=%.1fs", user_id, spec, elapsed
             )
-        if set(specs) <= set(succeeded):
+        if attempted and set(specs) <= set(succeeded):
             logger.info("DSH 插件名单已全部就位 user=%s count=%d", user_id, len(specs))
 
     def _wait_until_ready(self, port: int, *, process) -> bool:
