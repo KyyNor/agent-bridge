@@ -71,6 +71,21 @@ class DshProcessLauncher(Protocol):
     ) -> DshProcessHandle: ...
 
 
+@runtime_checkable
+class DshCommandRunner(Protocol):
+    """以目标 Linux 用户身份同步执行一次性 DSH 命令（如插件安装）。"""
+
+    def run_once(
+        self,
+        *,
+        command: list[str],
+        env: dict[str, str],
+        cwd: Path,
+        identity: LinuxIdentity,
+        timeout_seconds: float,
+    ) -> tuple[int, str]: ...
+
+
 class PopenDshLauncher:
     """用 ``subprocess.Popen`` 启动 DSH Web，并在 root 下切换 uid/gid。"""
 
@@ -107,6 +122,44 @@ class PopenDshLauncher:
             command,
         )
         return process
+
+    def run_once(
+        self,
+        *,
+        command: list[str],
+        env: dict[str, str],
+        cwd: Path,
+        identity: LinuxIdentity,
+        timeout_seconds: float,
+    ) -> tuple[int, str]:
+        """同步执行一次性命令并等待结束，返回 ``(退出码, 输出尾部)``。
+
+        超时按退出码 124 返回（与 ``timeout(1)`` 约定一致）；输出只保留
+        最近 4000 字符，供结构化日志定位失败原因。
+        """
+        demotion = self._demotion_kwargs(identity)
+
+        def _text(value: object) -> str:
+            if isinstance(value, bytes):
+                return value.decode("utf-8", errors="replace")
+            return str(value or "")
+
+        try:
+            result = subprocess.run(
+                command,
+                cwd=str(cwd),
+                env=env,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=timeout_seconds,
+                **demotion,
+            )
+        except subprocess.TimeoutExpired as exc:
+            return 124, (_text(exc.stdout) + _text(exc.stderr))[-4000:]
+        output = ((result.stdout or "") + (result.stderr or ""))[-4000:]
+        return int(result.returncode), output
 
     @staticmethod
     def _demotion_kwargs(identity: LinuxIdentity) -> dict[str, object]:

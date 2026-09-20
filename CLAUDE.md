@@ -192,6 +192,12 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
 - 启动就绪后从日志横幅 `dsh web: http://…/?token=…` 捕获鉴权入口（`auth_path`/
   `auth_query`）到状态文件：DSH 首次访问必须携带该 token 换取会话 Cookie，代理层
   用它完成首次导航（见 Workspace 代理）。
+- 插件首装（`dsh/plugins.py`）：名单在 `<AGENT_BRIDGE_ROOT>/config/dsh-plugins.txt`
+  （每行一个 spec，`#` 注释，按需读取、无需重启），runtime 就绪后由后台线程经
+  launcher 的 `run_once` 以目标 Linux 用户身份执行 `dsh plugin --profile web add
+  <spec>`（不携带组级 API Key）；成功条目记入 `<DSH_HOME>/agent-bridge-plugins.txt`
+  （0600），因此实际只在首次初始化（及名单新增条目）执行，失败条目下次启动自动
+  重试，从名单移除条目不卸载已装插件。
 - `dsh_group_configs`/`dsh_runtime_config` 两张表经 `DshConfigRepository` 持久化；
   `api_key` 沿用“只返回 api_key_set + clear_api_key”的敏感配置模式。
 - 空闲回收是服务内守护线程（默认 120 分钟阈值，随全局配置读取）；app lifespan

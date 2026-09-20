@@ -25,6 +25,8 @@ class FakeLauncher:
     def __init__(self, pid: int = 410001) -> None:
         self.next_pid = pid
         self.starts: list[dict] = []
+        self.once_calls: list[dict] = []
+        self.once_handler = None
 
     def start(self, *, command, env, cwd, log_path, identity):
         process = FakeProcess(self.next_pid)
@@ -47,6 +49,19 @@ class FakeLauncher:
             }
         )
         return process
+
+    def run_once(self, *, command, env, cwd, identity, timeout_seconds):
+        self.once_calls.append(
+            {
+                "command": list(command),
+                "env": dict(env),
+                "cwd": str(cwd),
+                "timeout": timeout_seconds,
+            }
+        )
+        if self.once_handler is not None:
+            return self.once_handler(list(command))
+        return 0, "installed"
 
 
 @pytest.fixture
@@ -389,6 +404,114 @@ def test_inject_settings_warns_when_models_catalog_empty(service, home, caplog) 
         "全局可用模型列表为空" in record.message and "API Key 不会生效" in record.message
         for record in caplog.records
     )
+
+
+# -- 插件首装 --
+
+
+def test_plugin_list_parsing_and_marker_roundtrip(tmp_path) -> None:
+    """名单解析：忽略注释/空行/重复；marker 可读写；命令形态固定。"""
+    from agent_bridge.dsh import plugins
+
+    text = "\n".join(
+        [
+            "# Agent Bridge 托管的 DSH 插件名单",
+            "",
+            "@linxin666/dsh-client-ui-task-board@latest",
+            "  dsh-context  # 行内注释",
+            "@linxin666/dsh-client-ui-task-board@latest",
+            "",
+        ]
+    )
+    assert plugins.parse_plugin_list(text) == [
+        "@linxin666/dsh-client-ui-task-board@latest",
+        "dsh-context",
+    ]
+    # 名单文件缺失 = 不安装任何插件
+    assert plugins.read_plugin_list(tmp_path) == []
+    plugins.write_installed_specs(tmp_path, ["a", "b"])
+    assert plugins.read_installed_specs(tmp_path) == ["a", "b"]
+    assert plugins.plugin_marker_path(tmp_path).name == "agent-bridge-plugins.txt"
+    assert plugins.build_install_command("dsh", "dsh-context") == [
+        "dsh",
+        "plugin",
+        "--profile",
+        "web",
+        "add",
+        "dsh-context",
+    ]
+
+
+def test_install_plugins_records_marker_and_retries_failures(
+    service, home, passwd_lookup
+) -> None:
+    """安装成功才写 marker；失败条目下次启动只补装失败项。"""
+    from agent_bridge.dsh import plugins
+    from agent_bridge.dsh.launcher import resolve_linux_identity
+
+    launcher = install_fake_launcher(service, home, passwd_lookup)
+    results = {"dsh-context": (0, "ok"), "deepseek-idesign": (1, "pnpm ERR")}
+    launcher.once_handler = lambda command: results[command[-1]]
+    identity = resolve_linux_identity("groupa", service.dsh._passwd_lookup)
+    config_dir = home / "groupa" / ".config" / "dsh" / "user1"
+    config_dir.mkdir(parents=True)
+    specs = ["dsh-context", "deepseek-idesign"]
+
+    service.dsh._install_plugins(
+        "user1", identity=identity, config_dir=config_dir, dsh_binary="dsh", specs=specs
+    )
+    assert [call["command"] for call in launcher.once_calls] == [
+        ["dsh", "plugin", "--profile", "web", "add", "dsh-context"],
+        ["dsh", "plugin", "--profile", "web", "add", "deepseek-idesign"],
+    ]
+    # 安装环境指向用户 DSH_HOME，且不携带组级 API Key
+    env = launcher.once_calls[0]["env"]
+    assert env["DSH_HOME"] == str(config_dir)
+    assert "AGENT_BRIDGE_DSH_API_KEY" not in env
+    marker = config_dir / "agent-bridge-plugins.txt"
+    assert plugins.read_installed_specs(config_dir) == ["dsh-context"]
+    assert oct(marker.stat().st_mode & 0o777) == "0o600"
+
+    launcher.once_handler = lambda command: (0, "ok")
+    service.dsh._install_plugins(
+        "user1", identity=identity, config_dir=config_dir, dsh_binary="dsh", specs=specs
+    )
+    assert [call["command"][-1] for call in launcher.once_calls[2:]] == ["deepseek-idesign"]
+    assert plugins.read_installed_specs(config_dir) == ["dsh-context", "deepseek-idesign"]
+
+
+def test_schedule_plugin_install_runs_after_ready_and_only_once(
+    service, home, passwd_lookup, monkeypatch
+) -> None:
+    """runtime 就绪后按名单首装；全部就位后的再次启动与空名单零执行。"""
+    from agent_bridge.dsh import plugins
+
+    configure_runtime(service)
+    list_path = service.paths.config_dir / "dsh-plugins.txt"
+    list_path.parent.mkdir(parents=True, exist_ok=True)
+    list_path.write_text("dsh-context\ndeepseek-idesign\n", encoding="utf-8")
+    # 后台线程同步化，便于断言执行顺序
+    monkeypatch.setattr(
+        service.dsh, "_launch_plugin_worker", lambda name, target: target()
+    )
+    launcher = install_fake_launcher(service, home, passwd_lookup)
+    patch_lifecycle(service, monkeypatch, launcher=launcher)
+
+    service.dsh.ensure_running("user1")
+    assert len(launcher.once_calls) == 2
+    config_dir = home / "groupa" / ".config" / "dsh" / "user1"
+    assert plugins.read_installed_specs(config_dir) == ["dsh-context", "deepseek-idesign"]
+
+    # 重启 runtime：marker 齐全，不再执行任何安装命令
+    service.dsh._stop_state(service.dsh._read_state("user1"), "user1")
+    service.dsh.ensure_running("user1")
+    assert len(launcher.once_calls) == 2
+
+    # 名单清空后同样零执行
+    list_path.unlink()
+    service.dsh._stop_state(service.dsh._read_state("user1"), "user1")
+    service.dsh.ensure_running("user1")
+    assert len(launcher.once_calls) == 2
 
 
 def test_command_template_renders_patch_placeholder(service) -> None:

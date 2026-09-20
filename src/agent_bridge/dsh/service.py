@@ -32,6 +32,7 @@ from agent_bridge.access_control.resources import ScopedResourceType
 from agent_bridge.core.domain import ValidationError, require_admin_user
 from agent_bridge.core.timeutil import utc_iso
 from agent_bridge.dsh import injection
+from agent_bridge.dsh import plugins
 from agent_bridge.dsh.launcher import (
     DshProcessLauncher,
     LinuxIdentity,
@@ -57,6 +58,8 @@ DSH_MAX_INSTANCES = 50
 DSH_STARTUP_TIMEOUT_SECONDS = 60.0
 DSH_STOP_GRACE_SECONDS = 5.0
 REAP_INTERVAL_SECONDS = 60.0
+# 单个插件安装（含 npm/pnpm 下载）的最长等待；超时按失败处理、下次启动重试。
+PLUGIN_INSTALL_TIMEOUT_SECONDS = 240.0
 
 STATE_DIR_NAME = "dsh-runtimes"
 LOG_DIR_NAME = "dsh-runtimes"
@@ -99,6 +102,8 @@ class DshRuntimeService:
         self._passwd_lookup = passwd_lookup
         self.capabilities = DshWorkspaceCapabilityRegistry()
         self._lock = threading.RLock()
+        # 插件首装进行中的用户集合：同一用户的并发 ensure_running 只触发一次安装。
+        self._plugin_installing: set[str] = set()
         self._reaper_stop = threading.Event()
         self._reaper_thread: threading.Thread | None = None
         # 本进程启动的子进程句柄；用于停止时 wait() 回收，避免僵尸进程被
@@ -404,6 +409,12 @@ class DshRuntimeService:
             port,
             time.time() - now,
         )
+        self._schedule_plugin_install(
+            user_id,
+            identity=identity,
+            config_dir=config_dir,
+            dsh_binary=self._dsh_binary(str(runtime_config.get("web_command") or "")),
+        )
         return state
 
     def _stop_state(self, state: dict[str, Any], user_id: str) -> bool:
@@ -418,6 +429,124 @@ class DshRuntimeService:
             state.get("config_dir"),
         )
         return stopped
+
+    # -- 插件首装 --
+
+    @staticmethod
+    def _dsh_binary(web_command: str) -> str:
+        """从启动命令模板推导 dsh 可执行名（插件安装与 web 进程同一通道）。"""
+        try:
+            argv = shlex.split(web_command)
+        except ValueError:
+            argv = []
+        return argv[0] if argv else "dsh"
+
+    def _plugin_env(self, identity: LinuxIdentity, config_dir: Path) -> dict[str, str]:
+        """插件安装进程环境：与 web 进程同源，但不携带 API Key。"""
+        env = os.environ.copy()
+        env["HOME"] = str(identity.home)
+        env["USER"] = identity.user
+        env["LOGNAME"] = identity.user
+        env["DSH_HOME"] = str(config_dir)
+        return env
+
+    def _schedule_plugin_install(
+        self,
+        user_id: str,
+        *,
+        identity: LinuxIdentity,
+        config_dir: Path,
+        dsh_binary: str,
+    ) -> None:
+        """runtime 就绪后按名单补装插件；全部就位或名单为空时零开销。
+
+        安装在后台线程执行，不阻塞工作台首次访问；失败条目不写入 marker，
+        下次 runtime 启动自动重试。
+        """
+        specs = plugins.read_plugin_list(self.paths.config_dir)
+        if not specs:
+            return
+        installed = set(plugins.read_installed_specs(config_dir))
+        missing = [spec for spec in specs if spec not in installed]
+        if not missing:
+            return
+        with self._lock:
+            if user_id in self._plugin_installing:
+                return
+            self._plugin_installing.add(user_id)
+
+        def worker() -> None:
+            try:
+                self._install_plugins(
+                    user_id, identity=identity, config_dir=config_dir,
+                    dsh_binary=dsh_binary, specs=specs,
+                )
+            finally:
+                with self._lock:
+                    self._plugin_installing.discard(user_id)
+
+        self._launch_plugin_worker(f"dsh-plugin-install-{user_id}", worker)
+
+    def _launch_plugin_worker(self, name: str, target: Callable[[], None]) -> None:
+        threading.Thread(target=target, name=name, daemon=True).start()
+
+    def _install_plugins(
+        self,
+        user_id: str,
+        *,
+        identity: LinuxIdentity,
+        config_dir: Path,
+        dsh_binary: str,
+        specs: list[str],
+    ) -> None:
+        """逐个安装名单中尚未记录的插件，成功即更新 marker（幂等、可断点续装）。"""
+        runner = getattr(self._launcher, "run_once", None)
+        if runner is None:
+            logger.warning(
+                "DSH 插件安装跳过：当前 launcher 不支持一次性命令 user=%s", user_id
+            )
+            return
+        env = self._plugin_env(identity, config_dir)
+        installed = plugins.read_installed_specs(config_dir)
+        succeeded: list[str] = list(installed)
+        marker_path = plugins.plugin_marker_path(config_dir)
+        for spec in specs:
+            if spec in installed:
+                continue
+            command = plugins.build_install_command(dsh_binary, spec)
+            started = time.monotonic()
+            try:
+                exit_code, output = runner(
+                    command=command,
+                    env=env,
+                    cwd=identity.home if identity.home.is_dir() else config_dir,
+                    identity=identity,
+                    timeout_seconds=PLUGIN_INSTALL_TIMEOUT_SECONDS,
+                )
+            except Exception as exc:
+                logger.error(
+                    "DSH 插件安装异常 user=%s plugin=%s 原因=%s", user_id, spec, exc
+                )
+                continue
+            elapsed = time.monotonic() - started
+            if exit_code != 0:
+                logger.warning(
+                    "DSH 插件安装失败 user=%s plugin=%s exit=%s 耗时=%.1fs 输出尾部=%s（下次启动重试）",
+                    user_id, spec, exit_code, elapsed, output[-500:] or "(空)",
+                )
+                continue
+            succeeded.append(spec)
+            plugins.write_installed_specs(config_dir, succeeded)
+            try:
+                marker_path.chmod(0o600)
+            except OSError:
+                logger.warning("DSH 插件 marker chmod 失败 path=%s", marker_path)
+            plugins.ensure_marker_owner(marker_path, uid=identity.uid, gid=identity.gid)
+            logger.info(
+                "DSH 插件安装完成 user=%s plugin=%s 耗时=%.1fs", user_id, spec, elapsed
+            )
+        if set(specs) <= set(succeeded):
+            logger.info("DSH 插件名单已全部就位 user=%s count=%d", user_id, len(specs))
 
     def _wait_until_ready(self, port: int, *, process) -> bool:
         deadline = time.monotonic() + DSH_STARTUP_TIMEOUT_SECONDS
