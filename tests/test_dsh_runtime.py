@@ -354,6 +354,43 @@ def test_injected_settings_preserve_unmanaged_user_configuration(service, home) 
     assert settings["llm-pi-ai"]["providers"]["agent-bridge"]["baseURL"] == "http://model.internal/v1"
 
 
+def test_inject_settings_warns_when_models_catalog_empty(service, home, caplog) -> None:
+    """Base URL 已解析但全局可用模型为空：跳过供应商注入必须留下告警。
+
+    此时 settings.yaml 不写 agent-bridge 供应商条目，apiKeyEnv 无处挂靠，
+    组级 API Key 即使注入进程环境也不会生效——静默跳过会让“密钥没进去”
+    无法从日志定位。
+    """
+    import logging
+
+    service.dsh_configs.save_runtime_config(
+        "root",
+        web_command="dsh web {patch} --host 127.0.0.1 --port {port} --no-open",
+        idle_timeout_minutes=60,
+        base_url="http://model.internal/v1",
+        available_models=[],
+    )
+    service.dsh_configs.save_group_config(
+        "root", group_key="groupa", linux_user="groupa", default_model="", api_key="sk-secret"
+    )
+    config_dir = home / "groupa" / ".config" / "dsh" / "user1"
+    config_dir.mkdir(parents=True)
+
+    with caplog.at_level(logging.WARNING, logger="agent_bridge.dsh.service"):
+        written = service.dsh._inject_settings(
+            config_dir,
+            types.SimpleNamespace(uid=os.getuid(), gid=os.getgid()),
+            service.dsh_configs.model_binding_for("groupa"),
+        )
+
+    assert written is None
+    assert not (config_dir / "settings.yaml").exists()
+    assert any(
+        "全局可用模型列表为空" in record.message and "API Key 不会生效" in record.message
+        for record in caplog.records
+    )
+
+
 def test_command_template_renders_patch_placeholder(service) -> None:
     command = service.dsh._build_command(
         "dsh web {patch} --host 127.0.0.1 --port {port} --no-open", 48500
