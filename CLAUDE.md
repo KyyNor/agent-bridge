@@ -193,7 +193,7 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
   `auth_query`）到状态文件：DSH 首次访问必须携带该 token 换取会话 Cookie，代理层
   用它完成首次导航（见 Workspace 代理）。
 - 插件首装（`dsh/plugins.py`）：名单内置于包内 `src/agent_bridge/dsh/dsh-plugins.txt`
-  （每行一个 spec，`#` 注释，随版本发布），**在 web 进程启动前**经
+  （每行一个 spec、必须钉住精确版本，`#` 注释，随版本发布），**在 web 进程启动前**经
   launcher 的 `run_once` 以目标 Linux 用户身份同步执行 `dsh plugin --profile web
   add <spec>` 装完（不携带组级 API Key；运行中的 DSH 不热加载 profile 变更，
   后装会出现首访无插件竞态）；成功条目记入 `<DSH_HOME>/agent-bridge-plugins.txt`

@@ -434,7 +434,7 @@ def test_plugin_list_parsing_and_marker_roundtrip(tmp_path) -> None:
     # 包内名单随版本发布：文件必须存在且解析出非空 spec 列表
     assert plugins.plugin_list_path().name == "dsh-plugins.txt"
     packaged = plugins.read_plugin_list()
-    assert packaged and "@linxin666/dsh-client-ui-task-board@latest" in packaged
+    assert packaged and "@linxin666/dsh-client-ui-task-board@0.3.23" in packaged
     plugins.write_installed_specs(tmp_path, ["a", "b"])
     assert plugins.read_installed_specs(tmp_path) == ["a", "b"]
     assert plugins.plugin_marker_path(tmp_path).name == "agent-bridge-plugins.txt"
@@ -446,6 +446,19 @@ def test_plugin_list_parsing_and_marker_roundtrip(tmp_path) -> None:
         "add",
         "dsh-context",
     ]
+
+
+def test_packaged_plugin_list_is_pinned() -> None:
+    """版本名单必须钉住精确版本：同一 Agent Bridge 版本装出一致的插件集。"""
+    from agent_bridge.dsh import plugins
+
+    specs = plugins.read_plugin_list()
+    assert specs, "包内插件名单不应为空"
+    for spec in specs:
+        # 作用域包自身以 @ 开头，版本分隔符取最后一个 @
+        name, _, version = spec.rpartition("@")
+        assert name.strip("@") and version, f"插件缺少精确版本：{spec}"
+        assert version[0].isdigit(), f"插件版本未钉住（浮动 tag 或范围）：{spec}"
 
 
 def test_install_plugins_records_marker_and_retries_failures(

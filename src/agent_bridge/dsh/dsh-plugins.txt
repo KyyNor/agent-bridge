@@ -1,11 +1,14 @@
 # Agent Bridge 托管的 DSH 插件名单：随版本发布（src/agent_bridge/dsh/ 内置）。
 # 新初始化的 DSH 工作台会在 web 进程启动前安装以下插件
-# （dsh plugin --profile web add <spec>）；新增条目会在下次 runtime 启动时
-# 补装，移除条目不会卸载已装插件。
-@linxin666/dsh-client-ui-task-board@latest
-@linxin666/dsh-client-ui-skill-explorer@latest
-@linxin666/dsh-client-ui-git-graph@latest
-@anionex/dsh-turn-rewind
-dsh-better-sidebar@latest
-dsh-context
-deepseek-idesign
+# （dsh plugin --profile web add <spec>）。
+#
+# 版本策略：全部钉住精确版本（不使用 @latest / ^ / ~），同一 Agent Bridge
+# 版本在各部署装出一致的插件集；升级插件 = 在本文件改版本号并随版本发布，
+# 安装进度 marker 按 spec 差异驱动补装/升级，移除条目不会卸载已装插件。
+@linxin666/dsh-client-ui-task-board@0.3.23
+@linxin666/dsh-client-ui-skill-explorer@0.3.23
+@linxin666/dsh-client-ui-git-graph@0.3.23
+@anionex/dsh-turn-rewind@0.3.8
+dsh-better-sidebar@0.19.1
+dsh-context@0.53.4
+deepseek-idesign@0.2.2

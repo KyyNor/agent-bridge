@@ -104,8 +104,8 @@ Linux uid，但各自的 DSH 配置目录互相独立：
 settings（主题、onboarding 等）原样保留。
 
 插件首装：插件名单内置于包内（`src/agent_bridge/dsh/dsh-plugins.txt`，随版本
-发布；每行一个 spec，如 `@scope/name@latest`，支持 `#` 注释，调整名单即修改
-该文件并随版本部署）。插件在 **web 进程启动之前**
+发布；每行一个 spec，如 `@scope/name@0.3.23`，支持 `#` 注释；全部钉住精确
+版本以保证同一版本各部署插件集一致，升级插件即改版本号随版本部署）。插件在 **web 进程启动之前**
 以目标 Linux 用户身份逐个执行 `dsh plugin --profile web add <spec>` 安装完毕
 （运行中的 DSH 不会热加载 profile 变更，先启动后安装会出现首访无插件的竞态），
 成功条目记入 `<DSH_HOME>/agent-bridge-plugins.txt`；已就位的条目不会重装，
