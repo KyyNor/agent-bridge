@@ -13,7 +13,10 @@
 - 根导航由代理在服务端完成 DSH 的 token→Cookie 换取，token 既不出现在浏览器
   地址栏，也不会因 runtime 重启后的旧 Cookie 而卡死在 401；换取请求不带任何
   浏览器 Cookie（旧会话会让真实 DSH 只回 303 而不下发新 Cookie，形成无限
-  重定向），其余发往 DSH 的 Cookie 也收敛为 DSH 自己的（``dsh-`` 前缀）；
+  重定向），其余发往 DSH 的 Cookie 也收敛为 DSH 自己的（``dsh-`` 前缀）。
+  DSH 的启动 token 会随 Connection 重载轮换并重印横幅，换取失败时重扫日志
+  取最新 token 重试一次；仍失败则不带 token 直接代理原请求（既有会话有效
+  则 200，否则如实 401），绝不把带 token 查询的 303 回放给浏览器；
 - 代理命中即刷新 runtime ``last_access_at``，供空闲回收使用。
 """
 
@@ -392,6 +395,32 @@ class AgentWorkspaceProxyMiddleware:
             return None
         return self.service.dsh.workspace_auth(user_id)
 
+    async def _perform_exchange(
+        self,
+        scope: Scope,
+        *,
+        user_id: str,
+        target: str,
+        upstream_path: str,
+        auth_query: str,
+    ) -> httpx.Response | None:
+        """发起一次 token→Cookie 交换请求；网络异常时返回 None。"""
+        headers = _forward_headers_for_exchange(scope, target)
+        exchange_url = urlunsplit(
+            (urlsplit(target).scheme, urlsplit(target).netloc, upstream_path, auth_query, "")
+        )
+        timeout = httpx.Timeout(connect=10.0, read=_EXCHANGE_TIMEOUT_SECONDS, write=10.0, pool=10.0)
+        try:
+            async with httpx.AsyncClient(follow_redirects=False, timeout=timeout) as client:
+                return await client.request(
+                    str(scope.get("method", "GET")), exchange_url, headers=headers
+                )
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "DSH Workspace 首访鉴权请求失败 user=%s url=%s 原因=%s", user_id, exchange_url, exc
+            )
+            return None
+
     async def _proxy_root_navigation(
         self,
         scope: Scope,
@@ -405,37 +434,59 @@ class AgentWorkspaceProxyMiddleware:
     ) -> None:
         """服务端完成 DSH 首次鉴权：带 token 换取会话 Cookie 后转发最终页面。
 
-        DSH 的会话 Cookie 由进程内密钥签名，runtime 重启（同一端口）后浏览器
-        手里的旧 Cookie 必然失效，此时若跳过 token 换取就会永久 401；因此每次
-        ``GET /`` 导航都重新换取，并在服务端吞掉 DSH 的 303，浏览器不会在
-        ``/agent-workspace/`` 与它之间来回重定向。换取请求不带任何浏览器
-        Cookie（见 ``_forward_headers_for_exchange``），避免旧会话让 DSH 只回
-        303 而不下发新 Cookie。换取失败（如 token 过期）时按原样转发上游
-        响应，让失败原因如实暴露。
+        每次根导航都先尝试 ``GET /?token=…`` 换取（换取请求不带任何浏览器
+        Cookie，见 ``_forward_headers_for_exchange``），成功后在服务端吞掉
+        DSH 的 303、携带新鲜 Cookie follow 最终页面，浏览器直接拿到 200。
+
+        DSH 的启动 token 会随 Connection 重载静默轮换并重印横幅，状态里捕获
+        的入口可能已过期（交换 401）；因此换取失败时先重扫日志取最新 token
+        重试一次。仍换取不到（token 与浏览器会话双双失效）时改按原请求直接
+        代理、不带 token 查询：浏览器既有会话有效则照常 200，否则如实收到
+        DSH 的 401。绝不把带 token 查询的响应回放给浏览器——DSH 对“已认证 +
+        token 查询”只回去掉查询串的 303 且不下发 Set-Cookie，回放会让浏览器
+        在 ``/agent-workspace/`` 上无限重定向。
         """
         target_parts = urlsplit(target)
         authority = target_parts.netloc
-        headers = _forward_headers_for_exchange(scope, target)
-        exchange_url = urlunsplit(
-            (target_parts.scheme, authority, upstream_path, auth_query, "")
+
+        exchange = await self._perform_exchange(
+            scope, user_id=user_id, target=target, upstream_path=upstream_path, auth_query=auth_query
         )
-        timeout = httpx.Timeout(connect=10.0, read=_EXCHANGE_TIMEOUT_SECONDS, write=10.0, pool=10.0)
-        try:
-            async with httpx.AsyncClient(follow_redirects=False, timeout=timeout) as client:
-                exchange = await client.request(
-                    str(scope.get("method", "GET")), exchange_url, headers=headers
-                )
-        except httpx.HTTPError as exc:
-            logger.warning(
-                "DSH Workspace 首访鉴权请求失败 user=%s url=%s 原因=%s", user_id, exchange_url, exc
-            )
-            await _send_plain(send, 502, f"DSH workspace proxy failed: {exc}".encode("utf-8"))
+        if exchange is None:
+            await _send_plain(send, 502, b"DSH workspace proxy failed: exchange request error")
             return
 
         pair = _session_cookie_pair(exchange.headers, authority)
         if pair is None:
+            try:
+                refreshed = await asyncio.to_thread(
+                    self.service.dsh.refresh_workspace_auth, user_id
+                )
+            except Exception as exc:
+                logger.warning(
+                    "DSH Workspace 重扫鉴权横幅失败 user=%s 原因=%s（沿用既有入口继续）",
+                    user_id,
+                    exc,
+                )
+                refreshed = None
+            if refreshed is not None and refreshed[1] != auth_query:
+                logger.info(
+                    "DSH Workspace 启动 token 已轮换 user=%s，使用最新鉴权入口重试换取", user_id
+                )
+                retry = await self._perform_exchange(
+                    scope,
+                    user_id=user_id,
+                    target=target,
+                    upstream_path=refreshed[0],
+                    auth_query=refreshed[1],
+                )
+                if retry is not None:
+                    exchange = retry
+                    pair = _session_cookie_pair(exchange.headers, authority)
+
+        if pair is None:
             logger.warning(
-                "DSH Workspace 未换取到会话 Cookie user=%s status=%s（按原样转发上游响应）",
+                "DSH Workspace 未换取到会话 Cookie user=%s status=%s（改按原请求直连代理）",
                 user_id,
                 exchange.status_code,
             )
@@ -451,7 +502,6 @@ class AgentWorkspaceProxyMiddleware:
                 response_header_builder=lambda headers: _workspace_response_headers(
                     headers, target=target
                 ),
-                query_override=auth_query,
                 request_header_overrides=_request_overrides(scope, target),
             )
             return
