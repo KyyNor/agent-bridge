@@ -26,7 +26,7 @@ _SERVER_SCRIPT = Path(__file__).parent / "dsh_test_workspace_server.py"
 
 
 @pytest.fixture
-def client(wm_paths, tmp_path):
+def client(wm_paths, tmp_path, monkeypatch):
     from agent_bridge.api.app import create_app
     from agent_bridge.app.service import AgentBridgeService
 
@@ -41,6 +41,8 @@ def client(wm_paths, tmp_path):
     service.dsh._passwd_lookup = lambda user: types.SimpleNamespace(
         pw_uid=os.getuid(), pw_gid=os.getgid(), pw_dir=str(linux_home / user)
     )
+    # 替身命令不是 dsh：固定空插件名单，避免真实安装命令被反复执行
+    monkeypatch.setattr("agent_bridge.dsh.plugins.read_plugin_list", lambda: [])
     service.dsh_configs.save_runtime_config(
         "root",
         web_command=f'"{sys.executable}" "{_SERVER_SCRIPT}" {{patch}} --host 127.0.0.1 --port {{port}}',

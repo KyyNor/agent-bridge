@@ -21,7 +21,7 @@ pytestmark = pytest.mark.process
 
 
 @pytest.fixture
-def dsh_service(wm_paths, tmp_path):
+def dsh_service(wm_paths, tmp_path, monkeypatch):
     from agent_bridge.app.service import AgentBridgeService
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
@@ -38,6 +38,8 @@ def dsh_service(wm_paths, tmp_path):
     svc.dsh._passwd_lookup = lambda user: types.SimpleNamespace(
         pw_uid=os.getuid(), pw_gid=os.getgid(), pw_dir=str(linux_home / user)
     )
+    # 替身命令不是 dsh：固定空插件名单，避免真实安装命令被反复执行
+    monkeypatch.setattr("agent_bridge.dsh.plugins.read_plugin_list", lambda: [])
 
     svc.dsh_configs.save_runtime_config(
         "root",

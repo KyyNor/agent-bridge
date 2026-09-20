@@ -431,8 +431,10 @@ def test_plugin_list_parsing_and_marker_roundtrip(tmp_path) -> None:
         "@linxin666/dsh-client-ui-task-board@latest",
         "dsh-context",
     ]
-    # 名单文件缺失 = 不安装任何插件
-    assert plugins.read_plugin_list(tmp_path) == []
+    # 包内名单随版本发布：文件必须存在且解析出非空 spec 列表
+    assert plugins.plugin_list_path().name == "dsh-plugins.txt"
+    packaged = plugins.read_plugin_list()
+    assert packaged and "@linxin666/dsh-client-ui-task-board@latest" in packaged
     plugins.write_installed_specs(tmp_path, ["a", "b"])
     assert plugins.read_installed_specs(tmp_path) == ["a", "b"]
     assert plugins.plugin_marker_path(tmp_path).name == "agent-bridge-plugins.txt"
@@ -485,15 +487,16 @@ def test_install_plugins_records_marker_and_retries_failures(
 
 
 def test_plugins_install_before_web_start_and_only_once(
-    service, home, passwd_lookup, monkeypatch
+    service, home, passwd_lookup, monkeypatch, tmp_path
 ) -> None:
     """插件必须在 web 进程启动前装完（运行中的 DSH 不热加载），且只装一次。"""
     from agent_bridge.dsh import plugins
 
     configure_runtime(service)
-    list_path = service.paths.config_dir / "dsh-plugins.txt"
-    list_path.parent.mkdir(parents=True, exist_ok=True)
+    # 名单内置于包内：测试用受控名单文件替换读取入口
+    list_path = tmp_path / "dsh-plugins.txt"
     list_path.write_text("dsh-context\ndeepseek-idesign\n", encoding="utf-8")
+    monkeypatch.setattr(plugins, "plugin_list_path", lambda: list_path)
     launcher = install_fake_launcher(service, home, passwd_lookup)
     patch_lifecycle(service, monkeypatch, launcher=launcher)
 
@@ -512,7 +515,7 @@ def test_plugins_install_before_web_start_and_only_once(
     second_start_index = len(launcher.order) - 1
     assert launcher.order[second_start_index][0] == "start"
 
-    # 名单清空后同样零执行
+    # 名单缺失（等价于版本名单为空）同样零执行
     list_path.unlink()
     service.dsh._stop_state(service.dsh._read_state("user1"), "user1")
     service.dsh.ensure_running("user1")

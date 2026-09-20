@@ -340,14 +340,14 @@ class DshRuntimeService:
         env = self._build_env(identity, config_dir, model_binding)
         log_path = self._log_path(user_id)
         # 插件必须先于 web 进程安装完毕：运行中的 DSH 不会热加载 profile 变更，
-        # 后装插件只会在下次重启后出现（首访竞态）。失败不阻塞启动，未就位
-        # 条目下次启动自动重试。
+        # 后装插件只会在下次重启后出现（首访竞态）。名单内置于包内、随版本
+        # 发布。失败不阻塞启动，未就位条目下次启动自动重试。
         self._install_plugins(
             user_id,
             identity=identity,
             config_dir=config_dir,
             dsh_binary=self._dsh_binary(str(runtime_config.get("web_command") or "")),
-            specs=plugins.read_plugin_list(self.paths.config_dir),
+            specs=plugins.read_plugin_list(),
         )
         logger.info(
             "DSH Runtime 开始启动 user=%s group=%s linux_user=%s port=%s config_dir=%s",

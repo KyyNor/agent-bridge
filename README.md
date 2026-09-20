@@ -103,9 +103,9 @@ Linux uid，但各自的 DSH 配置目录互相独立：
 `AGENT_BRIDGE_DSH_API_KEY` 环境变量传给 DSH 进程，不写入文件；用户自身的其他
 settings（主题、onboarding 等）原样保留。
 
-插件首装：`<AGENT_BRIDGE_ROOT>/config/dsh-plugins.txt` 维护要为新初始化 DSH
-安装的插件名单（每行一个 spec，如 `@scope/name@latest`，支持 `#` 注释；文件
-缺失或为空则不安装，修改后按需读取、无需重启）。插件在 **web 进程启动之前**
+插件首装：插件名单内置于包内（`src/agent_bridge/dsh/dsh-plugins.txt`，随版本
+发布；每行一个 spec，如 `@scope/name@latest`，支持 `#` 注释，调整名单即修改
+该文件并随版本部署）。插件在 **web 进程启动之前**
 以目标 Linux 用户身份逐个执行 `dsh plugin --profile web add <spec>` 安装完毕
 （运行中的 DSH 不会热加载 profile 变更，先启动后安装会出现首访无插件的竞态），
 成功条目记入 `<DSH_HOME>/agent-bridge-plugins.txt`；已就位的条目不会重装，
