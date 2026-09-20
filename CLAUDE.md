@@ -199,11 +199,12 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
   后装会出现首访无插件竞态）；成功条目记入 `<DSH_HOME>/agent-bridge-plugins.txt`
   （0600），因此实际只在首次初始化（及版本名单新增条目）执行，失败/超出总预算
   （`PLUGIN_INSTALL_TOTAL_BUDGET_SECONDS`，安装持有服务锁必须封顶）的条目不
-  阻塞启动、下次启动自动重试，从名单移除条目不卸载已装插件。安装前必须经
-  `ensure_build_approvals` 在 profile `pnpm-workspace.yaml` 放行
-  `BUILD_DEPENDENCIES`（node-pty）：pnpm 10 默认拦截依赖构建且安装仍退出 0，
-  被拦下时原生模块无编译产物；依赖已就位而放行缺失时补一次 profile install
-  触发构建。node-pty 无 Linux 预编译，内网部署需预置工具链与 Node headers。
+  阻塞启动、下次启动自动重试，从名单移除条目不卸载已装插件。安装前经
+  `ensure_build_blocks` 在 profile `pnpm-workspace.yaml` 显式声明不构建原生依赖
+  （`allowBuilds` map，`BLOCKED_BUILDS` 当前为 node-pty；pnpm 10.33 正式键，
+  等价于 `ignoredBuiltDependencies`，并会清理历史放行条目）：pnpm 10 默认拦截
+  依赖构建并留待定告警，node-pty 又无 Linux 预编译、构建需工具链与 Node
+  headers——默认跳过保证整份名单装得上，终端等能力由插件自行降级。
 - `dsh_group_configs`/`dsh_runtime_config` 两张表经 `DshConfigRepository` 持久化；
   `api_key` 沿用“只返回 api_key_set + clear_api_key”的敏感配置模式。
 - 空闲回收是服务内守护线程（默认 120 分钟阈值，随全局配置读取）；app lifespan

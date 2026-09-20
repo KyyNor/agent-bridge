@@ -26,11 +26,15 @@ PLUGIN_PROFILE = "web"
 PLUGIN_LIST_FILENAME = "dsh-plugins.txt"
 # 已安装 marker 文件（相对 DSH_HOME）。
 PLUGIN_MARKER_FILENAME = "agent-bridge-plugins.txt"
-# 需要放行安装期构建的原生依赖（随版本维护）：pnpm 10 默认拦截依赖的
-# install/postinstall 脚本，被拦下时 node-pty 等原生模块没有编译产物，
-# 依赖它的插件在运行期不可用。node-pty 只随包附带 win32/darwin 预编译，
-# Linux 必须走 node-gyp 构建（内网部署需预置工具链与 Node headers 缓存）。
-BUILD_DEPENDENCIES = ("node-pty",)
+# 显式声明「不构建」的原生依赖（随版本维护）：pnpm 10 默认拦截依赖的
+# install/postinstall 脚本并给出 ``Ignored build scripts`` 待定告警，构建
+# 与否悬而未决。node-pty 只随包附带 win32/darwin 预编译、Linux 必须走
+# node-gyp 编译（需要工具链与 Node headers）；为了不让单个原生依赖的构建
+# 阻塞整份插件名单，这里默认声明不构建（``allowBuilds`` map，pnpm 10.33
+# 的正式键，等价于 ``ignoredBuiltDependencies``）：安装静默跳过构建、退出 0，
+# 依赖 node-pty 的能力（如 dsh-better-sidebar 的终端）在运行期自行降级。
+# 内网如需终端能力：移出本名单并预置 python3/make/g++ 与 Node headers。
+BLOCKED_BUILDS = ("node-pty",)
 
 
 def plugin_list_path() -> Path:
@@ -46,18 +50,20 @@ def plugin_marker_path(dsh_home: Path) -> Path:
 
 
 def build_profile_install_command(dsh_binary: str) -> list[str]:
-    """构造 profile 初始化/同步命令：``<dsh> plugin --profile web install``。"""
+    """构造 profile 初始化命令：``<dsh> plugin --profile web install``。"""
     return [dsh_binary, "plugin", "--profile", PLUGIN_PROFILE, "install"]
 
 
-def ensure_build_approvals(profile_dir: Path) -> bool:
-    """确保 profile 放行原生依赖的构建脚本；需要变更时返回 True。
+def ensure_build_blocks(profile_dir: Path) -> bool:
+    """在 profile 显式声明不构建 BLOCKED_BUILDS；需要变更时返回 True。
 
-    pnpm 10 对依赖的 install/postinstall 脚本默认只警告不执行
-    （``Ignored build scripts``），原生模块因此缺少编译产物且安装仍退出 0。
-    合并语义：保留 ``pnpm-workspace.yaml`` 其余键与用户已放行条目，只补齐
-    缺失项；profile 尚未初始化（dsh 会先建模板文件）或内容未变化时返回
-    False 且不触盘。
+    pnpm 10 对依赖的 install/postinstall 脚本默认只警告不执行（``Ignored
+    build scripts`` 待定），安装仍退出 0 但原生模块没有编译产物；显式声明
+    ``allowBuilds.<pkg>: false`` 后跳过是确定行为、不再产生待定告警，插件
+    安装也不会因单个原生依赖的构建失败而整体失败。合并语义：保留
+    ``pnpm-workspace.yaml`` 其余键与用户已有条目，并从历史放行名单
+    （``onlyBuiltDependencies``）里移除这些包，避免放行/拒绝并存；profile
+    未初始化或内容未变化时返回 False 且不触盘。
     """
     path = profile_dir / "pnpm-workspace.yaml"
     if not path.exists():
@@ -68,18 +74,29 @@ def ensure_build_approvals(profile_dir: Path) -> bool:
         logger.warning("DSH profile pnpm-workspace.yaml 读取失败 path=%s 原因=%s", path, exc)
         return False
     payload = dict(loaded) if isinstance(loaded, dict) else {}
-    approved = payload.get("onlyBuiltDependencies")
-    approved_list = [str(item) for item in approved] if isinstance(approved, list) else []
-    missing = [dep for dep in BUILD_DEPENDENCIES if dep not in approved_list]
-    if not missing:
+    allow_builds = payload.get("allowBuilds")
+    allow_builds = dict(allow_builds) if isinstance(allow_builds, dict) else {}
+    allowed = payload.get("onlyBuiltDependencies")
+    allowed_list = [str(item) for item in allowed] if isinstance(allowed, list) else []
+    kept_allowed = [item for item in allowed_list if item not in BLOCKED_BUILDS]
+    needs_block = [dep for dep in BLOCKED_BUILDS if allow_builds.get(dep) is not False]
+    list_changed = kept_allowed != allowed_list
+    if not needs_block and not list_changed:
         return False
-    payload["onlyBuiltDependencies"] = [*approved_list, *missing]
+    for dep in needs_block:
+        allow_builds[dep] = False
+    payload["allowBuilds"] = allow_builds
+    if isinstance(allowed, list):
+        if kept_allowed:
+            payload["onlyBuiltDependencies"] = kept_allowed
+        else:
+            payload.pop("onlyBuiltDependencies", None)
     path.write_text(
         yaml.safe_dump(payload, allow_unicode=True, sort_keys=False),
         encoding="utf-8",
     )
     logger.info(
-        "DSH profile 已放行依赖构建 path=%s dependencies=%s", path, ",".join(missing)
+        "DSH profile 已声明不构建原生依赖 path=%s dependencies=%s", path, ",".join(BLOCKED_BUILDS)
     )
     return True
 
