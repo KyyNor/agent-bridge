@@ -263,7 +263,7 @@ async def _proxy_stream_response(
     location_rewriter: Callable[[str], str] | None = None,
     response_header_builder: Callable[[httpx.Headers], list[tuple[bytes, bytes]]] | None = None,
     query_override: str | None = None,
-    request_header_overrides: dict[str, str] | None = None,
+    request_header_overrides: dict[str, str | None] | None = None,
     extra_response_headers: list[tuple[bytes, bytes]] | None = None,
 ) -> None:
     """Forward a request to a dashboard upstream, streaming the response back.
@@ -277,7 +277,8 @@ async def _proxy_stream_response(
     同一转发骨架并自带 Location/Cookie 等响应头改写策略；缺省沿用既有
     prefix/key 改写逻辑。``query_override`` 供需要服务端补参数（如 DSH 的首访
     token）的代理覆盖上游查询串；``request_header_overrides`` 覆盖转发头（如
-    服务端换取 Cookie 后改写 Cookie/Origin），``extra_response_headers`` 追加
+    服务端换取 Cookie 后改写 Cookie/Origin），值为 ``None`` 表示从转发头中删除
+    该头（如 Cookie 收敛后没有需要转发的内容），``extra_response_headers`` 追加
     调用方在骨架之外自行生成的响应头（如换取到的新会话 Cookie）。
     """
     body = await _read_body(receive)
@@ -292,7 +293,11 @@ async def _proxy_stream_response(
     ))
     headers = _forward_headers(scope.get("headers", []), target_parts.netloc)
     if request_header_overrides:
-        headers.update(request_header_overrides)
+        for name, value in request_header_overrides.items():
+            if value is None:
+                headers.pop(name, None)
+            else:
+                headers[name] = value
     method = str(scope.get("method", "GET"))
     # ``read=None`` keeps idle SSE connections alive; connect/write/pool stay
     # bounded so a misbehaving upstream still fails fast.
