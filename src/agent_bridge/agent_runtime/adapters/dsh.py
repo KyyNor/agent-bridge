@@ -68,6 +68,11 @@ _ADAPTER_WARMUP_INTERVAL_SECONDS = 1.0
 # session/prompt 结束原因 → 是否错误。
 _STOP_REASONS_OK = {"end_turn"}
 
+# tool_call_update 的终态集合；in_progress 等中间状态不产生 tool_result，
+# 否则会被误报为成功。
+_TERMINAL_TOOL_STATUSES = frozenset({"completed", "failed", "error", "cancelled"})
+_TOOL_ERROR_STATUSES = frozenset({"failed", "error", "cancelled"})
+
 # 队列哨兵：prompt 结算任务完成后投入更新队列，结束消费循环。dsh-acp 的
 # prompt 只在全部有序 update 送达后结算，因此哨兵之前必是完整事件流。
 _SETTLED = object()
@@ -86,6 +91,10 @@ class AcpRpcError(RuntimeError):
         else:
             message = str(payload)
         super().__init__(message)
+
+
+class AcpProcessExitedError(RuntimeError):
+    """DSH ACP 进程退出（stdout EOF/读取异常），在途 RPC 永远等不到响应。"""
 
 
 def build_model_patch(*, provider: str, model: str) -> list[dict[str, Any]]:
@@ -255,9 +264,10 @@ def events_from_acp_update(
         ]
     if kind == "tool_call_update":
         status_value = _tool_status(update)
-        if not status_value:
+        if status_value not in _TERMINAL_TOOL_STATUSES:
+            # in_progress 等中间帧不产生终态事件（原始 update 仍进 messages.jsonl）。
             return []
-        is_error = status_value in {"failed", "error", "cancelled"}
+        is_error = status_value in _TOOL_ERROR_STATUSES
         return [
             _dsh_event(
                 "tool_result",
@@ -376,6 +386,7 @@ class _AcpJsonRpc:
         self._write_lock = asyncio.Lock()
         self._closed = False
         self._shutdown_done = False
+        self._reader_dead = False
 
     @property
     def process(self) -> asyncio.subprocess.Process:
@@ -388,6 +399,7 @@ class _AcpJsonRpc:
     async def _read_loop(self) -> None:
         stdout = self._process.stdout
         if stdout is None:
+            self._fail_pending("DSH ACP 进程未提供 stdout")
             return
         try:
             while True:
@@ -425,9 +437,25 @@ class _AcpJsonRpc:
                     # 其他 server→client 请求统一回空结果，避免对端挂起。
                     await self.reply(message.get("id"), {})
         except asyncio.CancelledError:
+            # shutdown 主动取消读取任务（正常收尾/取消路径），不是进程故障。
             raise
-        except Exception:
+        except Exception as exc:
             logger.exception("DSH ACP 读取循环异常退出")
+            self._fail_pending(f"DSH ACP 读取循环异常：{exc}")
+            return
+        # stdout EOF：进程已退出（崩溃或提前结束）。必须让在途 RPC 立即失败，
+        # 否则 prompt 的 86400s 超时兜底会让 run 挂近一天。
+        self._fail_pending(
+            f"DSH ACP 进程已退出（code={self._process.returncode}），在途 RPC 无法完成"
+        )
+
+    def _fail_pending(self, reason: str) -> None:
+        """让全部在途 RPC future 立即失败，并标记读取通道已死。"""
+        self._reader_dead = True
+        for future in self._pending.values():
+            if not future.done():
+                future.set_exception(AcpProcessExitedError(reason))
+        self._pending.clear()
 
     async def _drain_stderr(self) -> None:
         stderr = self._process.stderr
@@ -450,6 +478,10 @@ class _AcpJsonRpc:
         await self._write({"jsonrpc": "2.0", "id": request_id, "result": result})
 
     async def call(self, method: str, params: dict[str, Any], *, timeout: float) -> dict[str, Any]:
+        if self._reader_dead or self._closed:
+            # 读取通道已死或已 shutdown：新 RPC 永远等不到响应，立即失败
+            # 而不是等到 timeout（session/close 收尾路径因此不会被拖住）。
+            raise AcpProcessExitedError("DSH ACP 进程已退出，无法发送 RPC")
         self._next_id += 1
         request_id = self._next_id
         future: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()

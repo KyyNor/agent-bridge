@@ -139,7 +139,12 @@ class DshAgentRuntimeResolver:
         return available[0]
 
     def _ensure_config_dir(self, identity: LinuxIdentity, user_id: str) -> Path:
-        """创建 ``<linux home>/.config/dsh/<business-user>/`` 并归属目标用户。"""
+        """创建 ``<linux home>/.config/dsh/<business-user>/`` 并归属目标用户。
+
+        只对本次新建的目录段（含标准子目录）执行 chown；已存在的目录保持
+        原样。root 降权场景下新建目录默认归属 root，若不归属目标用户，
+        降权后的 DSH 进程无法写入（sessions/storages 等均为其工作目录）。
+        """
         dsh_root = identity.home / ".config" / "dsh"
         user_dir = dsh_root / user_id
         created: list[Path] = []
@@ -151,11 +156,15 @@ class DshAgentRuntimeResolver:
                 break
             probe = parent
         user_dir.mkdir(parents=True, exist_ok=True)
+        created_subdirs: list[Path] = []
         for name in _DSH_HOME_DIRECTORIES:
-            (user_dir / name).mkdir(parents=True, exist_ok=True)
+            subdir = user_dir / name
+            if not subdir.exists():
+                created_subdirs.append(subdir)
+            subdir.mkdir(parents=True, exist_ok=True)
         running_uid = os.geteuid()
         if running_uid == 0 and identity.uid != running_uid:
-            for path in ([*created, user_dir] if user_dir not in created else created):
+            for path in [*created, user_dir, *created_subdirs]:
                 try:
                     os.chown(path, identity.uid, identity.gid)
                 except OSError as exc:

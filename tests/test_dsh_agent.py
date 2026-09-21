@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import pwd
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,6 +17,7 @@ import yaml
 
 from agent_bridge.agent_runtime.adapters.dsh import (
     MODEL_PATCH_FILENAME,
+    AcpProcessExitedError,
     DshCodingAgent,
     acp_mcp_servers,
     build_model_patch,
@@ -219,13 +221,15 @@ def test_events_from_acp_update_tool_lifecycle() -> None:
     assert failed[0]["status"] == "failed"
     assert failed[0]["is_error"] is True
 
-    # 没有状态的 update（如 in_progress 的中间帧）不产生事件。
-    assert (
-        events_from_acp_update(
-            {"sessionUpdate": "tool_call_update", "toolCallId": "call-3"}, session_id=None
-        )
-        == []
-    )
+    # 中间状态帧（in_progress / 无状态）不产生终态 tool_result，否则会被误报成功。
+    for raw_status in ("in_progress", "pending", None, ""):
+        payload: dict[str, Any] = {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "call-3",
+        }
+        if raw_status is not None:
+            payload["status"] = raw_status
+        assert events_from_acp_update(payload, session_id=None) == []
 
 
 def test_events_from_acp_update_usage_and_ignored_kinds() -> None:
@@ -287,10 +291,17 @@ def test_permission_reply_prefers_allow_option() -> None:
 
 class _QueuePipe:
     def __init__(self) -> None:
-        self.queue: asyncio.Queue[bytes] = asyncio.Queue()
+        self.queue: asyncio.Queue[Any] = asyncio.Queue()
 
     async def readline(self) -> bytes:
-        return await self.queue.get()
+        item = await self.queue.get()
+        if item is None:
+            return b""
+        return item
+
+    def emit_eof(self) -> None:
+        """模拟进程关闭 stdout（崩溃/提前退出）。"""
+        self.queue.put_nowait(None)
 
 
 class _EmptyPipe:
@@ -312,6 +323,9 @@ class _FakeStdin:
             return
         self._process.requests.append(json.loads(line))
         for message in self._process.handler(json.loads(line)):
+            if message == "EOF":
+                self._process.stdout.emit_eof()
+                continue
             self._process.stdout.queue.put_nowait(
                 (json.dumps(message, ensure_ascii=False) + "\n").encode("utf-8")
             )
@@ -586,6 +600,33 @@ def test_dsh_run_prompt_error_propagates(monkeypatch: pytest.MonkeyPatch, tmp_pa
     asyncio.run(consume())
 
 
+def test_dsh_run_process_exit_fails_pending_prompt_fast(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # DSH 进程在 prompt 执行中崩溃（stdout EOF）：在途 RPC 必须立即失败，
+    # 而不是等 86400s 的 prompt 超时兜底把 run 挂近一天。
+    def handler(request: dict[str, Any]) -> list[Any]:
+        request_id = request.get("id")
+        method = request.get("method")
+        if method == "initialize":
+            return [{"jsonrpc": "2.0", "id": request_id, "result": {"protocolVersion": 1}}]
+        if method == "session/new":
+            return [{"jsonrpc": "2.0", "id": request_id, "result": {"sessionId": "sess-1"}}]
+        if method == "session/prompt":
+            return ["EOF"]  # 模拟进程随即崩溃，不回结算结果
+        return [{"jsonrpc": "2.0", "id": request_id, "result": {}}]
+
+    process = _install_fake_process(monkeypatch, handler)
+    run = DshCodingAgent(runtime=_FakeRuntime()).start(_request(tmp_path))
+
+    async def consume() -> None:
+        with pytest.raises(AcpProcessExitedError, match="进程已退出"):
+            async for _ in run.updates():
+                pass
+
+    started = time.monotonic()
+    asyncio.run(consume())
+    assert time.monotonic() - started < 10
+
+
 def test_dsh_run_abort_sends_cancel_and_closes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     started = asyncio.Event()
 
@@ -646,14 +687,14 @@ class _StubAccess:
         return "system-maintainers"
 
 
-def _stub_passwd(home: Path):
+def _stub_passwd(home: Path, *, uid: int | None = None, gid: int | None = None):
     def lookup(name: str) -> pwd.struct_passwd:
         return pwd.struct_passwd(
             (
                 name,
                 "*",
-                os.geteuid(),
-                os.getegid(),
+                os.geteuid() if uid is None else uid,
+                os.getegid() if gid is None else gid,
                 "",
                 str(home),
                 "/bin/zsh",
@@ -693,6 +734,46 @@ def test_resolver_builds_binding_and_writes_settings(tmp_path: Path) -> None:
     settings = yaml.safe_load((binding.dsh_home / "settings.yaml").read_text(encoding="utf-8"))
     assert settings["llm-pi-ai"]["providers"]["agent-bridge"]["baseURL"] == "https://gateway.example/v1"
     assert settings["agent-default-model"]["model"] == "deepseek-pro"
+
+
+def test_resolver_chowns_new_dirs_when_root_demotes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # root -> 目标 Linux 用户降权场景：本次新建的目录段（用户目录与全部标准
+    # 子目录）都必须归属目标 uid/gid，否则降权后的 DSH 进程无法写入。
+    chowned: list[tuple[Path, int, int]] = []
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    monkeypatch.setattr(os, "chown", lambda path, uid, gid: chowned.append((Path(path), uid, gid)))
+    configs = _StubConfigs({"linux_user": "bizuser"}, _default_binding())
+    resolver = DshAgentRuntimeResolver(
+        configs=configs,
+        access=_StubAccess(),
+        passwd_lookup=_stub_passwd(tmp_path, uid=12345, gid=543),
+    )
+
+    binding = resolver.resolve_execution("kyynor", "system-maintainers")
+
+    assert (binding.dsh_home, 12345, 543) in chowned
+    for name in ("sessions", "storages", "change-ledger", "task-board"):
+        assert (binding.dsh_home / name, 12345, 543) in chowned
+    # 上层新建目录段同样归属目标用户。
+    assert (binding.dsh_home.parent, 12345, 543) in chowned
+    assert (binding.dsh_home.parent.parent, 12345, 543) in chowned
+
+
+def test_resolver_skips_chown_when_same_user(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 非降权场景（目标用户即当前用户）不执行 chown，便于开发与测试环境。
+    chowned: list[tuple[Path, int, int]] = []
+    monkeypatch.setattr(os, "chown", lambda path, uid, gid: chowned.append((Path(path), uid, gid)))
+    configs = _StubConfigs({"linux_user": "kyynor"}, _default_binding())
+    resolver = DshAgentRuntimeResolver(
+        configs=configs,
+        access=_StubAccess(),
+        passwd_lookup=_stub_passwd(tmp_path),
+    )
+
+    binding = resolver.resolve_execution("kyynor", "system-maintainers")
+
+    assert chowned == []
+    assert (binding.dsh_home / "sessions").is_dir()
 
 
 def test_resolver_prefers_model_override_and_validates_it(tmp_path: Path) -> None:
