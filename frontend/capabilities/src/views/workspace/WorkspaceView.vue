@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { ExternalLink } from '@lucide/vue'
 import { api } from '../../api/client'
 import type { DshRuntimeStatus, ProjectProfile } from '../../api/types'
+import { resolvePreferredDshProfile, writePreferredDshProfile } from '../../lib/dshWorkspacePreference'
 import { formatLocalDatetime } from '../../lib/time'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
@@ -40,6 +41,10 @@ async function loadProfiles() {
   profilesError.value = ''
   try {
     profiles.value = await api.listProfiles()
+    // 默认选中浏览器记忆的能力平面；记忆失效（被删/停用/无权限）时清除并回落。
+    selectedProfile.value = resolvePreferredDshProfile(
+      activeProfiles.value.map(profile => profile.profile_key),
+    )
   } catch (e: any) {
     profiles.value = []
     profilesError.value = e.message || '无法加载能力平面'
@@ -54,8 +59,10 @@ async function loadRuntime() {
   }
 }
 
-/** 在新标签页打开伪全屏工作台；能力平面经查询串传递，授权在目标页完成。 */
+/** 在新标签页打开伪全屏工作台；能力平面经查询串传递，授权在目标页完成。
+ *  当前选择记入浏览器 localStorage，下次进入默认选中同一能力平面。 */
 function openWorkspace() {
+  writePreferredDshProfile(selectedProfile.value)
   const target = router.resolve({
     name: 'workspace-live',
     query: selectedProfile.value ? { profile: selectedProfile.value } : {},
@@ -156,7 +163,7 @@ async function stopRuntime() {
           <Button size="sm" @click="openWorkspace()">
             <ExternalLink :size="14" class="mr-1" />进入工作台
           </Button>
-          <span class="text-xs text-muted-foreground">将在新标签页打开全屏工作台；首次启动约需一分钟</span>
+          <span class="text-xs text-muted-foreground">将在新标签页打开全屏工作台；工作台未运行时启动约需十秒</span>
         </div>
       </CardContent>
     </Card>
