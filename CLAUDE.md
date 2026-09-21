@@ -285,6 +285,8 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
 
 工作流执行身份必须区分“触发者”和“业务运行主体”。手工运行先校验触发者对定义的写权限；定时运行不得借维护管理员身份读取业务资源。每次 run 按持久化的 `owner_group_key` 签发进程内短期 capability，Agent MCP 与脚本 runtime 必须同时携带 capability 和 workflow/profile/run lineage；服务端校验后绑定不可获得管理员旁路的临时主体。`workflow_get_task`、`workflow_set_task`、`workflow_run_log` 必须校验 run 写权限，客户端自报的 workflow headers 不是可信凭证。工具审计、Agent run 和节点产物均按父 run 归属组落库。自动调度的单个工作流若在归属或定义预检中失败，必须隔离到当前窗口结束并继续处理同批其他工作流，不能让异常逃出 `tick()` 或在每轮重复失败。
 
+工作流编辑器对归属组用户开放，表单路由的首屏依赖必须全部是登录即可读的接口：脚本、技能、能力平面列表，以及 `GET /api/v1/agent-runtime/backends`（默认后端 + 各后端 slug/展示名/能力/思考力度，由 `_available_agent_backends_payload` 投影，不含命令与模型配置）。管理员专用配置接口（`/agent-runtime/config`、`/sync-config`、`/claude-mem/config` 等）只服务系统管理页，不得进入业务页面加载链路；工作流写入权限始终由 `owner_group_key` 决定。
+
 `agent` 与 `output` 节点的 `timeout_seconds` 是 1–86400 秒的运行控制参数，默认 600 秒；它不属于节点产物语义，单独调整超时不得使节点或下游失去复用资格。工作流名称、描述、节点显示名称和 Output 节点配置标题是展示字段，调整它们同样不得改变增量复用或触发重跑。版本判定走双口径：执行语义口径（`content_hash`，剥离 name/description/timeout/title 等字段）喂重跑与 stale 判定，单独调整这些字段时必须稳定不变；版本历史口径（`version_hash`，含这些字段）喂版本号递增与 diff，会随之变更并产生新 `revision_no`——这是版本记录而非增量版本，版本号递增本身不触发重跑。
 
 保存工作流支持 `task_refresh_policy=auto|defer`。`auto` 保持现有行为，将受影响的最新完成任务标记为 `stale`；`defer` 只保存 revision，不改变任务队列。延期后的完成任务通过派生字段 `needs_refresh` 标识，后续由显式任务刷新操作转入 `stale`。不要通过修改 `content_hash` 隐藏执行语义变化；运行中的任务仍受运行快照与版本不一致护栏保护。

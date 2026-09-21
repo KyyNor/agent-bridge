@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowLeft, Download, FolderOutput, GitBranch, HelpCircle, ListTodo, Maximize2, MoreHorizontal, Play, Plus, Save, Upload, WandSparkles, X } from '@lucide/vue'
 import { api, beginWorkflowValidationRun, finishWorkflowValidationRun, hasBlockingWorkflowValidationErrors, invalidateWorkflowValidationRun, isCurrentWorkflowValidationRun, workflowValidationErrorMessage, workflowValidationIssuesFor } from '../../api/client'
-import type { AccessActorContext, ProjectProfile, WorkflowArtifact, WorkflowDefinition, WorkflowDraft, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowRunSummary, WorkflowSubagentDetail, WorkflowTask, WorkflowTaskImportPreview, WorkflowImportPreview, WorkflowImportTargetMode, AgentRun, AgentRuntimeConfig, ManagedScript, SkillPrompt, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowNodeRun, WorkflowNodeType, WorkflowValidationError, WorkflowType, WorkflowExecutionMode, WorkflowExecutionPlan } from '../../api/types'
+import type { AccessActorContext, ProjectProfile, WorkflowArtifact, WorkflowDefinition, WorkflowDraft, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowRunSummary, WorkflowSubagentDetail, WorkflowTask, WorkflowTaskImportPreview, WorkflowImportPreview, WorkflowImportTargetMode, AgentRun, AgentBackendCatalog, ManagedScript, SkillPrompt, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowNodeRun, WorkflowNodeType, WorkflowValidationError, WorkflowType, WorkflowExecutionMode, WorkflowExecutionPlan } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
@@ -77,7 +77,7 @@ const profiles = ref<ProjectProfile[]>([])
 const scripts = ref<ManagedScript[]>([])
 const skills = ref<SkillPrompt[]>([])
 const defaultBackend = ref('codex')
-const agentRuntimeConfig = ref<AgentRuntimeConfig>({ default_backend: 'claude', backends: [] })
+const agentBackends = ref<AgentBackendCatalog>({ default_backend: 'claude' })
 const selectedKey = ref('')
 const loading = ref(true)
 const workflowPage = ref(1)
@@ -355,7 +355,7 @@ const selectedNodeReferenceItems = computed(() => selectedNode.value ? deriveAva
 const selectedEdgeReferenceItems = computed(() => selectedEdge.value ? deriveAvailableData(form.value.definition, { kind: 'edge', id: selectedEdge.value.id }, scripts.value) : [])
 const hasTaskNode = computed(() => form.value.definition.nodes.some(node => node.type === 'get_task'))
 const manualInputFields = computed(() => deriveManualInputFields(form.value.definition, scripts.value))
-const backendKeys = computed(() => deriveWorkflowBackendKeys(agentRuntimeConfig.value))
+const backendKeys = computed(() => deriveWorkflowBackendKeys(agentBackends.value))
 const selectedProfileName = computed(() => profileName(selectedWorkflow.value?.profile_key || ''))
 const runs = computed(() => workflowRuns.value[selectedWorkflow.value?.workflow_key || ''] || [])
 const latestRun = computed(() => runs.value[0] || null)
@@ -639,15 +639,15 @@ async function maybeStartWorkflowDetailTour() {
 let editorResourcesLoaded = false
 async function loadEditorResources() {
   if (editorResourcesLoaded) return
-  const [scriptList, skillList, runtimeConfig] = await Promise.all([
+  const [scriptList, skillList, backendCatalog] = await Promise.all([
     api.listScripts(),
     api.listSkills(),
-    api.getAgentRuntimeConfig(),
+    api.listAgentBackends(),
   ])
   scripts.value = scriptList
   skills.value = skillList
-  agentRuntimeConfig.value = runtimeConfig
-  defaultBackend.value = runtimeConfig.default_backend || defaultBackend.value
+  agentBackends.value = backendCatalog
+  defaultBackend.value = backendCatalog.default_backend || defaultBackend.value
   editorResourcesLoaded = true
 }
 

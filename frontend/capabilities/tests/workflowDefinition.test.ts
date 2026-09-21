@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { api, beginWorkflowValidationRun, finishWorkflowValidationRun, hasBlockingWorkflowValidationErrors, invalidateWorkflowValidationRun, isCurrentWorkflowValidationRun, workflowValidationIssuesFor } from '../src/api/client.ts'
 import { createDefaultGraph, deriveManualInputFields, deriveWorkflowBackendKeys, isProtectedSummaryEdge, isProtectedSummaryNode, migrateWorkflowGraph } from '../src/lib/workflowDefinition.ts'
-import type { AgentRuntimeConfig, ManagedScript, WorkflowGraph, WorkflowValidationResult } from '../src/api/types.ts'
+import type { AgentBackendCatalog, AgentRuntimeConfig, ManagedScript, WorkflowGraph, WorkflowValidationResult } from '../src/api/types.ts'
 
 test('summary graph creates protected markdown and html pair', () => {
   const graph = createDefaultGraph('summary', 'codex')
@@ -213,6 +213,23 @@ test('workflow backend options come from the runtime registry payload and keep c
   }
 
   assert.deepEqual(deriveWorkflowBackendKeys(runtime), ['claude', 'team-codex'])
+})
+
+test('workflow backend options come from the catalog payload without configured backends', () => {
+  // 编辑器读的是登录即可读的后端目录：只有默认后端与已注册后端，没有 backends 配置段。
+  const catalog: AgentBackendCatalog = {
+    default_backend: 'claude',
+    available_backends: [
+      { slug: 'claude', display_name: 'Claude', source: 'claude_agent_sdk', capabilities: { supports_mcp: true } },
+      { slug: 'codex', display_name: 'Codex', source: 'codex_cli', capabilities: { supports_mcp: false } },
+    ],
+  }
+
+  assert.deepEqual(deriveWorkflowBackendKeys(catalog), ['claude', 'codex'])
+  assert.deepEqual(
+    deriveWorkflowBackendKeys({ default_backend: 'codex', available_backends: [] }),
+    ['codex'],
+  )
 })
 
 test('workflow validation run guard blocks duplicates and ignores stale responses', () => {

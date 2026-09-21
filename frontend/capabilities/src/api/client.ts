@@ -58,6 +58,7 @@ import type {
   ToolCallLog,
   ToolCallStats,
   AgentRun,
+  AgentBackendCatalog,
   AgentRuntimeConfig,
   DesignAgentResponse,
   WorkflowDesignResult,
@@ -862,6 +863,7 @@ export const api = {
   },
   getSchedulerStatus: () => get<SchedulerStatus>('/sync-config/scheduler-status'),
   getAgentRuntimeConfig: () => get<AgentRuntimeConfig>('/agent-runtime/config'),
+  listAgentBackends: () => get<AgentBackendCatalog>('/agent-runtime/backends'),
   saveAgentRuntimeConfig: (config: AgentRuntimeConfig) => {
     const { edit_token, available_backends: _availableBackends, ...payload } = config
     return post<AgentRuntimeConfig>('/agent-runtime/config', { ...payload, expected_edit_token: edit_token })

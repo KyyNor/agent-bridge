@@ -171,6 +171,11 @@ def create_builtin_routes(service, actor):
     def save_agent_runtime_config(payload: AgentRuntimeConfigRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
         return service.save_agent_runtime_config(current_actor, payload.model_dump())
 
+    @router.get("/agent-runtime/backends")
+    def list_agent_backend_catalog(current_actor: str = Depends(actor)) -> dict[str, Any]:
+        # 工作流编辑器选择节点后端用；登录即可读，不含各后端的命令与模型配置。
+        return service.list_agent_backend_catalog()
+
     # -- Claude Mem Config --
 
     @router.get("/claude-mem/config")

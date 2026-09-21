@@ -80,6 +80,27 @@ UPLOAD_EXTENSIONS = ALLOWED_EXTENSIONS | {".zip"}
 _UNSET = object()
 
 
+def _available_agent_backends_payload(registry: Any) -> list[dict[str, Any]]:
+    """已注册 Coding Agent 后端目录：只含选择与展示所需字段，不含命令与模型配置。"""
+    payload: list[dict[str, Any]] = []
+    for backend_key in registry.keys():
+        backend = registry.get(backend_key)
+        payload.append(
+            {
+                "slug": backend_key,
+                "display_name": backend.display_name,
+                "source": backend.source,
+                "capabilities": asdict(backend.capabilities),
+                "supported_efforts": (
+                    sorted(backend.supported_efforts)
+                    if backend.supported_efforts is not None
+                    else None
+                ),
+            }
+        )
+    return payload
+
+
 def _agent_runtime_config_payload(config: AgentRuntimeConfig, registry: Any = None) -> dict[str, Any]:
     payload = {
         "default_backend": config.default_backend,
@@ -95,21 +116,16 @@ def _agent_runtime_config_payload(config: AgentRuntimeConfig, registry: Any = No
         ],
     }
     if registry is not None:
-        payload["available_backends"] = [
-            {
-                "slug": backend_key,
-                "display_name": registry.get(backend_key).display_name,
-                "source": registry.get(backend_key).source,
-                "capabilities": asdict(registry.get(backend_key).capabilities),
-                "supported_efforts": (
-                    sorted(registry.get(backend_key).supported_efforts)
-                    if registry.get(backend_key).supported_efforts is not None
-                    else None
-                ),
-            }
-            for backend_key in registry.keys()
-        ]
+        payload["available_backends"] = _available_agent_backends_payload(registry)
     return payload
+
+
+def _agent_backend_catalog_payload(config: AgentRuntimeConfig, registry: Any) -> dict[str, Any]:
+    """工作流节点选择后端所需的只读目录（默认后端 + 已注册后端清单）。"""
+    return {
+        "default_backend": config.default_backend,
+        "available_backends": _available_agent_backends_payload(registry),
+    }
 
 
 class _IngestFacade:
@@ -1426,6 +1442,15 @@ class AgentBridgeService:
         config = load_agent_runtime_config(self.paths)
         payload = _agent_runtime_config_payload(config, self.agents.coding_agents)
         return attach_edit_token(payload, _agent_runtime_config_payload(config))
+
+    def list_agent_backend_catalog(self) -> dict[str, Any]:
+        """工作流编辑器读取可选 Coding Agent 后端目录。
+
+        编辑本组工作流的普通用户需要该目录渲染节点后端选择，因此登录即可读；
+        只返回默认后端与后端 slug/展示名/能力/思考力度，不回传命令与模型配置。
+        """
+        config = load_agent_runtime_config(self.paths)
+        return _agent_backend_catalog_payload(config, self.agents.coding_agents)
 
     def save_agent_runtime_config(self, actor: str, payload: dict[str, Any]) -> dict[str, Any]:
         require_admin_user(actor, self.admins)

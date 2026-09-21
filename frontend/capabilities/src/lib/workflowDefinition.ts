@@ -1,5 +1,5 @@
 import type { Edge, Node } from '@vue-flow/core'
-import type { AgentRuntimeConfig, ManagedScript, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowType } from '../api/types'
+import type { AgentBackendCatalog, ManagedScript, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowType } from '../api/types'
 
 export interface ManualInputField { path: string; type: string; required: boolean; description: string }
 
@@ -116,11 +116,10 @@ export function isProtectedSummaryEdge(edge: WorkflowEdge, workflowType: Workflo
   return workflowType === 'summary' && edge.system_role === 'summary_markdown_to_html'
 }
 
-export function deriveWorkflowBackendKeys(runtime: AgentRuntimeConfig): string[] {
-  const registered = runtime.available_backends?.map(item => item.slug) || []
-  const candidates = registered.length
-    ? registered
-    : [runtime.default_backend, ...runtime.backends.map(item => item.slug)]
+export function deriveWorkflowBackendKeys(catalog: AgentBackendCatalog): string[] {
+  const registered = catalog.available_backends?.map(item => item.slug) || []
+  const configured = catalog.backends?.map(item => item.slug) || []
+  const candidates = registered.length ? registered : [catalog.default_backend, ...configured]
   return candidates.filter((item, index, all) => Boolean(item) && all.indexOf(item) === index)
 }
 

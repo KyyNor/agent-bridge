@@ -1379,10 +1379,16 @@ export interface AvailableAgentBackend {
   }>
 }
 
-export interface AgentRuntimeConfig {
+/** 可选 Coding Agent 后端目录：工作流编辑器登录即可读，不含各后端的命令与模型配置。 */
+export interface AgentBackendCatalog {
   default_backend: string
-  backends: AgentBackendConfig[]
   available_backends?: AvailableAgentBackend[]
+  /** 已配置后端的 slug 兜底来源；目录接口不返回该字段。 */
+  backends?: AgentBackendConfig[]
+}
+
+export interface AgentRuntimeConfig extends AgentBackendCatalog {
+  backends: AgentBackendConfig[]
   edit_token?: string
 }
 
