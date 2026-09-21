@@ -815,6 +815,43 @@ def test_workspace_proxy_routes_escaped_root_requests(respx_mock) -> None:
     assert status == 200 and api.called and json.loads(body) == {"ok": True}
 
 
+def test_workspace_proxy_fills_missing_browser_marker(respx_mock) -> None:
+    """缺席浏览器信号的请求补 Sec-Fetch-Site；浏览器已带值的一律原样透传。
+
+    task-board 等 DSH 插件控制面要求 ``Sec-Fetch-Site: same-origin`` 或
+    ``Origin`` 之一；Safari/重放请求两者都缺，由代理补齐同源标记（代理是这些
+    请求的已认证入口）。显式 ``cross-site`` 绝不改写成同源。
+    """
+    target = "http://127.0.0.1:48400"
+    dsh = _FakeDshService(target)
+    route = respx_mock.get(f"{target}/api/task-board/state").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    referer = "http://bridge.internal:8080/agent-workspace/"
+
+    # 两种信号都缺：补 same-origin。
+    status, _, _ = _drive(
+        _middleware(dsh), _http_scope("/api/task-board/state", referer=referer)
+    )
+    assert status == 200
+    assert route.calls[-1].request.headers["sec-fetch-site"] == "same-origin"
+
+    # 浏览器显式 cross-site：不得改写。
+    _drive(
+        _middleware(dsh),
+        _http_scope("/api/task-board/state", referer=referer, sec_fetch_site="cross-site"),
+    )
+    assert route.calls[-1].request.headers["sec-fetch-site"] == "cross-site"
+
+    # 只带 Origin：标记已满足，不注入 Sec-Fetch-Site；Origin 改写为目标 authority。
+    _drive(
+        _middleware(dsh),
+        _http_scope("/api/task-board/state", referer=referer, origin="http://bridge.internal:8080"),
+    )
+    assert "sec-fetch-site" not in route.calls[-1].request.headers
+    assert route.calls[-1].request.headers["origin"] == target
+
+
 def test_workspace_proxy_leaves_agent_bridge_paths_alone() -> None:
     """保留路径（平台接口/静态资源）不得被逃逸路由抢走。"""
 

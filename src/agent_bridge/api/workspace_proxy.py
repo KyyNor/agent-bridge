@@ -140,10 +140,28 @@ def _origin_override(scope: Scope, target: str) -> dict[str, str]:
     return {"origin": f"{parts.scheme}://{parts.netloc}"}
 
 
+def _browser_marker_override(scope: Scope) -> dict[str, str]:
+    """为缺少浏览器信号的请求补 ``Sec-Fetch-Site: same-origin``。
+
+    部分 DSH 插件（如 task-board）的控制面路由要求请求携带浏览器信号标记：
+    ``Sec-Fetch-Site: same-origin`` 或任意 ``Origin``。真实浏览器的同源请求
+    本就带其一；但 Safari/WebKit 不发 Fetch Metadata、重放工具也不会带，请求
+    会被插件栅栏以 403 拒绝。代理是这些请求的已认证入口（业务身份与 runtime
+    目标都由平台校验），因此在两种信号都缺席时补齐同源标记；浏览器已带值的
+    请求原样透传（含显式的 ``cross-site``，绝不改写成同源）。
+    """
+    if _header_value(scope, "sec-fetch-site") is not None:
+        return {}
+    if _header_value(scope, "origin") is not None:
+        return {}
+    return {"sec-fetch-site": "same-origin"}
+
+
 def _request_overrides(scope: Scope, target: str) -> dict[str, str | None]:
-    """通用请求头覆盖：Origin 改写 + Cookie 收敛到 DSH 自己的范围。"""
+    """通用请求头覆盖：Origin 改写 + 浏览器信号补齐 + Cookie 收敛到 DSH 范围。"""
     return {
         **_origin_override(scope, target),
+        **_browser_marker_override(scope),
         "cookie": _dsh_request_cookies(
             _header_value(scope, "cookie"), authority=urlsplit(target).netloc
         ),

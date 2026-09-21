@@ -241,7 +241,11 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
   `/memory-dashboard`、`/health`）永不参与逃逸路由。
 - 上游 `Origin` 必须改写为目标 origin（DSH 的 `/api/**` 浏览器信任栅栏要求 Host
   为回环且 Origin 与之匹配）；会话 Cookie 原样透传（`Path=/`），不得收窄到
-  `/agent-workspace`，否则根绝对路径请求与 WS 握手都拿不到会话。发往 DSH 的
+  `/agent-workspace`，否则根绝对路径请求与 WS 握手都拿不到会话。部分 DSH 插件
+  （如 task-board）的控制面路由还要求请求携带浏览器信号（`Sec-Fetch-Site:
+  same-origin` 或 `Origin` 之一），缺失时请求会被插件栅栏 403；代理作为这些请求
+  的已认证入口，在两种信号都缺席时补齐 `Sec-Fetch-Site: same-origin`（浏览器
+  已带值的一律原样透传，显式 `cross-site` 绝不改写）。发往 DSH 的
   Cookie（HTTP 转发、follow、WS 握手）一律收敛为 DSH 自己的范围——当前
   authority 的 `dsh-auth-*` 会话与其余 `dsh-` 前缀应用 Cookie；`agent_bridge_admin`、
   PostHog 等平台/统计 Cookie 不透传给上游，收敛后无剩余时删除 Cookie 头。
