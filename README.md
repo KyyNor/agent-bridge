@@ -7,11 +7,17 @@ Agent Bridge 是面向内部可信环境的 Agent 能力与知识管理平台。
 - 注册 MCP 与 OpenAPI 服务，同步工具定义并统一检索、执行和审计。
 - 通过 Profile 管理来源级与资源级访问策略，并将常用工具提升为 pinned tools。
 - 管理文档知识库、CodeGraph 代码知识和 claude-mem 记忆。
-- 支持 Claude、Codex、OpenCode、Pi 等 Coding Agent 后端。
+- 支持 Claude、Codex、OpenCode、Pi、DSH 等 Coding Agent 后端。
 - Coding Agent 可按后端配置思考力度（`server.toml` `[agents.<slug>]` 的 `effort`，或「系统管理 →
   知识处理配置 → Coding Agent 运行配置」编辑）：Claude 支持 low/medium/high/xhigh/max、Codex 支持
   minimal~xhigh、Pi 支持 off~xhigh，OpenCode 透传 provider 相关的 variant 名。留空使用各 CLI 默认值；
   例如部署模型不接受默认的 `high` 时，可把 Claude 后端设为 `xhigh` 或 `medium` 规避 litellm 报错。
+  DSH 后端不支持配置思考力度（其托管供应商路由不暴露 reasoning effort，配置会被拒绝）。
+- DSH 可作为 Coding Agent 后端执行后台任务：每次 run 以目标 Linux 用户身份启动独立的
+  `dsh --profile acp` 进程，通过标准 Agent Client Protocol（JSON-RPC over stdio）完成一次
+  任务并随 stdin EOF 优雅退出；模型接入（Base URL/模型/API Key）复用 DSH Web Runtime 的
+  组级配置与用户级配置目录，后台 run 不依赖 Web Runtime 是否启动；`.mcp.json` 转换为 ACP
+  的 MCP 声明，Profile 能力平面照常经 MetaMCP 网关生效，MCP 工具调用照常进入「调用日志」。
 - OpenCode 由 Agent Bridge 按 run 启动并回收本机 server，通过 HTTP API 执行会话；当前使用
   `prompt_async` + `/event` SSE 实时接收文本、阶段和工具事件，OpenCode V1 事件映射与 server
   生命周期分开，便于未来替换 V2 client；运行时间轴会合并工具调用/结果和文本增量，同时保留

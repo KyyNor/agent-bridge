@@ -264,6 +264,7 @@ function backendBadgeClass(backend: string | null | undefined): string {
   if (backend === 'claude') return 'border-info/30 bg-info-soft text-info-soft-fg'
   if (backend === 'opencode') return 'border-success/30 bg-success-soft text-success-soft-fg'
   if (backend === 'codex') return 'border-warning/30 bg-warning-soft text-warning-soft-fg'
+  if (backend === 'dsh') return 'border-cat-teal/30 bg-cat-teal text-cat-teal-fg'
   return 'border-border bg-muted text-muted-foreground'
 }
 

@@ -19,6 +19,14 @@ class CodingAgentCapabilities:
 
 
 @dataclass(frozen=True)
+class CodingAgentRunContext:
+    """按 run 下发的身份上下文，供需要组级配置的后端（如 DSH）解析执行参数。"""
+
+    actor: str | None = None
+    owner_group_key: str | None = None
+
+
+@dataclass(frozen=True)
 class CodingAgentRequest:
     prompt: str
     cwd: Path
@@ -32,6 +40,7 @@ class CodingAgentRequest:
     model: str | None = None
     max_turns: int | None = None
     max_budget_usd: float | None = None
+    run_context: CodingAgentRunContext | None = None
     # Compatibility hook for callers that still inspect the native SDK/CLI
     # stream. AgentService itself must not depend on the native message shape.
     on_native_message: Callable[[Any], None] | None = None
@@ -50,6 +59,7 @@ class CodingAgentRequest:
             model=model,
             max_turns=self.max_turns,
             max_budget_usd=self.max_budget_usd,
+            run_context=self.run_context,
             on_native_message=self.on_native_message,
         )
 

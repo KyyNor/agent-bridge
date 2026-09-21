@@ -33,6 +33,7 @@ from agent_bridge.core.domain import ValidationError, require_admin_user
 from agent_bridge.core.timeutil import utc_iso
 from agent_bridge.dsh import injection
 from agent_bridge.dsh import plugins
+from agent_bridge.dsh.agent_runtime import dsh_binary_from_command
 from agent_bridge.dsh.launcher import (
     DshProcessLauncher,
     LinuxIdentity,
@@ -440,11 +441,7 @@ class DshRuntimeService:
     @staticmethod
     def _dsh_binary(web_command: str) -> str:
         """从启动命令模板推导 dsh 可执行名（插件安装与 web 进程同一通道）。"""
-        try:
-            argv = shlex.split(web_command)
-        except ValueError:
-            argv = []
-        return argv[0] if argv else "dsh"
+        return dsh_binary_from_command(web_command)
 
     def _plugin_env(self, identity: LinuxIdentity, config_dir: Path) -> dict[str, str]:
         """插件安装进程环境：与 web 进程同源，但不携带 API Key。"""

@@ -35,7 +35,12 @@ from agent_bridge.agent_runtime.support import (
 from agent_bridge.capability_hub.profiles.docs import install_profile_to_cwd
 from agent_bridge.access_control.service import ResourceScope
 from agent_bridge.core.timeutil import utc_iso
-from agent_bridge.agent_runtime.types import CodingAgent, CodingAgentFinal, CodingAgentRequest
+from agent_bridge.agent_runtime.types import (
+    CodingAgent,
+    CodingAgentFinal,
+    CodingAgentRequest,
+    CodingAgentRunContext,
+)
 from agent_bridge.agent_runtime.trace import (
     StageTimer,
     ToolTimingTracker,
@@ -306,6 +311,10 @@ class AgentService:
                 model=model,
                 max_turns=max_turns,
                 max_budget_usd=max_budget_usd,
+                run_context=CodingAgentRunContext(
+                    actor=effective_actor,
+                    owner_group_key=owner_group_key,
+                ),
                 on_native_message=on_message,
             )
             if self.control_registry.is_stop_requested(run_key):

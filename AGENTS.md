@@ -18,6 +18,7 @@
 - Coding Agent 的配置暂时要求 `slug == type`。在支持实例级差异配置之前，不创建同一 type 的多个无差异 slug。
 - Coding Agent 后端可选 `effort` 思考力度字段，留空表示不传参、保持各 CLI 默认。各实现通过类属性 `supported_efforts` 声明自己的取值集合（Claude：low/medium/high/xhigh/max；Codex：minimal~xhigh；Pi：off~xhigh），由 `create_coding_agent_registry` 统一校验；OpenCode 的 variant 名由 provider 决定，`supported_efforts` 为 `None` 时不做枚举校验。保存接口必须先构建 registry 校验再写 `server.toml`，禁止把非法取值落盘导致服务重启失败。
 - OpenCode 使用由 Agent Bridge 按 run 管理的 server HTTP 模式；server 启动、就绪探测、SSE framing、请求和回收集中在 `opencode_server.py`，adapter 只负责 OpenCode V1 API 事件与统一事件模型的映射，便于未来替换 V2 client。
+- DSH 作为 Coding Agent 后端走标准 Agent Client Protocol：每次 run 启动独立、短生命周期的 `dsh --profile acp --patch <模型路由>` 进程（JSON-RPC over stdio），不解析 TUI 文本、不与 DSH Web Runtime 共享进程。模型路由必须经 run 目录中的 `--patch` 覆盖 `dsh-acp` 行（acp profile shipped 行钉死 deepseek-official，用户 settings.yaml 的默认模型不会覆盖它）；组级模型接入与 Linux 身份由 `dsh/agent_runtime.py` 统一解析并幂等注入用户级 `settings.yaml`，后台 run 不依赖 Web Runtime。全新 DSH_HOME 必须预创建标准子目录（sessions/storages/change-ledger/task-board），否则 provider 注册失败；DSH 侧 LLM provider 注册可能晚于 ACP 应答开始，adapter 对 `no adapter registered` 做退避重试。`.mcp.json` 在 adapter 内转换为 ACP `session/new` 的 stdio/HTTP MCP 声明（Profile 能力平面照常经 MetaMCP 网关），不得把 Profile 规则复制进 DSH。权限请求按无人值守语义自动放行（优先 allow_* 选项，沙箱仍由 DSH 执行）；取消走 `session/cancel` + stdin EOF 优雅退出。effort 为空集合（托管供应商路由不暴露 reasoning effort，配置即拒绝）；原始 ACP update 全量进 `messages.jsonl` 供诊断。
 - Mock 后端只能由显式 `type = "mock"` 使用，不得作为未知或缺失配置的静默回退。
 - CodeGraph CLI/MCP 是同一正式后端的两种调用通道，统一通过 `CodeGraphBackend` 使用。
 - 禁止为 CodeGraph 恢复 SQLite 隐式文本索引降级；后端缺失或索引未就绪必须明确失败。

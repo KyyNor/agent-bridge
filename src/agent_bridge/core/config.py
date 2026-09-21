@@ -151,6 +151,7 @@ class AgentBackendConfig:
     command: str | None = None
     # 思考力度按后端透传给具体 Coding Agent（claude --effort / opencode variant /
     # codex model_reasoning_effort / pi --thinking）；留空表示完全使用各 CLI 默认。
+    # dsh 的托管供应商路由当前不暴露 reasoning effort，配置该字段会被拒绝。
     effort: str | None = None
 
 
@@ -369,7 +370,7 @@ def load_agent_runtime_config(paths: AgentBridgePaths) -> AgentRuntimeConfig:
 
 
 _AGENT_BACKEND_SLUG_RE = re.compile(r"^[A-Za-z0-9_-]+$")
-_SUPPORTED_AGENT_TYPES = {"claude", "codex", "opencode", "pi"}
+_SUPPORTED_AGENT_TYPES = {"claude", "codex", "opencode", "pi", "dsh"}
 
 
 def save_agent_runtime_config(paths: AgentBridgePaths, config: AgentRuntimeConfig) -> AgentRuntimeConfig:
