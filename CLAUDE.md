@@ -236,9 +236,12 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
 - DSH 前端按 `<base href="/">` 以根绝对路径请求资源、插件模块与 `/api/**`
   （`/api/remote.mux` 是 WS 通道），因此 `workspace_escape_path` 会在前缀之外认领
   这些请求：HTTP 依据 `Referer: …/agent-workspace/…`，WebSocket 依据与请求 Host
-  同 authority 的 `Origin`（Agent Bridge 自身没有 WS 端点）。`RESERVED_PATH_PREFIXES`
-  （`/api/v1`、`/agent-bridge`、`/static/capabilities`、`/dashboard`、
-  `/memory-dashboard`、`/health`）永不参与逃逸路由。
+  同 authority 的 `Origin`（Agent Bridge 自身没有 WS 端点）。工作台内的嵌套文档
+  （插件 studio 等页面本身也服务在根路径下，如 `/ipollowork-design/studio/`）的
+  子资源与接口请求，Referer 已不在 `/agent-workspace/` 下，同 authority 且指向
+  非保留路径的 Referer 同样认领（外部站点因 authority 不同被排除）。
+  `RESERVED_PATH_PREFIXES`（`/api/v1`、`/agent-bridge`、`/static/capabilities`、
+  `/dashboard`、`/memory-dashboard`、`/health`）永不参与逃逸路由。
 - 上游 `Origin` 必须改写为目标 origin（DSH 的 `/api/**` 浏览器信任栅栏要求 Host
   为回环且 Origin 与之匹配）；会话 Cookie 原样透传（`Path=/`），不得收窄到
   `/agent-workspace`，否则根绝对路径请求与 WS 握手都拿不到会话。部分 DSH 插件

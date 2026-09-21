@@ -467,6 +467,20 @@ def test_workspace_escape_path_routing_rules() -> None:
     assert is_reserved_path("/health")
     assert not is_reserved_path("/api/session/list")
 
+    # 嵌套文档（插件 studio 等根路径下的页面）自身的子资源与接口请求：
+    # Referer 已不在 /agent-workspace/ 下，但同 authority、非保留路径仍归工作台。
+    studio_referer = "http://bridge.internal:8080/ipollowork-design/studio/"
+    studio_asset = "/ipollowork-design/studio/assets/index-DL8JJYJS.js"
+    assert workspace_escape_path(http_scope(studio_asset, studio_referer)) == studio_asset
+    assert workspace_escape_path(http_scope("/ipollowork-design/api/tree", studio_referer)) == "/ipollowork-design/api/tree"
+    # 外部站点的 Referer（authority 不同）不认领；保留路径的 Referer 不认领。
+    assert workspace_escape_path(http_scope(studio_asset, "http://evil.example/ipollowork-design/studio/")) is None
+    assert workspace_escape_path(http_scope(studio_asset, "http://bridge.internal:8080/agent-bridge/workspace/live")) is None
+    # Host 缺失（非常规请求）不认领嵌套文档请求。
+    assert workspace_escape_path(
+        {"type": "http", "method": "GET", "path": studio_asset, "headers": [(b"referer", studio_referer.encode())]}
+    ) is None
+
     # WebSocket 无 Referer：只认同源握手（Origin 与 Host 同 authority）
     ws_path = {"type": "websocket", "path": "/api/remote.mux", "headers": [(b"host", b"bridge.internal:8080")]}
     assert workspace_escape_path({**ws_path, "headers": [*ws_path["headers"], (b"origin", b"http://bridge.internal:8080")]}) == "/api/remote.mux"

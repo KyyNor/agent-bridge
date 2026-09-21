@@ -99,6 +99,10 @@ def workspace_escape_path(scope: Scope) -> str | None:
     路径请求，因此需要在前缀之外认领它们：
 
     - HTTP：这些请求由工作台页面发起，携带 ``Referer: …/agent-workspace/…``；
+      工作台内的嵌套文档（插件 studio 等页面本身也服务在根路径下，如
+      ``/ipollowork-design/studio/``）的子资源与接口请求，Referer 已不在
+      ``/agent-workspace/`` 下——同 authority 且指向非保留路径的 Referer
+      同样认领（外部站点因 authority 不同被排除）；
     - WebSocket：浏览器不发送 Referer（DSH 的 ``/api/remote.mux`` 只有同源
       ``Origin``），而 Agent Bridge 自身没有 WS 端点，因此同源 WS 归工作台。
 
@@ -114,10 +118,23 @@ def workspace_escape_path(scope: Scope) -> str | None:
     referer = _header_value(scope, "referer")
     if referer is None:
         return None
-    referer_path = urlsplit(referer).path
+    parsed = urlsplit(referer)
+    referer_path = parsed.path
     if referer_path == WORKSPACE_PROXY_PREFIX or referer_path.startswith(WORKSPACE_PROXY_PREFIX + "/"):
         return path
+    if _same_authority_referer(scope, parsed.netloc) and not is_reserved_path(referer_path or "/"):
+        return path
     return None
+
+
+def _same_authority_referer(scope: Scope, netloc: str) -> bool:
+    """Referer 与请求 Host 是否同 authority（防外部站点 Referer 触发转发）。"""
+    if not netloc:
+        return False
+    host = _header_value(scope, "host")
+    if not host:
+        return False
+    return netloc.lower() == host.lower()
 
 
 def _header_value(scope: Scope, name: str) -> str | None:
