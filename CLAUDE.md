@@ -120,9 +120,9 @@ Hook 审计（审计保留原始 prompt）。`profile use` 会自动、幂等安
 
 ## Coding Agent
 
-`CodingAgent` / `CodingAgentRun` 是统一契约，Claude、Codex、OpenCode、Pi 在 `agent_runtime/adapters/` 实现。`AgentService` 负责工作目录、Profile/MCP 配置、运行记录和事件持久化。
+`CodingAgent` / `CodingAgentRun` 是统一契约，Claude、Codex、OpenCode、Pi、DSH 在 `agent_runtime/adapters/` 实现。`AgentService` 负责工作目录、Profile/MCP 配置、运行记录和事件持久化。
 
-思考力度按后端配置（`server.toml` `[agents.<slug>]` 的 `effort`，管理后台 Coding Agent 配置区可编辑），各实现声明 `supported_efforts` 并由 registry 落盘前统一校验：Claude 走 SDK `effort`（low/medium/high/xhigh/max）、Codex 走 `-c model_reasoning_effort`（minimal~xhigh）、Pi 走 `--thinking`（off~xhigh）、OpenCode 走 message payload 的 `variant`（取值由 provider 决定，不做枚举校验）。留空时完全不传参，保持各 CLI 默认行为。
+思考力度按后端配置（`server.toml` `[agents.<slug>]` 的 `effort`，管理后台 Coding Agent 配置区可编辑），各实现声明 `supported_efforts` 并由 registry 落盘前统一校验：Claude 走 SDK `effort`（low/medium/high/xhigh/max）、Codex 走 `-c model_reasoning_effort`（minimal~xhigh）、Pi 走 `--thinking`（off~xhigh）、OpenCode 走 message payload 的 `variant`（取值由 provider 决定，不做枚举校验）、DSH 声明空集合（托管供应商路由不暴露 reasoning effort，配置即拒绝）。留空时完全不传参，保持各 CLI 默认行为。
 
 Agent 运行观测也走统一规范化事件流：工具事件包含 `input`/`output`（短内容内联，超过阈值落到运行目录 `payloads/` 并返回安全相对引用），工具结果包含 `started_at`、`finished_at` 和 `duration_ms`；运行准备、后端执行、收尾和总耗时以 `stage` 事件记录。SQLite 保存可查询的摘要和完整事件列表，JSONL 负责运行中的实时追加和原始消息留档。
 
@@ -146,6 +146,22 @@ Agent run 由 `adapters/opencode_server.py` 启动一个独立 server，等待�
 统一事件流；reasoning part 的 provider 文本进入阶段事件 `detail`，由运行目录 payload 规则
 负责长内容外置。结构化输出使用 OpenCode 的 `format.type=json_schema`，从
 `StructuredOutput` tool part 的 `state.input` 提取。
+
+DSH（DeepSeek Harness）通过标准 Agent Client Protocol 接入：每次 run 由
+`adapters/dsh.py` 以目标 Linux 用户身份启动独立、短生命周期的
+`dsh --profile acp --patch <模型路由>` 进程，JSON-RPC over stdio 完成
+initialize → session/new → session/prompt（流式 `session/update`）→ session/close，
+stdin EOF 即进程优雅退出。模型路由经 run 目录中的 `--patch` 覆盖 `dsh-acp` 行
+（acp profile 的 shipped 行钉死 deepseek-official，必须以后到 patch 显式指定托管供应商）；
+组级模型接入与 Linux 身份由 `dsh/agent_runtime.py` 的 resolver 从 DSH group 配置解析，
+并幂等注入用户级 `settings.yaml`（后台 run 不依赖 Web Runtime 是否启动）。
+`.mcp.json` 转换为 `session/new` 的 stdio/HTTP MCP 声明，Profile 能力平面照常经
+MetaMCP 网关生效；权限请求按无人值守语义自动放行（沙箱仍由 DSH 执行）。协议差异：
+无原生 JSON Schema（经 system prompt 回落）、无 USD 成本与 turn 计数、无子代理生命周期
+事件、reasoning 经 `agent_thought_chunk` 映射为 thinking 状态事件；原始 ACP update 全量
+进 `messages.jsonl`。DSH 侧 LLM provider 注册可能晚于 ACP 应答开始（启动竞态），adapter
+对 `no adapter registered` 做退避重试，resolver 预创建标准 HOME 子目录以规避全新目录
+下 provider 注册失败。
 
 Agent run 的 `events.jsonl` 是可重放事实来源。`AgentService` 必须先将带单 run 递增
 `event_id` 的事件 flush 到该文件，再交给进程内发布器分发给

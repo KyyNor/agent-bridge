@@ -48,6 +48,19 @@ def resolve_linux_identity(linux_user: str, passwd_lookup=None) -> LinuxIdentity
     )
 
 
+def demotion_kwargs(identity: LinuxIdentity) -> dict[str, object]:
+    """需要切换身份时构造 Popen 降权参数；无 root 权限且目标不同则拒绝。"""
+    current_uid = os.geteuid()
+    if identity.uid == current_uid:
+        return {}
+    if current_uid != 0:
+        raise AccessDenied(
+            f"Agent Bridge 需以 root 运行才能以 {identity.user} 身份启动 DSH"
+            f"（当前 euid={current_uid}）"
+        )
+    return {"user": identity.user, "group": identity.gid, "extra_groups": [identity.gid]}
+
+
 @runtime_checkable
 class DshProcessHandle(Protocol):
     """DSH Web 子进程句柄：可查询 pid 与退出码。"""
@@ -163,13 +176,4 @@ class PopenDshLauncher:
 
     @staticmethod
     def _demotion_kwargs(identity: LinuxIdentity) -> dict[str, object]:
-        """需要切换身份时构造 Popen 降权参数；无 root 权限且目标不同则拒绝。"""
-        current_uid = os.geteuid()
-        if identity.uid == current_uid:
-            return {}
-        if current_uid != 0:
-            raise AccessDenied(
-                f"Agent Bridge 需以 root 运行才能以 {identity.user} 身份启动 DSH Web"
-                f"（当前 euid={current_uid}）"
-            )
-        return {"user": identity.user, "group": identity.gid, "extra_groups": [identity.gid]}
+        return demotion_kwargs(identity)

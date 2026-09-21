@@ -66,6 +66,7 @@ const fixedAgentBackendDefs = [
   { slug: 'claude', type: 'claude', command: null as string | null, model: null as string | null, effort: null as string | null },
   { slug: 'opencode', type: 'opencode', command: 'opencode', model: null as string | null, effort: null as string | null },
   { slug: 'codex', type: 'codex', command: 'codex', model: null as string | null, effort: null as string | null },
+  { slug: 'dsh', type: 'dsh', command: 'dsh', model: null as string | null, effort: null as string | null },
 ]
 
 // Categories

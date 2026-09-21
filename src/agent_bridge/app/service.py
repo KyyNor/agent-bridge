@@ -252,13 +252,22 @@ class AgentBridgeService:
             governance=self.governance,
             access=self.access,
         )
+        from agent_bridge.dsh.agent_runtime import DshAgentRuntimeResolver
+        from agent_bridge.dsh.config import DshConfigService
+
+        self.dsh_configs = DshConfigService(store=store, admins=admins, access=self.access)
+        self.dsh_agent_runtime = DshAgentRuntimeResolver(
+            configs=self.dsh_configs, access=self.access
+        )
         agent_runtime_config = load_agent_runtime_config(paths)
         self.agents = AgentService(
             paths=paths,
             store=store,
             admins=admins,
             governance=self.governance,
-            coding_agents=create_coding_agent_registry(agent_runtime_config),
+            coding_agents=create_coding_agent_registry(
+                agent_runtime_config, dsh_runtime=self.dsh_agent_runtime
+            ),
         )
         self.codegraph = CodeGraphService(
             paths=paths,
@@ -347,10 +356,8 @@ class AgentBridgeService:
             governance=self.governance,
             keyword_extractor=OpenAIChatProbeKeywordExtractor(store=store, history=retrieval_probe_history),
         )
-        from agent_bridge.dsh.config import DshConfigService
         from agent_bridge.dsh.service import DshRuntimeService
 
-        self.dsh_configs = DshConfigService(store=store, admins=admins, access=self.access)
         self.dsh = DshRuntimeService(
             paths=paths,
             configs=self.dsh_configs,
@@ -1449,7 +1456,9 @@ class AgentBridgeService:
         try:
             # 先用候选配置构建 registry 完成 effort 枚举校验，全部通过后才落盘，
             # 避免非法取值写入 server.toml 导致服务重启失败。
-            registry = create_coding_agent_registry(normalize_agent_runtime_config(config))
+            registry = create_coding_agent_registry(
+                normalize_agent_runtime_config(config), dsh_runtime=self.dsh_agent_runtime
+            )
             saved = save_agent_runtime_config(self.paths, config)
         except ValueError as exc:
             raise ValidationError(str(exc)) from exc

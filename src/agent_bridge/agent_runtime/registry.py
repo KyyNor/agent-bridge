@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from agent_bridge.agent_runtime.adapters import ClaudeCodingAgent, CodexCodingAgent, OpenCodeCodingAgent, PiCodingAgent
+from agent_bridge.agent_runtime.adapters import (
+    ClaudeCodingAgent,
+    CodexCodingAgent,
+    DshCodingAgent,
+    OpenCodeCodingAgent,
+    PiCodingAgent,
+)
 from agent_bridge.agent_runtime.types import CodingAgent
 from agent_bridge.core.config import AgentBackendConfig, AgentRuntimeConfig, normalize_agent_runtime_config
 
@@ -39,19 +45,30 @@ def _validate_effort(backend: AgentBackendConfig, agent: CodingAgent) -> None:
     """按实现声明的取值集合校验 effort，避免非法值留到运行期才被 CLI 拒绝。
 
     ``supported_efforts`` 为 None 的实现（如 OpenCode 的 provider 相关 variant）
-    不做枚举校验，取值原样透传。
+    不做枚举校验，取值原样透传；空集合表示该实现完全不支持配置 effort
+    （如 DSH 的托管供应商路由不暴露 reasoning effort）。
     """
     if backend.effort is None:
         return
     supported = agent.supported_efforts
-    if supported is not None and backend.effort not in supported:
+    if supported is None:
+        return
+    if not supported:
+        raise ValueError(
+            f"Agent 后端 '{backend.slug}' 不支持配置思考力度，请留空以使用其默认值"
+        )
+    if backend.effort not in supported:
         raise ValueError(
             f"Agent 后端 '{backend.slug}' 不支持 effort 取值 {backend.effort!r}，"
             f"可选值：{', '.join(sorted(supported))}"
         )
 
 
-def create_coding_agent_registry(config: AgentRuntimeConfig | None = None) -> CodingAgentRegistry:
+def create_coding_agent_registry(
+    config: AgentRuntimeConfig | None = None,
+    *,
+    dsh_runtime: object | None = None,
+) -> CodingAgentRegistry:
     runtime_config = normalize_agent_runtime_config(config or AgentRuntimeConfig())
     registry = CodingAgentRegistry(default_backend=runtime_config.default_backend)
 
@@ -86,6 +103,13 @@ def create_coding_agent_registry(config: AgentRuntimeConfig | None = None) -> Co
                 command=backend.command or "pi",
                 model=backend.model,
                 thinking=backend.effort,
+            )
+        elif backend.agent_type == "dsh":
+            agent = DshCodingAgent(
+                backend_key=backend.slug,
+                command=backend.command or "dsh",
+                model=backend.model,
+                runtime=dsh_runtime,
             )
         else:
             raise UnknownCodingAgentError(
