@@ -693,3 +693,135 @@ def test_batched_delete_removes_all_rows_across_batches(service, retention) -> N
     assert summary["main_db"]["deleted"]["workflow_run_logs"] == total
     with service.store.connect() as conn:
         assert conn.execute("SELECT COUNT(*) FROM workflow_run_logs").fetchone()[0] == 0
+
+
+# -- review 修复回归：本地时区与首启迁移竞态 --
+
+
+def test_scheduler_uses_local_timezone(service) -> None:
+    """cleanup_time 按部署机器本地时间解释，与现有调度器语义一致。"""
+    from datetime import datetime
+
+    from agent_bridge.system_config.data_retention import DataRetentionScheduler
+
+    scheduler = DataRetentionScheduler(service.data_retention, service.store)
+    scheduler._refresh_jobs()
+    try:
+        job = scheduler._scheduler.get_job("data-retention-cleanup")
+        assert job is not None
+        # 本地时区语义：触发器时区解析出的当前偏移与本机一致，且绝不是 UTC。
+        local_offset = datetime.now().astimezone().utcoffset()
+        assert datetime.now(job.trigger.timezone).utcoffset() == local_offset
+        assert str(job.trigger.timezone) != "UTC"
+        assert datetime.now(scheduler._scheduler.timezone).utcoffset() == local_offset
+        # 触发器字段即配置的本地时刻（hour=22 / minute=0）。
+        fields = {field.name: field for field in job.trigger.fields}
+        assert str(fields["hour"].expressions[0]) == "22"
+        assert str(fields["minute"].expressions[0]) == "0"
+    finally:
+        if scheduler._scheduler is not None:
+            scheduler._scheduler.remove_all_jobs()
+
+
+def test_run_daily_cleanup_skips_when_lock_held(service, retention) -> None:
+    """锁被占时日常清理返回 skipped（非阻塞语义）。"""
+    assert retention._run_lock.acquire(blocking=False)
+    try:
+        result = retention.run_daily_cleanup()
+        assert result == {"skipped": "already_running"}
+    finally:
+        retention._run_lock.release()
+    # 锁释放后可正常执行。
+    assert "skipped" not in retention.run_daily_cleanup()
+
+
+def test_first_upgrade_never_marks_done_on_skipped_cleanup(service, retention, monkeypatch) -> None:
+    """skipped 不是成功：即使阻塞路径意外返回 skipped，也不写 cleanup marker。"""
+    monkeypatch.setattr(
+        retention,
+        "_run_cleanup_blocking",
+        lambda: {"skipped": "already_running"},
+    )
+    with pytest.raises(RuntimeError):
+        retention.run_first_upgrade()
+    with service.store.connect() as conn:
+        row = conn.execute(
+            "SELECT value FROM data_retention_meta WHERE key = 'retention_v1.cleanup'"
+        ).fetchone()
+    assert row is None
+
+
+def test_first_upgrade_blocks_until_concurrent_cleanup_releases(service, retention) -> None:
+    """首启迁移阻塞等待并发的清理锁，等锁后真实执行并落 marker。"""
+    import threading
+
+    executed: list[bool] = []
+    original_execute = retention._execute_cleanup
+
+    def _slow_execute() -> dict:
+        # 持锁执行期间记录并发可见性，模拟一轮慢清理。
+        executed.append(True)
+        return original_execute()
+
+    retention._execute_cleanup = _slow_execute  # type: ignore[method-assign]
+    release = threading.Event()
+    holder_started = threading.Event()
+
+    def _hold_lock() -> None:
+        retention._run_lock.acquire()
+        try:
+            holder_started.set()
+            release.wait(timeout=5.0)
+        finally:
+            retention._run_lock.release()
+
+    holder = threading.Thread(target=_hold_lock)
+    holder.start()
+    assert holder_started.wait(timeout=2.0)
+
+    result: dict = {}
+    error: list[Exception] = []
+
+    def _run_upgrade() -> None:
+        try:
+            result.update(retention.run_first_upgrade())
+        except Exception as exc:
+            error.append(exc)
+
+    upgrade = threading.Thread(target=_run_upgrade)
+    upgrade.start()
+    # 迁移必须等待持锁方释放，而不是立刻以 skipped 完成。
+    upgrade.join(timeout=0.5)
+    assert upgrade.is_alive()
+    with service.store.connect() as conn:
+        row = conn.execute(
+            "SELECT value FROM data_retention_meta WHERE key = 'retention_v1.cleanup'"
+        ).fetchone()
+    assert row is None
+
+    release.set()
+    holder.join(timeout=2.0)
+    upgrade.join(timeout=10.0)
+    assert not error
+    assert executed  # 等锁后真实执行了清理
+    assert "cleanup" in result.get("stages", {})
+    with service.store.connect() as conn:
+        row = conn.execute(
+            "SELECT value FROM data_retention_meta WHERE key = 'retention_v1.cleanup'"
+        ).fetchone()
+    assert row is not None and row["value"] == "done"
+
+
+def test_first_upgrade_cleanup_failure_leaves_no_marker(service, retention, monkeypatch) -> None:
+    """清理中途失败：marker 不落，下次启动重试。"""
+    def _failing_execute() -> dict:
+        raise RuntimeError("cleanup exploded")
+
+    monkeypatch.setattr(retention, "_execute_cleanup", _failing_execute)
+    with pytest.raises(RuntimeError):
+        retention.run_first_upgrade()
+    with service.store.connect() as conn:
+        row = conn.execute(
+            "SELECT value FROM data_retention_meta WHERE key = 'retention_v1.cleanup'"
+        ).fetchone()
+    assert row is None

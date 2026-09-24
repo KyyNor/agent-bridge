@@ -157,45 +157,58 @@ class DataRetentionService:
         return resolve_retention_config(self._store.get_sync_config())
 
     def run_daily_cleanup(self) -> dict[str, Any]:
-        """执行一轮完整生命周期清理（日常路径：只 DELETE + checkpoint，不 VACUUM）。"""
+        """执行一轮完整生命周期清理（日常路径：只 DELETE + checkpoint，不 VACUUM）。
+
+        非阻塞：已有清理在执行时返回 ``{"skipped": "already_running"}``，由调用
+        方决定是否重试；首次升级迁移走 :meth:`_run_cleanup_blocking` 等锁。
+        """
         if not self._run_lock.acquire(blocking=False):
             logger.warning("数据生命周期清理已在执行中，本次触发跳过")
             return {"skipped": "already_running"}
         try:
-            started = time.monotonic()
-            config = self.retention_config()
-            detail_days = config["detail_days"]
-            history_days = config["history_days"]
-            detail_cutoff = _cutoff_stamp(detail_days)
-            history_cutoff = _cutoff_stamp(history_days)
-            logger.info(
-                "数据生命周期清理开始 detail_days=%s history_days=%s",
-                detail_days,
-                history_days,
-            )
-            logs_summary = self._cleanup_logs_db(detail_cutoff, history_cutoff)
-            main_summary = self._cleanup_main_db(detail_cutoff, history_cutoff)
-            dirs_summary = self._cleanup_disk_dirs(detail_days, history_days)
-            checkpoint = self._checkpoint_databases()
-            summary = {
-                "config": config,
-                "logs_db": logs_summary,
-                "main_db": main_summary,
-                "dirs": dirs_summary,
-                "checkpoint": checkpoint,
-                "duration_seconds": round(time.monotonic() - started, 3),
-            }
-            logger.info(
-                "数据生命周期清理完成 耗时=%.1fs 删除=%s 瘦身=%s 目录=%s checkpoint=%s",
-                summary["duration_seconds"],
-                {**logs_summary["deleted"], **main_summary["deleted"]},
-                {**logs_summary["slimmed"], **main_summary["slimmed"]},
-                dirs_summary,
-                checkpoint,
-            )
-            return summary
+            return self._execute_cleanup()
         finally:
             self._run_lock.release()
+
+    def _run_cleanup_blocking(self) -> dict[str, Any]:
+        """阻塞等待锁并执行清理；供首次升级迁移使用，绝不以 skipped 结束。"""
+        with self._run_lock:
+            return self._execute_cleanup()
+
+    def _execute_cleanup(self) -> dict[str, Any]:
+        """执行一轮清理；调用方必须已持有 ``_run_lock``。"""
+        started = time.monotonic()
+        config = self.retention_config()
+        detail_days = config["detail_days"]
+        history_days = config["history_days"]
+        detail_cutoff = _cutoff_stamp(detail_days)
+        history_cutoff = _cutoff_stamp(history_days)
+        logger.info(
+            "数据生命周期清理开始 detail_days=%s history_days=%s",
+            detail_days,
+            history_days,
+        )
+        logs_summary = self._cleanup_logs_db(detail_cutoff, history_cutoff)
+        main_summary = self._cleanup_main_db(detail_cutoff, history_cutoff)
+        dirs_summary = self._cleanup_disk_dirs(detail_days, history_days)
+        checkpoint = self._checkpoint_databases()
+        summary = {
+            "config": config,
+            "logs_db": logs_summary,
+            "main_db": main_summary,
+            "dirs": dirs_summary,
+            "checkpoint": checkpoint,
+            "duration_seconds": round(time.monotonic() - started, 3),
+        }
+        logger.info(
+            "数据生命周期清理完成 耗时=%.1fs 删除=%s 瘦身=%s 目录=%s checkpoint=%s",
+            summary["duration_seconds"],
+            {**logs_summary["deleted"], **main_summary["deleted"]},
+            {**logs_summary["slimmed"], **main_summary["slimmed"]},
+            dirs_summary,
+            checkpoint,
+        )
+        return summary
 
     def run_first_upgrade(self) -> dict[str, Any]:
         """首次升级迁移：历史清理 + 一次性 VACUUM，按阶段 marker 幂等恢复。"""
@@ -208,7 +221,13 @@ class DataRetentionService:
             # 迁移为对应 history_days，避免新默认悄悄改变已有保留语义。
             self._migrate_legacy_log_retention()
             started = time.monotonic()
-            cleanup = self.run_daily_cleanup()
+            # 阻塞等待清理完成（绝不把 skipped 当成功）：只有真实执行完一轮
+            # 清理才允许落 cleanup marker，否则中途失败下次启动重试。
+            cleanup = self._run_cleanup_blocking()
+            if cleanup.get("skipped"):
+                raise RuntimeError(
+                    "数据生命周期首次升级清理未执行完成（skipped），不写入 marker"
+                )
             self._set_marker(RETENTION_V1_CLEANUP_MARKER, "done")
             summary["stages"]["cleanup"] = {
                 "duration_seconds": cleanup.get("duration_seconds"),
@@ -834,15 +853,18 @@ class DataRetentionScheduler:
             return
         hour, minute = cleanup_time.split(":", 1)
         if self._scheduler is None:
+            # 不指定 timezone：与 BaseCronScheduler / Workflow 窗口调度一致，
+            # APScheduler 默认部署机器本地时区——配置的 22:00 即本地 22:00。
             self._scheduler = BackgroundScheduler(
-                timezone="UTC", job_defaults={"coalesce": True, "max_instances": 1}
+                job_defaults={"coalesce": True, "max_instances": 1}
             )
         if self._cleanup_time == cleanup_time and self._scheduler.get_job("data-retention-cleanup"):
             return
         self._scheduler.remove_all_jobs()
         self._scheduler.add_job(
             self._run_cleanup,
-            CronTrigger(hour=int(hour), minute=int(minute), timezone="UTC"),
+            # 触发器同样不指定时区：cleanup_time 按本地时间解释。
+            CronTrigger(hour=int(hour), minute=int(minute)),
             id="data-retention-cleanup",
             name="数据生命周期清理",
         )
