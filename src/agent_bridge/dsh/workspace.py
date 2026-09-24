@@ -61,13 +61,18 @@ MCP_SERVER_NAME = "agent-bridge"
 
 @dataclass(frozen=True)
 class DshWorkspaceCapability:
-    """绑定业务用户、能力平面与数据归属组的短期访问能力。"""
+    """绑定业务用户、能力平面与数据归属组的访问能力。
+
+    ``expires_at_monotonic`` 为 ``None`` 表示不设独立过期，生命周期完全由
+    registry 记账槽位决定（共享 Runtime 的稳定 capability 用此模式，随
+    runtime 停止/回收显式撤销）；个人 Workspace 仍是 24 小时 TTL。
+    """
 
     token: str
     user_id: str
     profile_key: str
     owner_group_key: str
-    expires_at_monotonic: float
+    expires_at_monotonic: float | None
 
 
 @dataclass(frozen=True)
@@ -98,7 +103,7 @@ class DshWorkspaceCapabilityRegistry:
         user_id: str,
         profile_key: str,
         owner_group_key: str,
-        ttl_seconds: int = DEFAULT_CAPABILITY_TTL_SECONDS,
+        ttl_seconds: int | None = DEFAULT_CAPABILITY_TTL_SECONDS,
         key: str | None = None,
     ) -> DshWorkspaceCapability:
         """签发 capability；``key`` 为记账槽位（默认 ``user_id``）。
@@ -106,6 +111,7 @@ class DshWorkspaceCapabilityRegistry:
         ``capability.user_id`` 始终是调用方传入的审计身份（共享 Runtime 传
         Linux 用户）；``key`` 只决定替换/撤销的槽位——共享 Runtime 使用
         ``shared-runtime:<linux-user>`` 槽位，成员的个人签发不会触达它。
+        ``ttl_seconds=None`` 表示不设独立过期（绑定 runtime 生命周期）。
         """
         if not user_id or not profile_key or not owner_group_key:
             raise AccessDenied("DSH Workspace capability 缺少用户、能力平面或归属组")
@@ -115,7 +121,9 @@ class DshWorkspaceCapabilityRegistry:
             user_id=user_id,
             profile_key=profile_key,
             owner_group_key=owner_group_key,
-            expires_at_monotonic=time.monotonic() + max(1, ttl_seconds),
+            expires_at_monotonic=(
+                time.monotonic() + max(1, ttl_seconds) if ttl_seconds is not None else None
+            ),
         )
         registry_key = key or user_id
         with self._lock:
@@ -132,7 +140,11 @@ class DshWorkspaceCapabilityRegistry:
     ) -> DshWorkspaceCapability:
         with self._lock:
             capability = self._items.get(token)
-            if capability is not None and capability.expires_at_monotonic <= time.monotonic():
+            if (
+                capability is not None
+                and capability.expires_at_monotonic is not None
+                and capability.expires_at_monotonic <= time.monotonic()
+            ):
                 self._drop(capability)
                 capability = None
         if capability is None:

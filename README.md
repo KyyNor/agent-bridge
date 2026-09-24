@@ -152,9 +152,11 @@ node-pty 的能力（如 dsh-better-sidebar 的终端）由插件自身降级并
 （该选择成为本次共享 Runtime 的 active profile）；已运行时后续成员直接进入
 现有 Runtime、能力平面锁定只读，不会因平面不同并行启动第二个进程；空闲回收
 或显式停止后，下次进入重新允许选择。共享工作台的 MCP 注入使用 **runtime 级
-稳定 capability**（绑定 Linux 用户 + active profile，共享 MCP 调用以共享
-runtime/Linux 用户身份审计）：后续成员进入只校验 active profile 权限，不改写
-注入配置；个人工作台的 capability 与共享的互不影响。任一成员的访问都刷新
+稳定 capability**（绑定 Linux 用户 + active profile，不设独立过期、随 Runtime
+生命周期撤销/重建，共享 MCP 调用以共享 runtime/Linux 用户身份审计）：后续成员
+进入只校验 active profile 权限，不改写注入配置；Agent Bridge 重启时存活的共享
+实例会被安全停止（capability 不跨进程复用），下次进入按原 active profile 重新
+启动并重建注入；个人工作台的 capability 与共享的互不影响。任一成员的访问都刷新
 共享 Runtime 的空闲时间；目标只能由当前业务用户所属小组映射的 Linux 用户
 推导，无法访问他人小组的共享 Runtime。共享 Runtime 正在注入能力平面时，
 无该平面权限的成员会被拒绝进入。

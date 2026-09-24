@@ -236,7 +236,10 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
 - 空闲回收是服务内守护线程（默认 720 分钟 = 12 小时阈值，随全局配置读取；
   升级只改默认值、不覆盖已显式保存的配置），严格按 `last_access_at`（最后一次
   实际访问/操作）判断，进入/代理/保活都刷新；app lifespan 启动 `dsh.start()`，
-  装配期 `recover()` 识别遗留实例（含共享），停止期 `stop_all()`。
+  装配期 `recover()` 识别遗留实例：个人存活实例保留，**存活的共享实例直接
+  安全停止并清理 state/patch**（共享 capability 只在 Agent Bridge 进程内存，
+  patch 里的 token 跨进程必然失效），让首位成员下次进入时按 active profile
+  重新启动；停止期 `stop_all()`。
 - 管理接口（组配置、全局配置、实例列表）仅 admins；用户态接口只暴露状态，不
   暴露动态端口与 pid。
 - Workspace 反向代理位于 `api/workspace_proxy.py`：`/agent-workspace/**`（个人）
@@ -290,10 +293,12 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
   重启。共享 Runtime 使用 **runtime 级稳定 capability**：启动时按
   ``linux_user + active_profile`` 签发（registry 槽位 ``shared-runtime:<linux-user>``，
   ``capability.user_id`` = Linux 用户，MCP 调用以共享 runtime/Linux 用户身份
-  审计），后续成员进入只校验 active profile 权限、不重签发、不重写覆盖文件；
-  capability 随 runtime 停止/回收一并撤销并移除覆盖文件。共享与个人 capability
-  记账槽位互相隔离：成员的个人签发/撤销（含进入/停止另一 scope）不会使共享
-  capability 失效，反之亦然。
+  审计），**不设独立过期**（绑定 runtime 生命周期，持续活跃的 runtime 不会
+  因固定 TTL 到期而失去 MCP），后续成员进入只校验 active profile 权限、不重
+  签发、不重写覆盖文件；capability 随 runtime 停止/回收/重启一并撤销并在重启
+  时按原 active profile 重签重建 patch。共享与个人 capability 记账槽位互相
+  隔离：成员的个人签发/撤销（含进入/停止另一 scope）不会使共享 capability
+  失效，反之亦然。个人 capability 仍是 24 小时 TTL。
 
 ## 工作流
 

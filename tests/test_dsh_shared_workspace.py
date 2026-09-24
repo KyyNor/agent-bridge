@@ -426,31 +426,135 @@ def test_personal_and_shared_runtimes_fully_isolated(service, home, passwd_looku
     assert shared_state["profile_key"] is None
 
 
-def test_recover_and_list_include_shared_states(service, home, passwd_lookup, monkeypatch) -> None:
+def test_recover_stops_alive_shared_runtime_and_clears_patch(
+    service, home, passwd_lookup, monkeypatch
+) -> None:
+    """Agent Bridge 重启 recover：存活 shared runtime 安全停止并清理 state/patch。"""
+    from agent_bridge.app.service import AgentBridgeService
+    from agent_bridge.dsh.service import DshRuntimeService
+    from agent_bridge.dsh.workspace import mcp_overlay_path
+
     configure_group(service)
     launcher = install_fakes(service, home, passwd_lookup, monkeypatch)
     service.dsh.authorize_workspace("user1", profile_key="safe")
     service.dsh.authorize_workspace("user1", profile_key="safe", scope="shared")
+    shared_config_dir = home / "groupa" / ".config" / "dsh" / "groupa"
+    overlay_path = mcp_overlay_path(shared_config_dir)
+    assert overlay_path.exists()
+    shared_state = json.loads(shared_state_path(service).read_text(encoding="utf-8"))
 
-    listing = service.dsh.list_runtimes("root")
-    scopes = {item["scope"] for item in listing}
-    assert scopes == {"personal", "shared"}
+    # 模拟服务重启：新进程 registry 为空，状态文件与 DSH patch 仍在；旧进程的
+    # 两个 DSH 进程仍存活（类级 patch 使 create 内部的 recover 按存活处理）。
+    terminated: list[int] = []
+    monkeypatch.setattr(DshRuntimeService, "_pid_alive", staticmethod(lambda pid: True))
+    monkeypatch.setattr(
+        DshRuntimeService,
+        "_terminate_pid",
+        lambda self, pid, *, grace_seconds: terminated.append(pid) or True,
+    )
+    restarted = AgentBridgeService.create(service.paths, {"root"})
 
-    # 个人实例退出、共享实例存活：recover 只清失效状态
-    dead_pid = launcher.starts[0]["pid"]
-    launcher.starts[0]["pid"] = dead_pid  # keep reference
+    # create 内的 recover：shared 被停止并清理 state/patch，个人存活实例保留。
+    assert terminated == [shared_state["pid"]]
+    assert not shared_state_path(service).exists()
+    assert not overlay_path.exists()
+    assert restarted.dsh._state_path("personal", "user1").exists()
+    # 再次 recover 幂等：shared 已清理、个人仍保留、无死 token 残留。
+    assert restarted.dsh.recover() == {"kept": 1, "cleaned": 0, "stopped_shared": 0}
+
+    # 首位成员重新进入：按新选择重新签发 capability 并重建 patch。
+    launcher2 = install_fakes(restarted, home, passwd_lookup, monkeypatch)
+    relaunched = restarted.dsh.authorize_workspace("user2", profile_key="wide", scope="shared")
+    assert relaunched["profile_key"] == "wide"
+    assert len(launcher2.starts) == 1
+    overlay = yaml.safe_load(overlay_path.read_text(encoding="utf-8"))
+    entry = overlay[0]["insert"][0]
+    assert entry["config"]["headers"]["X-Agent-Bridge-MetaMCP-Profile"] == "wide"
+    token = entry["config"]["headers"]["X-Agent-Bridge-DSH-Capability"]
+    assert restarted.dsh.capabilities.require(token, profile_key="wide").user_id == "groupa"
+
+
+def test_shared_runtime_capability_never_expires_while_runtime_alive(
+    service, home, passwd_lookup, monkeypatch
+) -> None:
+    """共享 capability 绑定 runtime 生命周期：持续活跃远超 24h/30d 也不失效。"""
+    configure_group(service)
+    install_fakes(service, home, passwd_lookup, monkeypatch)
+    service.dsh.authorize_workspace("user1", profile_key="safe", scope="shared")
+
+    overlay = yaml.safe_load(
+        (home / "groupa" / ".config" / "dsh" / "groupa" / "agent-bridge-mcp.patch.yml")
+        .read_text(encoding="utf-8")
+    )
+    token = overlay[0]["insert"][0]["config"]["headers"]["X-Agent-Bridge-DSH-Capability"]
+    capability = service.dsh.capabilities.require(token, profile_key="safe")
+    # 不设独立过期（绑定 runtime 生命周期，随停止显式撤销）。
+    assert capability.expires_at_monotonic is None
+
+    # 把单调时钟推进 400 天：持续活跃的共享 runtime 依旧可用。
+    now = {"monotonic": time.monotonic()}
+    monkeypatch.setattr("agent_bridge.dsh.workspace.time.monotonic", lambda: now["monotonic"])
+    now["monotonic"] += 400 * 24 * 60 * 60
+    assert service.dsh.capabilities.require(token, profile_key="safe").user_id == "groupa"
+
+    # 个人 capability 仍按 24h TTL 过期（不受共享改动影响）。
+    service.dsh.authorize_workspace("user1", profile_key="safe")
+    personal_overlay = yaml.safe_load(
+        (home / "groupa" / ".config" / "dsh" / "user1" / "agent-bridge-mcp.patch.yml")
+        .read_text(encoding="utf-8")
+    )
+    personal_token = personal_overlay[0]["insert"][0]["config"]["headers"]["X-Agent-Bridge-DSH-Capability"]
+    now["monotonic"] += 25 * 60 * 60
+    with pytest.raises(Exception):
+        service.dsh.capabilities.require(personal_token, profile_key="safe")
+    # 共享 capability 不因时间流逝失效（仅随 runtime 停止撤销）。
+    assert service.dsh.capabilities.require(token, profile_key="safe") is not None
+
+
+def test_shared_unhealthy_restart_keeps_active_profile_and_mcp(
+    service, home, passwd_lookup, monkeypatch
+) -> None:
+    """shared unhealthy 自动重启：保留 active profile，重签 capability 并重建 patch。"""
+    from agent_bridge.dsh.workspace import mcp_overlay_path
+
+    configure_group(service)
+    launcher = install_fakes(service, home, passwd_lookup, monkeypatch)
+    service.dsh.authorize_workspace("user1", profile_key="safe", scope="shared")
+    first_port = launcher.starts[0]["port"]
+    config_dir = home / "groupa" / ".config" / "dsh" / "groupa"
+    overlay_path = mcp_overlay_path(config_dir)
+    old_token = yaml.safe_load(overlay_path.read_text(encoding="utf-8"))[0]["insert"][0]["config"]["headers"][
+        "X-Agent-Bridge-DSH-Capability"
+    ]
+
+    # 进程存活但端口不健康，且已超过启动探测窗口 → 判定 unhealthy 并回收重启。
+    # 重启可能复用同一端口，探针按“首个进程”判定：重启出第二个进程后即健康。
+    state_path = shared_state_path(service)
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["started_at"] = time.time() - 3600
+    state_path.write_text(json.dumps(state), encoding="utf-8")
     monkeypatch.setattr(
         service.dsh,
-        "_pid_alive",
-        staticmethod(
-            lambda pid: pid != dead_pid
-            and any(start["pid"] == pid for start in launcher.starts)
-        ),
+        "_probe_port",
+        staticmethod(lambda port: not (port == first_port and len(launcher.starts) == 1)),
     )
-    result = service.dsh.recover()
-    assert result == {"kept": 1, "cleaned": 1}
-    assert not service.dsh._state_path("personal", "user1").exists()
-    assert shared_state_path(service).exists()
+
+    # 后续成员进入触发 ensure_running；重启后必须仍是 safe 平面且 MCP 可用。
+    result = service.dsh.authorize_workspace("user2", profile_key="wide", scope="shared")
+    assert result["profile_key"] == "safe"
+    assert result["status"] == "running"
+    assert len(launcher.starts) == 2
+    restarted_state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert restarted_state["pid"] == launcher.starts[1]["pid"]
+    assert restarted_state["profile_key"] == "safe"
+    # patch 重建为新 capability（旧 token 已随回收撤销）。
+    new_token = yaml.safe_load(overlay_path.read_text(encoding="utf-8"))[0]["insert"][0]["config"][
+        "headers"
+    ]["X-Agent-Bridge-DSH-Capability"]
+    assert new_token != old_token
+    with pytest.raises(Exception):
+        service.dsh.capabilities.require(old_token, profile_key="safe")
+    assert service.dsh.capabilities.require(new_token, profile_key="safe").user_id == "groupa"
 
 
 # -- 代理路由 --

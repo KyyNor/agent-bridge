@@ -43,7 +43,6 @@ from agent_bridge.core.timeutil import utc_iso
 from agent_bridge.dsh import injection
 from agent_bridge.dsh import plugins
 from agent_bridge.dsh.agent_runtime import dsh_binary_from_command
-from agent_bridge.dsh.config import MAX_IDLE_TIMEOUT_MINUTES
 from agent_bridge.dsh.launcher import (
     DshProcessLauncher,
     LinuxIdentity,
@@ -236,11 +235,51 @@ class DshRuntimeService:
                 normalized_user,
                 group_key,
                 config,
-                workspace=workspace,
+                workspace=self._resume_shared_workspace(state, scope, group_key, linux_user, workspace),
                 scope=scope,
                 runtime_key=runtime_key,
             )
             return self._public_status(self._compute_status(scope, runtime_key, group_key))
+
+    def _resume_shared_workspace(
+        self,
+        state: dict[str, Any] | None,
+        scope: str,
+        group_key: str,
+        linux_user: str,
+        workspace: WorkspaceSelection | None,
+    ) -> WorkspaceSelection | None:
+        """共享 Runtime 重启（进程退出/unhealthy 回收）时恢复 active profile。
+
+        共享实例的 MCP 注入是 runtime 级配置：重启前若已有 active profile，
+        必须按原 profile 重新签发 runtime capability 并重建 patch，否则会
+        以无 MCP 状态启动。调用点必须在 ``_stop_state``（撤销旧 capability）
+        之后——重签使用同一记账槽位，先撤销后签发。
+        """
+        if (
+            scope != WORKSPACE_SCOPE_SHARED
+            or workspace is not None
+            or state is None
+        ):
+            return workspace
+        profile = str(state.get("profile_key") or "")
+        if not profile:
+            return WorkspaceSelection(profile_key=None)
+        # 归属组沿用启动该实例时的组（可能与本成员当前组不同，审计保持一致）。
+        owner_group_key = str(state.get("group_key") or group_key)
+        capability = self.capabilities.issue(
+            user_id=linux_user,
+            profile_key=profile,
+            owner_group_key=owner_group_key,
+            ttl_seconds=None,
+            key=shared_runtime_capability_key(linux_user),
+        )
+        logger.info(
+            "DSH 共享 Runtime 重启恢复 active profile shared=%s profile=%s",
+            linux_user,
+            profile,
+        )
+        return WorkspaceSelection(profile_key=profile, capability=capability)
 
     def authorize_workspace(
         self,
@@ -361,9 +400,10 @@ class DshRuntimeService:
                     user_id=linux_user,
                     profile_key=str(effective_profile),
                     owner_group_key=group_key,
-                    # 覆盖共享 Runtime 可能的最长存活期（idle 上限 30 天）；
-                    # 停止/回收时显式撤销。
-                    ttl_seconds=MAX_IDLE_TIMEOUT_MINUTES * 60,
+                    # 不设独立过期：capability 绑定共享 Runtime 生命周期，
+                    # 随停止/回收/重启显式撤销重签，持续活跃的 runtime 不会
+                    # 因固定 TTL 到期而突然失去 MCP。
+                    ttl_seconds=None,
                     key=shared_runtime_capability_key(linux_user),
                 )
                 workspace: WorkspaceSelection | None = WorkspaceSelection(
@@ -1249,14 +1289,36 @@ class DshRuntimeService:
         return stopped
 
     def recover(self) -> dict[str, Any]:
-        """服务启动期识别上一进程遗留的 runtime 实例并清理失效状态。"""
+        """服务启动期识别上一进程遗留的 runtime 实例并清理失效状态。
+
+        共享 Runtime 的稳定 capability 只存在于 Agent Bridge 进程内存，
+        而 DSH patch 里的 token 持久留在 DSH_HOME：跨进程恢复的共享实例
+        必然持有死 token（MCP 请求全部无效），且后续成员进入不会重签。
+        因此对存活共享实例直接安全停止并清理 state/patch，让首位成员下次
+        进入时重新按 active profile 启动并生成新 capability；个人实例维持
+        「存活保留」语义（个人 capability 本就随进程内存失效，重进会重签）。
+        """
         kept = 0
         cleaned = 0
+        stopped_shared = 0
         with self._lock:
             for state in self._all_states():
                 scope = str(state.get("scope") or WORKSPACE_SCOPE_PERSONAL)
                 runtime_key = str(state.get("user_id") or "")
-                if self._pid_alive(int(state.get("pid") or 0)):
+                alive = self._pid_alive(int(state.get("pid") or 0))
+                if scope == WORKSPACE_SCOPE_SHARED:
+                    # _stop_state 会撤销 capability 并移除共享 patch 覆盖文件。
+                    self._stop_state(state, scope, runtime_key)
+                    stopped_shared += 1
+                    logger.info(
+                        "DSH 共享 Runtime 遗留实例已回收（token 不可跨进程复用，待成员重新进入）"
+                        " shared=%s pid=%s alive=%s",
+                        runtime_key,
+                        state.get("pid"),
+                        alive,
+                    )
+                    continue
+                if alive:
                     kept += 1
                     logger.info(
                         "识别到存活的 DSH Runtime 遗留实例 scope=%s runtime=%s pid=%s port=%s",
@@ -1274,7 +1336,7 @@ class DshRuntimeService:
                         runtime_key,
                         state.get("pid"),
                     )
-        return {"kept": kept, "cleaned": cleaned}
+        return {"kept": kept, "cleaned": cleaned, "stopped_shared": stopped_shared}
 
     def stop_all(self) -> dict[str, Any]:
         """服务停止期回收全部实例（含共享）；用户 DSH 配置与 session 数据保留。"""

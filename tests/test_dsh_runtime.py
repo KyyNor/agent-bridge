@@ -1073,7 +1073,7 @@ def test_recover_cleans_dead_and_keeps_alive(service, monkeypatch) -> None:
             },
         )
     result = service.dsh.recover()
-    assert result == {"kept": 1, "cleaned": 1}
+    assert result == {"kept": 1, "cleaned": 1, "stopped_shared": 0}
     assert service.dsh._read_state("personal", "user1") is not None
     assert service.dsh._read_state("personal", "user2") is None
 
