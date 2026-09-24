@@ -55,10 +55,16 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
         """应用生命周期：初始化存储、对齐后端、后台刷新托管插件、启动调度器，停止时逆序收尾。"""
         logger.info("Agent Bridge 服务启动 root=%s", resolved_paths.root)
         service.store.init_schema()
-        service.store.set_runtime_log_retention_days(int(service.store.get_sync_config().get("log_retention_days") or 180))
-        deleted_logs = service.store.prune_runtime_logs(force=True)
-        if any(deleted_logs.values()):
-            logger.info("运行日志清理完成 tool_call_logs=%d agent_runs=%d", deleted_logs["tool_call_logs"], deleted_logs["agent_runs"])
+
+        # 数据生命周期 v1 首次升级迁移（历史清理 + 一次性 VACUUM，marker 幂等）：
+        # 大库清理/VACUUM 可能耗时较长，放后台线程执行，不阻塞 /health 就绪。
+        async def _run_data_retention_bootstrap() -> None:
+            try:
+                await asyncio.to_thread(service.data_retention.run_first_upgrade)
+            except Exception:
+                logger.error("数据生命周期首次升级迁移失败，将在下次启动重试", exc_info=True)
+
+        asyncio.create_task(_run_data_retention_bootstrap())
         try:
             service.align_backends()
         except Exception:
@@ -92,10 +98,11 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
         service.plugin_update_scheduler.start()
         service.doc_sync_scheduler.start()
         service.workflow_scheduler.start()
+        service.data_retention_scheduler.start()
         service.dsh.start()
         asyncio.create_task(service.business_ledgers.load_all_async())
         logger.info(
-            "调度器已启动 codegraph/understand/plugin_update/doc_sync/workflow/dsh"
+            "调度器已启动 codegraph/understand/plugin_update/doc_sync/workflow/data_retention/dsh"
         )
         yield
         logger.info("Agent Bridge 服务停止 root=%s", resolved_paths.root)
@@ -117,6 +124,7 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
         service.plugin_update_scheduler.stop()
         service.doc_sync_scheduler.stop()
         service.workflow_scheduler.stop()
+        service.data_retention_scheduler.stop()
         logger.info("Agent Bridge 服务已停止")
 
     app = FastAPI(title="Agent Bridge", docs_url=None, openapi_url=None, redoc_url=None, lifespan=lifespan)

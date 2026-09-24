@@ -1346,7 +1346,9 @@ export interface KnowledgeSyncConfig {
   workflow_max_concurrent_runs_per_workflow: number
   workflow_max_runtime_minutes: number
   workflow_task_rerun_days: number
-  log_retention_days: number
+  retention_detail_days: number
+  retention_history_days: number
+  retention_cleanup_time: string
   mcp_timeout_seconds: number
   understand_timeout_minutes: number
   artifact_search_cache_ttl_hours: number
@@ -1594,6 +1596,10 @@ export interface SchedulerStatus {
   understand: SingleSchedulerStatus
   plugin_update: SingleSchedulerStatus
   doc_sync: SingleSchedulerStatus
+  data_retention?: {
+    running: boolean
+    cleanup_time: string
+  }
   workflow: Omit<SingleSchedulerStatus, 'cron'> & {
     start_time: string
     stop_time: string

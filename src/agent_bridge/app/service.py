@@ -61,6 +61,13 @@ from agent_bridge.storage.sqlite import SQLiteStore
 from agent_bridge.system_config.scripts.service import ScriptService
 from agent_bridge.system_config.skills.service import SkillService
 from agent_bridge.system_config.plugin_update_scheduler import PluginUpdateScheduler
+from agent_bridge.system_config.data_retention import (
+    DataRetentionScheduler,
+    DataRetentionService,
+    normalize_cleanup_time,
+    normalize_detail_days,
+    normalize_history_days,
+)
 from agent_bridge.system_config.model_evaluation.service import ModelEvaluationService
 from agent_bridge.app.onboarding import OnboardingService
 from agent_bridge.automation.workflows.scheduler import WorkflowScheduler
@@ -381,6 +388,14 @@ class AgentBridgeService:
             admins=admins,
         )
         self.plugin_update_scheduler = PluginUpdateScheduler(service=self, store=store, admins=admins)
+        self.data_retention = DataRetentionService(
+            store=store,
+            paths=paths,
+            ledger_db_path=paths.ledger_db_path,
+        )
+        self.data_retention_scheduler = DataRetentionScheduler(
+            service=self.data_retention, store=store
+        )
         self.workflow_scheduler = WorkflowScheduler(
             service=self.workflows,
             store=store,
@@ -1354,7 +1369,7 @@ class AgentBridgeService:
         claude_mem_git_url: str = "",
         claude_mem_plugin_update_cron: str = "30 3 * * 0",
         understand_cron: str = "0 2 * * *",
-        doc_sync_cron: str = "*/30 * * *",
+        doc_sync_cron: str = "*/30 * * * *",
         workflow_start_time: str = "22:00",
         workflow_stop_time: str = "07:00",
         workflow_max_runs: int = 0,
@@ -1362,7 +1377,9 @@ class AgentBridgeService:
         workflow_max_concurrent_runs_per_workflow: int = 2,
         workflow_max_runtime_minutes: int = 30,
         workflow_task_rerun_days: int = 30,
-        log_retention_days: int = 180,
+        retention_detail_days: int = 20,
+        retention_history_days: int = 60,
+        retention_cleanup_time: str = "22:00",
         mcp_timeout_seconds: int = DEFAULT_MCP_TIMEOUT_SECONDS,
         understand_timeout_minutes: int = 120,
         artifact_search_cache_ttl_hours: int = 8,
@@ -1377,6 +1394,16 @@ class AgentBridgeService:
             resource_key="knowledge_sync",
             actor=actor,
         )
+        detail = normalize_detail_days(retention_detail_days)
+        history = normalize_history_days(retention_history_days)
+        if detail > history:
+            raise ValidationError(
+                f"详情保留天数（{detail}）不能大于历史保留天数（{history}）"
+            )
+        cleanup_time = normalize_cleanup_time(retention_cleanup_time)
+        # 旧 log_retention_days 已废弃：迁移后统一由数据生命周期配置管理，
+        # 行内保留列值只为兼容回读，不再驱动清理。
+        legacy_log_retention_days = int(current.get("log_retention_days") or 180)
         result = self.store.save_sync_config(
             code_sync_cron=code_sync_cron,
             ua_git_url=ua_git_url,
@@ -1392,31 +1419,36 @@ class AgentBridgeService:
             workflow_max_concurrent_runs_per_workflow=workflow_max_concurrent_runs_per_workflow,
             workflow_max_runtime_minutes=workflow_max_runtime_minutes,
             workflow_task_rerun_days=workflow_task_rerun_days,
-            log_retention_days=log_retention_days,
+            log_retention_days=legacy_log_retention_days,
+            retention_detail_days=detail,
+            retention_history_days=history,
+            retention_cleanup_time=cleanup_time,
             mcp_timeout_seconds=mcp_timeout_seconds,
             understand_timeout_minutes=understand_timeout_minutes,
             artifact_search_cache_ttl_hours=artifact_search_cache_ttl_hours,
         )
-        self.store.set_runtime_log_retention_days(log_retention_days)
-        deleted_logs = self.store.prune_runtime_logs(force=True)
-        # 配置变更后刷新全部调度器，使其读取最新 cron / 时间窗
+        # 配置变更后立即按新生命周期配置清理一轮，并刷新全部调度器，
+        # 使其读取最新 cron / 时间窗 / 清理时间。
+        cleanup_summary = self.data_retention.run_daily_cleanup()
         logger.info(
             "同步配置已保存，刷新全部调度器 code_sync_cron=%s doc_sync_cron=%s understand_cron=%s "
-            "workflow_window=%s-%s log_retention_days=%s pruned_tool_call_logs=%s pruned_agent_runs=%s",
+            "workflow_window=%s-%s retention=detail %s/history %s@%s cleanup_seconds=%s",
             code_sync_cron,
             doc_sync_cron,
             understand_cron,
             workflow_start_time,
             workflow_stop_time,
-            log_retention_days,
-            deleted_logs["tool_call_logs"],
-            deleted_logs["agent_runs"],
+            detail,
+            history,
+            cleanup_time,
+            cleanup_summary.get("duration_seconds"),
         )
         self.codegraph_scheduler.refresh()
         self.understand_scheduler.refresh()
         self.plugin_update_scheduler.refresh()
         self.doc_sync_scheduler.refresh()
         self.workflow_scheduler.refresh()
+        self.data_retention_scheduler.refresh()
         return attach_edit_token(result, self._sync_config_edit_snapshot(result))
 
     @staticmethod
@@ -1435,6 +1467,7 @@ class AgentBridgeService:
             "plugin_update": self.plugin_update_scheduler.get_status(),
             "doc_sync": self.doc_sync_scheduler.get_status(),
             "workflow": self.workflow_scheduler.get_status(),
+            "data_retention": self.data_retention_scheduler.get_status(),
         }
 
     def get_agent_runtime_config(self, actor: str) -> dict[str, Any]:

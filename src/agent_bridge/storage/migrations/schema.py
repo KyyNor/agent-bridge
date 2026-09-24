@@ -9,6 +9,7 @@ import time
 from typing import Any
 
 from agent_bridge.storage.schema import CODEGRAPH_SCHEMA, SCHEMA, WORKFLOW_SCHEMA
+from agent_bridge.system_config.data_retention import ensure_data_retention_meta
 from agent_bridge.storage.migrations.workflows import (
     backfill_completed_workflow_task_errors,
     backfill_workflow_tasks_superseded,
@@ -640,11 +641,16 @@ def apply_followup_schema(store: Any, conn: sqlite3.Connection) -> None:
             "workflow_max_runtime_minutes": "INTEGER NOT NULL DEFAULT 30",
             "workflow_task_rerun_days": "INTEGER NOT NULL DEFAULT 30",
             "log_retention_days": "INTEGER NOT NULL DEFAULT 180",
+            "retention_detail_days": "INTEGER NOT NULL DEFAULT 20",
+            "retention_history_days": "INTEGER NOT NULL DEFAULT 60",
+            "retention_cleanup_time": "TEXT NOT NULL DEFAULT '22:00'",
             "mcp_timeout_seconds": "INTEGER NOT NULL DEFAULT 150",
             "understand_timeout_minutes": "INTEGER NOT NULL DEFAULT 120",
             "artifact_search_cache_ttl_hours": "INTEGER NOT NULL DEFAULT 8",
         },
     )
+    # 数据生命周期 v1 的阶段 marker 表（首启迁移与一次性 VACUUM 的幂等凭据）。
+    ensure_data_retention_meta(conn)
     # Workflow scheduling moved from a single global cron to a daily
     # window (start/stop). Drop the legacy per-workflow schedule column
     # and the superseded workflow_cron config column on existing DBs.

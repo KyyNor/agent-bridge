@@ -432,7 +432,9 @@ class KnowledgeSyncConfigRequest(BaseModel):
     workflow_max_concurrent_runs_per_workflow: int = Field(default=2, ge=1)
     workflow_max_runtime_minutes: int = 30
     workflow_task_rerun_days: int = 30
-    log_retention_days: int = Field(default=180, ge=1)
+    retention_detail_days: int = Field(default=20, ge=1)
+    retention_history_days: int = Field(default=60, ge=1)
+    retention_cleanup_time: str = "22:00"
     mcp_timeout_seconds: int = 150
     understand_timeout_minutes: int = 120
     artifact_search_cache_ttl_hours: int = Field(default=8, ge=1, le=168)
