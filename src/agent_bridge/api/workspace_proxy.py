@@ -404,17 +404,21 @@ def _forward_ws_headers(scope: Scope, target: str) -> list[tuple[str, str]]:
 
 
 class AgentWorkspaceProxyMiddleware:
-    # 前缀外认领路径 → scope 的短期记忆：嵌套文档（插件 studio 等根路径页面）
-    # 的后续子资源 Referer 不再带工作台前缀，按“最近一次认领该路径的 scope”
-    # 继续归属；TTL 过期或路径被另一 scope 重新认领时自然更新。
+    # 前缀外认领路径 → scope 的短期记忆，按 ``(user_id, path)`` 隔离：不同
+    # 浏览器用户的认领互不可见，避免一个用户的 shared 工作台认领 ``/studio/``
+    # 后把另一个用户的同路径请求带偏。嵌套文档（插件 studio 等根路径页面）
+    # 的后续子资源 Referer 不再带工作台前缀，按“该用户最近一次认领该路径的
+    # scope”继续归属；TTL 过期或被同用户另一 scope 重新认领时自然更新。
+    # 同一用户同时打开 personal/shared 且出现同名嵌套页面的多 tab 场景仍为
+    # 已知限制（记忆按用户内最近认领为准）。
     _CLAIM_TTL_SECONDS = 6 * 60 * 60
-    _CLAIM_MAX_ENTRIES = 2048
+    _CLAIM_MAX_ENTRIES = 4096
 
     def __init__(self, app: ASGIApp, *, service, identity_resolver) -> None:
         self.app = app
         self.service = service
         self.identity_resolver = identity_resolver
-        self._claimed_scopes: dict[str, tuple[str, float]] = {}
+        self._claimed_scopes: dict[tuple[str, str], tuple[str, float]] = {}
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         path = str(scope.get("path", ""))
@@ -422,7 +426,7 @@ class AgentWorkspaceProxyMiddleware:
         if route is not None:
             workspace_scope, upstream_path = route
         else:
-            escaped = self._resolve_escape_route(scope)
+            escaped = self._resolve_escape_route(scope, self._current_user_id(scope))
             if escaped is None:
                 await self.app(scope, receive, send)
                 return
@@ -462,6 +466,7 @@ class AgentWorkspaceProxyMiddleware:
                 upstream_path=auth_path,
                 auth_query=auth_query,
                 prefix=prefix,
+                workspace_scope=workspace_scope,
             )
             return
 
@@ -480,13 +485,22 @@ class AgentWorkspaceProxyMiddleware:
             request_header_overrides=_request_overrides(scope, target),
         )
 
-    def _resolve_escape_route(self, scope: Scope) -> tuple[str, str] | None:
+    def _current_user_id(self, scope: Scope) -> str:
+        """解析当前业务用户（认领隔离维度）；解析失败返回空串，仅影响记忆键。"""
+        from starlette.requests import HTTPConnection
+
+        try:
+            return str(self.identity_resolver.resolve(HTTPConnection(scope)).user_id or "")
+        except Exception:
+            return ""
+
+    def _resolve_escape_route(self, scope: Scope, user_id: str = "") -> tuple[str, str] | None:
         """前缀外请求的归属解析：返回 ``(scope, 上游路径)``。
 
         HTTP 按 Referer 认领：Referer 指向任一工作台前缀时，scope 即该前缀
-        的范围；嵌套文档等非前缀 Referer 先查短期记忆（该路径最近被哪个
-        scope 的页面认领），再走同 authority 非保留路径兜底（默认个人）。
-        WebSocket 无 Referer，按同源 Origin 认领，默认个人范围。
+        的范围；嵌套文档等非前缀 Referer 先查该用户的短期记忆（该用户最近
+        把哪条路径认领给了哪个 scope），再走同 authority 非保留路径兜底（默认
+        个人）。WebSocket 无 Referer，按同源 Origin 认领，默认个人范围。
         """
         upstream_path = workspace_escape_path(scope)
         if upstream_path is None:
@@ -498,37 +512,38 @@ class AgentWorkspaceProxyMiddleware:
             for prefix, workspace_scope in PROXY_PREFIX_SCOPES.items():
                 if referer_path == prefix or referer_path.startswith(prefix + "/"):
                     # 记录当前请求路径：嵌套页面的子资源将以它为 Referer。
-                    self._remember_claim(upstream_path, workspace_scope)
+                    self._remember_claim(user_id, upstream_path, workspace_scope)
                     return workspace_scope, upstream_path
-            remembered = self._claimed_scope_for(referer_path)
+            remembered = self._claimed_scope_for(user_id, referer_path)
             if remembered is not None:
-                self._remember_claim(upstream_path, remembered)
+                self._remember_claim(user_id, upstream_path, remembered)
                 return remembered, upstream_path
-        self._remember_claim(upstream_path, WORKSPACE_SCOPE_PERSONAL)
+        self._remember_claim(user_id, upstream_path, WORKSPACE_SCOPE_PERSONAL)
         return WORKSPACE_SCOPE_PERSONAL, upstream_path
 
-    def _remember_claim(self, path: str, workspace_scope: str) -> None:
-        """记录（或刷新）路径被某 scope 的页面认领；带 TTL 与容量上限。"""
+    def _remember_claim(self, user_id: str, path: str, workspace_scope: str) -> None:
+        """记录（或刷新）某用户路径被某 scope 的页面认领；带 TTL 与容量上限。"""
         if not path or path == "/":
             return
         now = time.monotonic()
-        self._claimed_scopes = {
-            key: (value, seen)
-            for key, (value, seen) in self._claimed_scopes.items()
-            if now - seen < self._CLAIM_TTL_SECONDS
-        }
+        if len(self._claimed_scopes) >= self._CLAIM_MAX_ENTRIES:
+            self._claimed_scopes = {
+                key: (value, seen)
+                for key, (value, seen) in self._claimed_scopes.items()
+                if now - seen < self._CLAIM_TTL_SECONDS
+            }
         if len(self._claimed_scopes) >= self._CLAIM_MAX_ENTRIES:
             oldest = min(self._claimed_scopes.items(), key=lambda item: item[1][1])[0]
             self._claimed_scopes.pop(oldest, None)
-        self._claimed_scopes[path] = (workspace_scope, now)
+        self._claimed_scopes[(user_id, path)] = (workspace_scope, now)
 
-    def _claimed_scope_for(self, path: str) -> str | None:
-        remembered = self._claimed_scopes.get(path)
+    def _claimed_scope_for(self, user_id: str, path: str) -> str | None:
+        remembered = self._claimed_scopes.get((user_id, path))
         if remembered is None:
             return None
         workspace_scope, seen = remembered
         if time.monotonic() - seen >= self._CLAIM_TTL_SECONDS:
-            self._claimed_scopes.pop(path, None)
+            self._claimed_scopes.pop((user_id, path), None)
             return None
         return workspace_scope
 

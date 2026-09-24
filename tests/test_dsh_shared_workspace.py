@@ -163,6 +163,8 @@ def test_personal_scope_unchanged_default(service, home, passwd_lookup, monkeypa
 def test_shared_runtime_reused_by_second_member_with_locked_profile(
     service, home, passwd_lookup, monkeypatch
 ) -> None:
+    """共享 Runtime 使用 runtime 级稳定 capability：后续成员进入不重签发、不重写 patch。"""
+    from agent_bridge.dsh.service import shared_runtime_capability_key
     from agent_bridge.dsh.workspace import mcp_overlay_path
 
     configure_group(service)
@@ -172,7 +174,8 @@ def test_shared_runtime_reused_by_second_member_with_locked_profile(
     assert len(launcher.starts) == 1
     config_dir = home / "groupa" / ".config" / "dsh" / "groupa"
     overlay_path = mcp_overlay_path(config_dir)
-    first_overlay = yaml.safe_load(overlay_path.read_text(encoding="utf-8"))
+    first_overlay_text = overlay_path.read_text(encoding="utf-8")
+    first_overlay = yaml.safe_load(first_overlay_text)
     first_token = first_overlay[0]["insert"][0]["config"]["headers"]["X-Agent-Bridge-DSH-Capability"]
 
     # 第二名成员请求不同平面：直接进入现有 Runtime，active profile 锁定为 safe
@@ -180,15 +183,68 @@ def test_shared_runtime_reused_by_second_member_with_locked_profile(
     assert second["status"] == "running"
     assert second["profile_key"] == "safe"
     assert len(launcher.starts) == 1  # 不产生第二个进程
-    assert second["port"] if "port" in second else True
     state = json.loads(shared_state_path(service).read_text(encoding="utf-8"))
     assert state["pid"] == launcher.starts[0]["pid"]
     assert state["profile_key"] == "safe"
-    # 覆盖文件刷新为第二名成员的 capability（平面仍为 safe）
-    second_overlay = yaml.safe_load(overlay_path.read_text(encoding="utf-8"))
-    entry = second_overlay[0]["insert"][0]
-    assert entry["config"]["headers"]["X-Agent-Bridge-MetaMCP-Profile"] == "safe"
-    assert entry["config"]["headers"]["X-Agent-Bridge-DSH-Capability"] != first_token
+    # patch 文件逐字节不变：runtime capability 不因成员进入重写。
+    assert overlay_path.read_text(encoding="utf-8") == first_overlay_text
+    # runtime capability 仍有效，且 user_id 为 Linux 用户（共享身份审计）。
+    capability = service.dsh.capabilities.require(first_token, profile_key="safe")
+    assert capability.user_id == "groupa"
+    # registry 内不存在绑定成员身份的共享签发（只有 runtime 槽位）。
+    assert shared_runtime_capability_key("groupa") in service.dsh.capabilities._by_user
+    assert "user1" not in service.dsh.capabilities._by_user
+    assert "user2" not in service.dsh.capabilities._by_user
+
+
+def test_personal_and_shared_capabilities_do_not_invalidate_each_other(
+    service, home, passwd_lookup, monkeypatch
+) -> None:
+    """同一用户同时打开个人与共享工作台：两边 capability 互不失效。"""
+    from agent_bridge.dsh.workspace import mcp_overlay_path
+
+    configure_group(service)
+    launcher = install_fakes(service, home, passwd_lookup, monkeypatch)
+
+    # 先进入个人（profile safe），再进入共享（profile wide）：个人 capability 仍有效。
+    service.dsh.authorize_workspace("user1", profile_key="safe")
+    personal_overlay = yaml.safe_load(
+        (home / "groupa" / ".config" / "dsh" / "user1" / "agent-bridge-mcp.patch.yml")
+        .read_text(encoding="utf-8")
+    )
+    personal_token = personal_overlay[0]["insert"][0]["config"]["headers"]["X-Agent-Bridge-DSH-Capability"]
+
+    service.dsh.authorize_workspace("user1", profile_key="wide", scope="shared")
+    # 个人 capability 未被共享进入撤销。
+    personal_capability = service.dsh.capabilities.require(personal_token, profile_key="safe")
+    assert personal_capability.user_id == "user1"
+
+    # 共享 runtime capability 独立存在且有效。
+    shared_overlay = yaml.safe_load(
+        mcp_overlay_path(home / "groupa" / ".config" / "dsh" / "groupa").read_text(encoding="utf-8")
+    )
+    shared_token = shared_overlay[0]["insert"][0]["config"]["headers"]["X-Agent-Bridge-DSH-Capability"]
+    shared_capability = service.dsh.capabilities.require(shared_token, profile_key="wide")
+    assert shared_capability.user_id == "groupa"
+
+    # 用户再进入个人另一平面：个人槽位被替换（个人语义），共享 capability 不受影响。
+    service.dsh.authorize_workspace("user1", profile_key="wide")
+    with pytest.raises(Exception):
+        service.dsh.capabilities.require(personal_token)
+    service.dsh.capabilities.require(shared_token, profile_key="wide")
+
+    # 停止共享 runtime：撤销共享 capability，不影响用户当前个人 capability。
+    newest_personal_overlay = yaml.safe_load(
+        (home / "groupa" / ".config" / "dsh" / "user1" / "agent-bridge-mcp.patch.yml")
+        .read_text(encoding="utf-8")
+    )
+    newest_personal_token = newest_personal_overlay[0]["insert"][0]["config"]["headers"]["X-Agent-Bridge-DSH-Capability"]
+    service.dsh.stop_runtime("user1", scope="shared")
+    with pytest.raises(Exception):
+        service.dsh.capabilities.require(shared_token)
+    service.dsh.capabilities.require(newest_personal_token, profile_key="wide")
+    # 共享 overlay 随 runtime 停止移除（capability 已撤销，patch 不留死 token）。
+    assert not mcp_overlay_path(home / "groupa" / ".config" / "dsh" / "groupa").exists()
 
 
 def test_shared_profile_reselect_allowed_after_stop(service, home, passwd_lookup, monkeypatch) -> None:
@@ -432,40 +488,39 @@ def test_proxy_escape_claims_by_referer_scope() -> None:
     middleware = AgentWorkspaceProxyMiddleware(app=None, service=None, identity_resolver=None)
 
     def http_scope(path: str, referer: str | None) -> dict:
-        headers = [b"host", b"example.internal"] if False else []
         raw_headers = [(b"host", b"example.internal")]
         if referer is not None:
             raw_headers.append((b"referer", referer.encode("utf-8")))
         return {"type": "http", "path": path, "headers": raw_headers}
 
+    def resolve(path: str, referer: str | None, user: str = "user1") -> tuple[str, str] | None:
+        return middleware._resolve_escape_route(http_scope(path, referer), user)
+
     # 个人前缀 Referer → personal
-    assert middleware._resolve_escape_route(
-        http_scope("/api/chat", "http://example.internal/agent-workspace/")
-    ) == ("personal", "/api/chat")
+    assert resolve("/api/chat", "http://example.internal/agent-workspace/") == ("personal", "/api/chat")
     # 共享前缀 Referer → shared
-    assert middleware._resolve_escape_route(
-        http_scope("/api/chat", "http://example.internal/agent-workspace-shared/x")
-    ) == ("shared", "/api/chat")
+    assert resolve("/api/chat", "http://example.internal/agent-workspace-shared/x") == ("shared", "/api/chat")
     # 嵌套文档（无前缀 Referer）：先由工作台页面首次进入（Referer 带前缀），
-    # 其子资源再按“最近认领该路径的 scope”继续归属 shared
-    assert middleware._resolve_escape_route(
-        http_scope("/studio/", "http://example.internal/agent-workspace-shared/x")
-    ) == ("shared", "/studio/")
-    assert middleware._resolve_escape_route(
-        http_scope("/studio/page", "http://example.internal/studio/")
-    ) == ("shared", "/studio/page")
-    assert middleware._resolve_escape_route(
-        http_scope("/studio/page/asset.css", "http://example.internal/studio/page")
-    ) == ("shared", "/studio/page/asset.css")
+    # 其子资源再按“该用户最近认领该路径的 scope”继续归属 shared
+    assert resolve("/studio/", "http://example.internal/agent-workspace-shared/x") == ("shared", "/studio/")
+    assert resolve("/studio/page", "http://example.internal/studio/") == ("shared", "/studio/page")
+    assert resolve("/studio/page/asset.css", "http://example.internal/studio/page") == ("shared", "/studio/page/asset.css")
+
+    # 不同用户相同路径互不串 scope：user2 没有 user1 的认领记忆，回落 personal。
+    assert resolve("/studio/page2", "http://example.internal/studio/", user="user2") == ("personal", "/studio/page2")
+    # user2 随后用自己的个人工作台认领同路径，不影响 user1 的 shared 记忆。
+    assert resolve("/studio/", "http://example.internal/agent-workspace/", user="user2") == ("personal", "/studio/")
+    assert resolve("/studio/page", "http://example.internal/studio/") == ("shared", "/studio/page")
+    assert resolve("/studio/page", "http://example.internal/studio/", user="user2") == ("personal", "/studio/page")
+    # 同一用户重复认领按“最近认领”更新（文档化的多 tab 已知限制）。
+    assert resolve("/studio/", "http://example.internal/agent-workspace-shared/x") == ("shared", "/studio/")
+    assert resolve("/studio/page2", "http://example.internal/studio/") == ("shared", "/studio/page2")
+
     # 无前缀且无记忆的 Referer 回落 personal
     middleware._claimed_scopes.clear()
-    assert middleware._resolve_escape_route(
-        http_scope("/assets/app.js", "http://example.internal/other-page/")
-    ) == ("personal", "/assets/app.js")
+    assert resolve("/assets/app.js", "http://example.internal/other-page/") == ("personal", "/assets/app.js")
     # 保留前缀永不认领
-    assert middleware._resolve_escape_route(
-        http_scope("/api/v1/users", "http://example.internal/agent-workspace/")
-    ) is None
+    assert resolve("/api/v1/users", "http://example.internal/agent-workspace/") is None
 
 
 # -- 插件状态按 DSH_HOME 隔离（issue #14 验收） --

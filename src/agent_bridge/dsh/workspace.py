@@ -79,7 +79,13 @@ class WorkspaceSelection:
 
 
 class DshWorkspaceCapabilityRegistry:
-    """只保存当前进程的有效 capability；每个用户同时至多一个。"""
+    """只保存当前进程的有效 capability。
+
+    默认每个业务用户同时至多一个（个人 Workspace 语义，重签发即替换）；
+    共享 Runtime 的稳定 capability 通过独立 ``key`` 签发（``_by_user`` 按
+    key 记账），不占用任何业务用户的唯一槽位，也不会被成员的个人签发/
+    撤销波及。
+    """
 
     def __init__(self) -> None:
         self._items: dict[str, DshWorkspaceCapability] = {}
@@ -93,7 +99,14 @@ class DshWorkspaceCapabilityRegistry:
         profile_key: str,
         owner_group_key: str,
         ttl_seconds: int = DEFAULT_CAPABILITY_TTL_SECONDS,
+        key: str | None = None,
     ) -> DshWorkspaceCapability:
+        """签发 capability；``key`` 为记账槽位（默认 ``user_id``）。
+
+        ``capability.user_id`` 始终是调用方传入的审计身份（共享 Runtime 传
+        Linux 用户）；``key`` 只决定替换/撤销的槽位——共享 Runtime 使用
+        ``shared-runtime:<linux-user>`` 槽位，成员的个人签发不会触达它。
+        """
         if not user_id or not profile_key or not owner_group_key:
             raise AccessDenied("DSH Workspace capability 缺少用户、能力平面或归属组")
         token = secrets.token_urlsafe(32)
@@ -104,10 +117,11 @@ class DshWorkspaceCapabilityRegistry:
             owner_group_key=owner_group_key,
             expires_at_monotonic=time.monotonic() + max(1, ttl_seconds),
         )
+        registry_key = key or user_id
         with self._lock:
-            self.revoke_for_user(user_id)
+            self.revoke_by_key(registry_key)
             self._items[token] = capability
-            self._by_user[user_id] = token
+            self._by_user[registry_key] = token
         return capability
 
     def require(
@@ -131,11 +145,18 @@ class DshWorkspaceCapabilityRegistry:
         with self._lock:
             capability = self._items.pop(token, None)
             if capability is not None:
-                self._by_user.pop(capability.user_id, None)
+                for key, bound in list(self._by_user.items()):
+                    if bound == token:
+                        self._by_user.pop(key, None)
 
     def revoke_for_user(self, user_id: str) -> None:
+        """撤销业务用户的个人 capability；不影响共享 Runtime 的槽位。"""
+        self.revoke_by_key(user_id)
+
+    def revoke_by_key(self, key: str) -> None:
+        """撤销指定记账槽位上的 capability（个人 = user_id，共享 = 专用 key）。"""
         with self._lock:
-            token = self._by_user.pop(user_id, None)
+            token = self._by_user.pop(key, None)
             if token is not None:
                 self._items.pop(token, None)
 
@@ -147,8 +168,10 @@ class DshWorkspaceCapabilityRegistry:
 
     def _drop(self, capability: DshWorkspaceCapability) -> None:
         self._items.pop(capability.token, None)
-        if self._by_user.get(capability.user_id) == capability.token:
-            self._by_user.pop(capability.user_id, None)
+        # 槽位 key 不一定是 user_id（共享 Runtime 用专用 key），按 token 反查。
+        for key, bound in list(self._by_user.items()):
+            if bound == capability.token:
+                self._by_user.pop(key, None)
 
 
 def mcp_overlay_path(dsh_home: Path) -> Path:

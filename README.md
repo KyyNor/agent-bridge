@@ -151,10 +151,13 @@ node-pty 的能力（如 dsh-better-sidebar 的终端）由插件自身降级并
 器窗口访问同一个 DSH Web。共享 Runtime 启动前由首位进入的成员选择能力平面
 （该选择成为本次共享 Runtime 的 active profile）；已运行时后续成员直接进入
 现有 Runtime、能力平面锁定只读，不会因平面不同并行启动第二个进程；空闲回收
-或显式停止后，下次进入重新允许选择。任一成员的访问都刷新共享 Runtime 的
-空闲时间；目标只能由当前业务用户所属小组映射的 Linux 用户推导，无法访问他
-人小组的共享 Runtime。共享 Runtime 正在注入能力平面时，无该平面权限的成员
-会被拒绝进入（避免经他人 capability 越权调用 MCP）。
+或显式停止后，下次进入重新允许选择。共享工作台的 MCP 注入使用 **runtime 级
+稳定 capability**（绑定 Linux 用户 + active profile，共享 MCP 调用以共享
+runtime/Linux 用户身份审计）：后续成员进入只校验 active profile 权限，不改写
+注入配置；个人工作台的 capability 与共享的互不影响。任一成员的访问都刷新
+共享 Runtime 的空闲时间；目标只能由当前业务用户所属小组映射的 Linux 用户
+推导，无法访问他人小组的共享 Runtime。共享 Runtime 正在注入能力平面时，
+无该平面权限的成员会被拒绝进入。
 
 反向代理 `/agent-workspace/**`（个人）与 `/agent-workspace-shared/**`（小组）
 复用 dashboard 代理的流式转发骨架，支持 HTTP、WebSocket 与 SSE 长连接；

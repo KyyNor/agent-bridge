@@ -43,6 +43,7 @@ from agent_bridge.core.timeutil import utc_iso
 from agent_bridge.dsh import injection
 from agent_bridge.dsh import plugins
 from agent_bridge.dsh.agent_runtime import dsh_binary_from_command
+from agent_bridge.dsh.config import MAX_IDLE_TIMEOUT_MINUTES
 from agent_bridge.dsh.launcher import (
     DshProcessLauncher,
     LinuxIdentity,
@@ -91,6 +92,15 @@ WORKSPACE_URLS = {
     WORKSPACE_SCOPE_PERSONAL: WORKSPACE_PROXY_PREFIX + "/",
     WORKSPACE_SCOPE_SHARED: WORKSPACE_PROXY_SHARED_PREFIX + "/",
 }
+
+# 共享 Runtime 的 capability 记账槽位前缀：与任何业务用户的个人槽位
+# （key = user_id）隔离，成员的个人签发/撤销不会触达共享 Runtime 的
+# 稳定 capability。
+SHARED_RUNTIME_CAPABILITY_PREFIX = "shared-runtime:"
+
+
+def shared_runtime_capability_key(linux_user: str) -> str:
+    return f"{SHARED_RUNTIME_CAPABILITY_PREFIX}{linux_user}"
 
 _USER_ID_PATTERN = re.compile(r"^[^/\\\s]+$")
 # DSH 启动横幅：``dsh web: http://127.0.0.1:<port>/?token=<launch-token>``（可能附带 LAN 地址）
@@ -181,7 +191,9 @@ class DshRuntimeService:
                 healthy = alive and self._probe_port(int(state.get("port") or 0))
                 if not group_changed and not profile_changed and healthy:
                     self._touch_state(scope, runtime_key)
-                    if workspace is not None:
+                    if workspace is not None and scope != WORKSPACE_SCOPE_SHARED:
+                        # 共享 Runtime 的 MCP patch 是 runtime 级配置（capability
+                        # 绑定 linux_user + active profile），复用时不重写。
                         self._refresh_workspace_injection(
                             normalized_user, group_key, config, workspace, state=state
                         )
@@ -292,10 +304,16 @@ class DshRuntimeService:
     ) -> dict[str, Any]:
         """小组共享工作台的进入语义：运行中锁定 active profile，未运行按选择启动。
 
+        共享 Runtime 使用 **runtime 级稳定 capability**：启动时按
+        ``linux_user + active_profile`` 签发（user_id = Linux 用户，MCP 调用
+        以共享 runtime/Linux 用户身份审计）并写入共享 MCP patch；后续成员
+        进入只校验对 active profile 的访问权限，**不重签发、不重写 patch**。
+        个人 capability 与共享 capability 记账槽位互相隔离，互不失效。
+
         全程持有服务锁（``_lock`` 为 RLock，``ensure_running`` 重入安全）：
-        「读取 runtime 状态 → 决定 effective profile → 签发 capability → 启动/复用」
-        对并发进入原子化，后到成员必然观察到先到成员启动的共享实例并被锁定
-        到同一 active profile，不会出现两个进程或两个平面。
+        「读取 runtime 状态 → 决定 effective profile → 启动/复用」对并发进入
+        原子化，后到成员必然观察到先到成员启动的共享实例并被锁定到同一
+        active profile，不会出现两个进程或两个平面。
         """
         group_key = self._access.actor_group_key(user_id, required=True)
         config = self._configs.group_config_for_runtime(group_key)
@@ -310,48 +328,51 @@ class DshRuntimeService:
                 active_profile = (state.get("profile_key") or None) if state else None
                 if active_profile:
                     # 共享平面是 runtime 属性：无权访问 active profile 的成员不得
-                    # 进入（否则会经他人 capability 越权调用 MCP）。
+                    # 进入（capability 以 runtime/Linux 用户身份审计，成员权限
+                    # 只在进入口校验）。
                     self._access.require_resource_read(
                         actor=user_id,
                         resource_type=ScopedResourceType.capability_profile,
                         resource_key=str(active_profile),
                     )
-                effective_profile = active_profile
-            else:
-                effective_profile = profile_key or None
-
-            if not effective_profile:
-                self.capabilities.revoke_for_user(user_id)
-                status = self.ensure_running(
-                    user_id,
-                    workspace=WorkspaceSelection(profile_key=None),
-                    scope=WORKSPACE_SCOPE_SHARED,
-                )
+                # 直接进入现有 Runtime：不签发新 capability、不触碰共享 patch。
+                status = self.ensure_running(user_id, scope=WORKSPACE_SCOPE_SHARED)
                 logger.info(
-                    "DSH 共享工作台进入（不注入能力平面）user=%s shared=%s", user_id, linux_user
+                    "DSH 共享工作台复用现有 Runtime user=%s shared=%s profile=%s",
+                    user_id,
+                    linux_user,
+                    active_profile,
                 )
                 return {
                     **status,
-                    "profile_key": None,
+                    "profile_key": active_profile,
                     "workspace_url": WORKSPACE_URLS["shared"],
                 }
 
-            self._access.require_resource_read(
-                actor=user_id,
-                resource_type=ScopedResourceType.capability_profile,
-                resource_key=str(effective_profile),
-            )
-            capability = self.capabilities.issue(
-                user_id=user_id,
-                profile_key=str(effective_profile),
-                owner_group_key=group_key,
-            )
+            # 未运行：本次请求（首位成员）决定下一次共享 Runtime 的 active profile。
+            effective_profile = profile_key or None
+            if effective_profile:
+                self._access.require_resource_read(
+                    actor=user_id,
+                    resource_type=ScopedResourceType.capability_profile,
+                    resource_key=str(effective_profile),
+                )
+                runtime_capability = self.capabilities.issue(
+                    user_id=linux_user,
+                    profile_key=str(effective_profile),
+                    owner_group_key=group_key,
+                    # 覆盖共享 Runtime 可能的最长存活期（idle 上限 30 天）；
+                    # 停止/回收时显式撤销。
+                    ttl_seconds=MAX_IDLE_TIMEOUT_MINUTES * 60,
+                    key=shared_runtime_capability_key(linux_user),
+                )
+                workspace: WorkspaceSelection | None = WorkspaceSelection(
+                    profile_key=str(effective_profile), capability=runtime_capability
+                )
+            else:
+                workspace = WorkspaceSelection(profile_key=None)
             status = self.ensure_running(
-                user_id,
-                workspace=WorkspaceSelection(
-                    profile_key=str(effective_profile), capability=capability
-                ),
-                scope=WORKSPACE_SCOPE_SHARED,
+                user_id, workspace=workspace, scope=WORKSPACE_SCOPE_SHARED
             )
         logger.info(
             "DSH 共享工作台授权完成 user=%s shared=%s profile=%s group=%s runtime_status=%s",
@@ -363,7 +384,7 @@ class DshRuntimeService:
         )
         return {
             **status,
-            "profile_key": str(effective_profile),
+            "profile_key": effective_profile,
             "workspace_url": WORKSPACE_URLS["shared"],
         }
 
@@ -399,7 +420,11 @@ class DshRuntimeService:
             runtime_key, _ = self._resolve_runtime_key(normalized_user, scope, None)
             state = self._read_state(scope, runtime_key)
             stopped = self._stop_state(state, scope, runtime_key) if state else False
-            self.capabilities.revoke_for_user(normalized_user)
+            if scope == WORKSPACE_SCOPE_PERSONAL:
+                # 只撤销个人 capability；共享 Runtime 的 capability 在
+                # _stop_state 内按 runtime 槽位撤销，成员进入共享不触碰其
+                # 个人 capability（反之亦然）。
+                self.capabilities.revoke_for_user(normalized_user)
         return {
             "user_id": normalized_user,
             "scope": scope,
@@ -664,6 +689,13 @@ class DshRuntimeService:
     def _stop_state(self, state: dict[str, Any], scope: str, runtime_key: str) -> bool:
         pid = int(state.get("pid") or 0)
         stopped = self._terminate_pid(pid, grace_seconds=DSH_STOP_GRACE_SECONDS)
+        if scope == WORKSPACE_SCOPE_SHARED:
+            # 共享 Runtime 的稳定 capability 随 runtime 生命周期撤销；patch 内
+            # 的 token 同步失效，一并移除覆盖文件，避免下次按需启动带着死 token。
+            self.capabilities.revoke_by_key(shared_runtime_capability_key(runtime_key))
+            config_dir = str(state.get("config_dir") or "")
+            if config_dir:
+                remove_mcp_overlay(workspace_overlay_path(Path(config_dir)))
         self._remove_state(scope, runtime_key)
         logger.info(
             "DSH Runtime 已停止 scope=%s runtime=%s pid=%s signaled=%s config_dir=%s（用户配置已保留）",
