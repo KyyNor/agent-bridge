@@ -25,13 +25,32 @@ from typing import Any
 import yaml
 
 from agent_bridge.core.defaults import DEFAULT_CLAUDE_CODE_MCP_TOOL_TIMEOUT_MS
-from agent_bridge.core.domain import AccessDenied
+from agent_bridge.core.domain import AccessDenied, ValidationError
 
 logger = logging.getLogger(__name__)
 
 DSH_CAPABILITY_HEADER = "X-Agent-Bridge-DSH-Capability"
 WORKSPACE_PROXY_PREFIX = "/agent-workspace"
+# 小组共享工作台的独立代理前缀：与个人前缀区分路由目标（同一浏览器可同时
+# 打开个人与共享工作台，前缀是代理判定 scope 的唯一依据）。
+WORKSPACE_PROXY_SHARED_PREFIX = "/agent-workspace-shared"
+WORKSPACE_PROXY_PREFIXES = (WORKSPACE_PROXY_PREFIX, WORKSPACE_PROXY_SHARED_PREFIX)
 DEFAULT_CAPABILITY_TTL_SECONDS = 24 * 60 * 60
+
+# 工作空间范围：personal 每个业务用户独立 DSH_HOME；shared 同一 Linux 用户
+# 下全部业务用户共享同一个 DSH Web Runtime（runtime 身份 = linux_user）。
+WORKSPACE_SCOPE_PERSONAL = "personal"
+WORKSPACE_SCOPE_SHARED = "shared"
+WORKSPACE_SCOPES = (WORKSPACE_SCOPE_PERSONAL, WORKSPACE_SCOPE_SHARED)
+DEFAULT_WORKSPACE_SCOPE = WORKSPACE_SCOPE_PERSONAL
+
+
+def normalize_workspace_scope(value: object) -> str:
+    """校验并归一化工作空间范围；非法值明确报错。"""
+    scope = str(value or "").strip() or DEFAULT_WORKSPACE_SCOPE
+    if scope not in WORKSPACE_SCOPES:
+        raise ValidationError(f"工作空间范围不合法：{value!r}（只支持 personal/shared）")
+    return scope
 
 # 注入的 MCP 插件行与覆盖文件名。
 MCP_OVERLAY_FILENAME = "agent-bridge-mcp.patch.yml"
@@ -42,13 +61,18 @@ MCP_SERVER_NAME = "agent-bridge"
 
 @dataclass(frozen=True)
 class DshWorkspaceCapability:
-    """绑定业务用户、能力平面与数据归属组的短期访问能力。"""
+    """绑定业务用户、能力平面与数据归属组的访问能力。
+
+    ``expires_at_monotonic`` 为 ``None`` 表示不设独立过期，生命周期完全由
+    registry 记账槽位决定（共享 Runtime 的稳定 capability 用此模式，随
+    runtime 停止/回收显式撤销）；个人 Workspace 仍是 24 小时 TTL。
+    """
 
     token: str
     user_id: str
     profile_key: str
     owner_group_key: str
-    expires_at_monotonic: float
+    expires_at_monotonic: float | None
 
 
 @dataclass(frozen=True)
@@ -60,7 +84,13 @@ class WorkspaceSelection:
 
 
 class DshWorkspaceCapabilityRegistry:
-    """只保存当前进程的有效 capability；每个用户同时至多一个。"""
+    """只保存当前进程的有效 capability。
+
+    默认每个业务用户同时至多一个（个人 Workspace 语义，重签发即替换）；
+    共享 Runtime 的稳定 capability 通过独立 ``key`` 签发（``_by_user`` 按
+    key 记账），不占用任何业务用户的唯一槽位，也不会被成员的个人签发/
+    撤销波及。
+    """
 
     def __init__(self) -> None:
         self._items: dict[str, DshWorkspaceCapability] = {}
@@ -73,8 +103,16 @@ class DshWorkspaceCapabilityRegistry:
         user_id: str,
         profile_key: str,
         owner_group_key: str,
-        ttl_seconds: int = DEFAULT_CAPABILITY_TTL_SECONDS,
+        ttl_seconds: int | None = DEFAULT_CAPABILITY_TTL_SECONDS,
+        key: str | None = None,
     ) -> DshWorkspaceCapability:
+        """签发 capability；``key`` 为记账槽位（默认 ``user_id``）。
+
+        ``capability.user_id`` 始终是调用方传入的审计身份（共享 Runtime 传
+        Linux 用户）；``key`` 只决定替换/撤销的槽位——共享 Runtime 使用
+        ``shared-runtime:<linux-user>`` 槽位，成员的个人签发不会触达它。
+        ``ttl_seconds=None`` 表示不设独立过期（绑定 runtime 生命周期）。
+        """
         if not user_id or not profile_key or not owner_group_key:
             raise AccessDenied("DSH Workspace capability 缺少用户、能力平面或归属组")
         token = secrets.token_urlsafe(32)
@@ -83,12 +121,15 @@ class DshWorkspaceCapabilityRegistry:
             user_id=user_id,
             profile_key=profile_key,
             owner_group_key=owner_group_key,
-            expires_at_monotonic=time.monotonic() + max(1, ttl_seconds),
+            expires_at_monotonic=(
+                time.monotonic() + max(1, ttl_seconds) if ttl_seconds is not None else None
+            ),
         )
+        registry_key = key or user_id
         with self._lock:
-            self.revoke_for_user(user_id)
+            self.revoke_by_key(registry_key)
             self._items[token] = capability
-            self._by_user[user_id] = token
+            self._by_user[registry_key] = token
         return capability
 
     def require(
@@ -99,7 +140,11 @@ class DshWorkspaceCapabilityRegistry:
     ) -> DshWorkspaceCapability:
         with self._lock:
             capability = self._items.get(token)
-            if capability is not None and capability.expires_at_monotonic <= time.monotonic():
+            if (
+                capability is not None
+                and capability.expires_at_monotonic is not None
+                and capability.expires_at_monotonic <= time.monotonic()
+            ):
                 self._drop(capability)
                 capability = None
         if capability is None:
@@ -112,18 +157,33 @@ class DshWorkspaceCapabilityRegistry:
         with self._lock:
             capability = self._items.pop(token, None)
             if capability is not None:
-                self._by_user.pop(capability.user_id, None)
+                for key, bound in list(self._by_user.items()):
+                    if bound == token:
+                        self._by_user.pop(key, None)
 
     def revoke_for_user(self, user_id: str) -> None:
+        """撤销业务用户的个人 capability；不影响共享 Runtime 的槽位。"""
+        self.revoke_by_key(user_id)
+
+    def revoke_by_key(self, key: str) -> None:
+        """撤销指定记账槽位上的 capability（个人 = user_id，共享 = 专用 key）。"""
         with self._lock:
-            token = self._by_user.pop(user_id, None)
+            token = self._by_user.pop(key, None)
             if token is not None:
                 self._items.pop(token, None)
 
+    def revoke_all(self) -> None:
+        """清空全部 capability（服务停止回收全部 runtime 时调用）。"""
+        with self._lock:
+            self._items.clear()
+            self._by_user.clear()
+
     def _drop(self, capability: DshWorkspaceCapability) -> None:
         self._items.pop(capability.token, None)
-        if self._by_user.get(capability.user_id) == capability.token:
-            self._by_user.pop(capability.user_id, None)
+        # 槽位 key 不一定是 user_id（共享 Runtime 用专用 key），按 token 反查。
+        for key, bound in list(self._by_user.items()):
+            if bound == capability.token:
+                self._by_user.pop(key, None)
 
 
 def mcp_overlay_path(dsh_home: Path) -> Path:

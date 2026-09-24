@@ -1,15 +1,19 @@
-"""DSH Workspace 反向代理：``/agent-workspace/**`` → 当前用户 runtime。
+"""DSH Workspace 反向代理：``/agent-workspace/**`` → 当前用户个人 runtime，
+``/agent-workspace-shared/**`` → 当前用户所属 Linux 用户的共享 runtime。
 
 复用 dashboard 代理的流式转发骨架（HTTP/SSE 逐块转发、断连检测、hop-by-hop
 头剥离），并补充 Workspace 必需的语义：
 
 - 目标只能来自当前业务用户已登记的 runtime 状态（``require_runtime_target``），
-  不接受 URL 参数指定任意 localhost 端口；
+  不接受 URL 参数指定任意 localhost 端口；共享范围的目标由业务用户所属
+  小组映射的 Linux 用户推导，映射不到即视为未运行；
 - 未运行时兜底触发 ``ensure_running``（线程化，避免阻塞事件循环）；
 - HTTP/WebSocket 双通道；Host/Origin 改写为目标 origin，Location 统一重写回
-  ``/agent-workspace`` 前缀，浏览器地址保持 Agent Bridge 域名与端口；
+  对应工作台前缀，浏览器地址保持 Agent Bridge 域名与端口；
 - DSH 前端以 ``<base href="/">`` 用根绝对路径请求资源、插件与 ``/api/**``，
-  这些请求虽不在前缀下但属于工作台，按 ``workspace_escape_path`` 归属；
+  这些请求虽不在前缀下但属于工作台，按 ``workspace_escape_path`` 认领；
+  scope 依据 Referer 的工作台前缀判定，嵌套文档（插件 studio 等根路径页面）
+  的后续子资源按代理内短期记忆继续归属最近认领它的 scope；
 - 根导航由代理在服务端完成 DSH 的 token→Cookie 换取，token 既不出现在浏览器
   地址栏，也不会因 runtime 重启后的旧 Cookie 而卡死在 401；换取请求不带任何
   浏览器 Cookie（旧会话会让真实 DSH 只回 303 而不下发新 Cookie，形成无限
@@ -26,6 +30,7 @@ import asyncio
 import base64
 import hashlib
 import logging
+import time
 from contextlib import suppress
 from urllib.parse import urlsplit, urlunsplit
 
@@ -39,7 +44,12 @@ from agent_bridge.api.dashboard_proxy import (
     _proxy_stream_response,
 )
 from agent_bridge.core.domain import AgentBridgeError, BackendUnavailable
-from agent_bridge.dsh.workspace import WORKSPACE_PROXY_PREFIX
+from agent_bridge.dsh.workspace import (
+    WORKSPACE_PROXY_PREFIX,
+    WORKSPACE_PROXY_SHARED_PREFIX,
+    WORKSPACE_SCOPE_PERSONAL,
+    WORKSPACE_SCOPE_SHARED,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,11 +65,26 @@ RESERVED_PATH_PREFIXES = (
     "/api/v1",
     "/agent-bridge",
     "/agent-workspace",
+    "/agent-workspace-shared",
     "/static/capabilities",
     "/dashboard",
     "/memory-dashboard",
     "/health",
 )
+
+# 代理前缀 → 工作空间范围：个人与小组共享工作台各自独立路由目标。
+PROXY_PREFIX_SCOPES = {
+    WORKSPACE_PROXY_PREFIX: WORKSPACE_SCOPE_PERSONAL,
+    WORKSPACE_PROXY_SHARED_PREFIX: WORKSPACE_SCOPE_SHARED,
+}
+
+
+def _scope_prefix(workspace_scope: str) -> str:
+    """工作空间范围对应的代理前缀。"""
+    for prefix, scope_name in PROXY_PREFIX_SCOPES.items():
+        if scope_name == workspace_scope:
+            return prefix
+    return WORKSPACE_PROXY_PREFIX
 
 
 def dsh_session_cookie_name(authority: str) -> str:
@@ -82,6 +107,24 @@ def match_workspace_path(path: str) -> str | None:
         suffix = path[len(prefix):]
         return f"/{suffix}"
     return None
+
+
+def match_workspace_route(path: str) -> tuple[str, str] | None:
+    """匹配任一工作台前缀，返回 ``(scope, 上游路径)``。
+
+    个人（``/agent-workspace``）与小组共享（``/agent-workspace-shared``）
+    是同一浏览器中可同时打开的两个入口，前缀即代理判定 scope 的唯一依据。
+    """
+    if path == WORKSPACE_PROXY_SHARED_PREFIX:
+        return WORKSPACE_SCOPE_SHARED, "/"
+    shared_prefix = WORKSPACE_PROXY_SHARED_PREFIX + "/"
+    if path.startswith(shared_prefix):
+        suffix = path[len(shared_prefix):]
+        return WORKSPACE_SCOPE_SHARED, f"/{suffix}"
+    upstream_path = match_workspace_path(path)
+    if upstream_path is None:
+        return None
+    return WORKSPACE_SCOPE_PERSONAL, upstream_path
 
 
 def is_reserved_path(path: str) -> bool:
@@ -120,11 +163,19 @@ def workspace_escape_path(scope: Scope) -> str | None:
         return None
     parsed = urlsplit(referer)
     referer_path = parsed.path
-    if referer_path == WORKSPACE_PROXY_PREFIX or referer_path.startswith(WORKSPACE_PROXY_PREFIX + "/"):
+    if _is_workspace_referer_path(referer_path):
         return path
     if _same_authority_referer(scope, parsed.netloc) and not is_reserved_path(referer_path or "/"):
         return path
     return None
+
+
+def _is_workspace_referer_path(referer_path: str) -> bool:
+    """Referer 是否指向任一工作台前缀（个人或小组共享页面发起的请求）。"""
+    return any(
+        referer_path == prefix or referer_path.startswith(prefix + "/")
+        for prefix in PROXY_PREFIX_SCOPES
+    )
 
 
 def _same_authority_referer(scope: Scope, netloc: str) -> bool:
@@ -210,27 +261,25 @@ def _is_same_origin_websocket(scope: Scope) -> bool:
     return origin_parts.netloc == host
 
 
-def rewrite_workspace_location(location: str, *, target: str) -> str:
+def rewrite_workspace_location(location: str, *, target: str, prefix: str = WORKSPACE_PROXY_PREFIX) -> str:
     """把上游 Location 重写回 Workspace 前缀，浏览器不感知 DSH 端口。"""
     parts = urlsplit(location)
     target_parts = urlsplit(target)
     if parts.scheme or parts.netloc:
         if parts.scheme not in {"http", "https"} or parts.netloc != target_parts.netloc:
             return location
-        path, query, fragment = parts.path or "/", parts.query, parts.fragment
-    else:
-        path, query, fragment = parts.path or "/", parts.query, parts.fragment
-    if path.startswith(f"{WORKSPACE_PROXY_PREFIX}/") or path == WORKSPACE_PROXY_PREFIX:
+    path = parts.path or "/"
+    if path.startswith(f"{prefix}/") or path == prefix:
         rewritten_path = path
     elif path.startswith("/"):
-        rewritten_path = f"{WORKSPACE_PROXY_PREFIX}{path}"
+        rewritten_path = f"{prefix}{path}"
     else:
-        rewritten_path = f"{WORKSPACE_PROXY_PREFIX}/{path}"
-    return urlunsplit(("", "", rewritten_path, query, fragment))
+        rewritten_path = f"{prefix}/{path}"
+    return urlunsplit(("", "", rewritten_path, parts.query, parts.fragment))
 
 
 def _workspace_response_headers(
-    headers: httpx.Headers, *, target: str
+    headers: httpx.Headers, *, target: str, prefix: str = WORKSPACE_PROXY_PREFIX
 ) -> list[tuple[bytes, bytes]]:
     rewritten: list[tuple[bytes, bytes]] = []
     for name, value in headers.multi_items():
@@ -238,7 +287,7 @@ def _workspace_response_headers(
         if lower in RESPONSE_HEADERS_TO_DROP:
             continue
         if name.lower() == "location":
-            value = rewrite_workspace_location(value, target=target)
+            value = rewrite_workspace_location(value, target=target, prefix=prefix)
         rewritten.append((name.encode("latin-1"), value.encode("latin-1")))
     return rewritten
 
@@ -355,22 +404,37 @@ def _forward_ws_headers(scope: Scope, target: str) -> list[tuple[str, str]]:
 
 
 class AgentWorkspaceProxyMiddleware:
+    # 前缀外认领路径 → scope 的短期记忆，按 ``(user_id, path)`` 隔离：不同
+    # 浏览器用户的认领互不可见，避免一个用户的 shared 工作台认领 ``/studio/``
+    # 后把另一个用户的同路径请求带偏。嵌套文档（插件 studio 等根路径页面）
+    # 的后续子资源 Referer 不再带工作台前缀，按“该用户最近一次认领该路径的
+    # scope”继续归属；TTL 过期或被同用户另一 scope 重新认领时自然更新。
+    # 同一用户同时打开 personal/shared 且出现同名嵌套页面的多 tab 场景仍为
+    # 已知限制（记忆按用户内最近认领为准）。
+    _CLAIM_TTL_SECONDS = 6 * 60 * 60
+    _CLAIM_MAX_ENTRIES = 4096
+
     def __init__(self, app: ASGIApp, *, service, identity_resolver) -> None:
         self.app = app
         self.service = service
         self.identity_resolver = identity_resolver
+        self._claimed_scopes: dict[tuple[str, str], tuple[str, float]] = {}
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         path = str(scope.get("path", ""))
-        upstream_path = match_workspace_path(path)
-        if upstream_path is None:
-            upstream_path = workspace_escape_path(scope)
-        if upstream_path is None:
-            await self.app(scope, receive, send)
-            return
+        route = match_workspace_route(path)
+        if route is not None:
+            workspace_scope, upstream_path = route
+        else:
+            escaped = self._resolve_escape_route(scope, self._current_user_id(scope))
+            if escaped is None:
+                await self.app(scope, receive, send)
+                return
+            workspace_scope, upstream_path = escaped
+        prefix = _scope_prefix(workspace_scope)
 
         if scope["type"] == "websocket":
-            await self._proxy_websocket(scope, receive, send, upstream_path)
+            await self._proxy_websocket(scope, receive, send, upstream_path, workspace_scope)
             return
         if scope["type"] != "http":
             await self.app(scope, receive, send)
@@ -380,15 +444,17 @@ class AgentWorkspaceProxyMiddleware:
 
         try:
             user_id = self.identity_resolver.resolve(Request(scope)).user_id
-            target = await self._resolve_target(user_id)
+            target = await self._resolve_target(user_id, workspace_scope)
         except AgentBridgeError as exc:
             await _send_plain(send, exc.status_code, exc.message.encode("utf-8"))
             return
         if target is None:
-            await _send_plain(send, 404, "当前用户没有运行中的 DSH 工作台".encode("utf-8"))
+            await _send_plain(
+                send, 404, "当前用户没有运行中的 DSH 工作台".encode("utf-8")
+            )
             return
 
-        auth = self._workspace_auth(user_id, upstream_path, scope)
+        auth = self._workspace_auth(user_id, upstream_path, scope, workspace_scope)
         if auth is not None:
             auth_path, auth_query = auth
             await self._proxy_root_navigation(
@@ -399,6 +465,8 @@ class AgentWorkspaceProxyMiddleware:
                 target=target,
                 upstream_path=auth_path,
                 auth_query=auth_query,
+                prefix=prefix,
+                workspace_scope=workspace_scope,
             )
             return
 
@@ -408,17 +476,79 @@ class AgentWorkspaceProxyMiddleware:
             send,
             upstream_path=upstream_path,
             target=target,
-            location_prefix=WORKSPACE_PROXY_PREFIX,
+            location_prefix=prefix,
             location_key="",
             error_label="DSH workspace proxy failed",
             response_header_builder=lambda headers: _workspace_response_headers(
-                headers, target=target
+                headers, target=target, prefix=prefix
             ),
             request_header_overrides=_request_overrides(scope, target),
         )
 
+    def _current_user_id(self, scope: Scope) -> str:
+        """解析当前业务用户（认领隔离维度）；解析失败返回空串，仅影响记忆键。"""
+        from starlette.requests import HTTPConnection
+
+        try:
+            return str(self.identity_resolver.resolve(HTTPConnection(scope)).user_id or "")
+        except Exception:
+            return ""
+
+    def _resolve_escape_route(self, scope: Scope, user_id: str = "") -> tuple[str, str] | None:
+        """前缀外请求的归属解析：返回 ``(scope, 上游路径)``。
+
+        HTTP 按 Referer 认领：Referer 指向任一工作台前缀时，scope 即该前缀
+        的范围；嵌套文档等非前缀 Referer 先查该用户的短期记忆（该用户最近
+        把哪条路径认领给了哪个 scope），再走同 authority 非保留路径兜底（默认
+        个人）。WebSocket 无 Referer，按同源 Origin 认领，默认个人范围。
+        """
+        upstream_path = workspace_escape_path(scope)
+        if upstream_path is None:
+            return None
+        referer = _header_value(scope, "referer")
+        if referer is not None:
+            parsed = urlsplit(referer)
+            referer_path = parsed.path
+            for prefix, workspace_scope in PROXY_PREFIX_SCOPES.items():
+                if referer_path == prefix or referer_path.startswith(prefix + "/"):
+                    # 记录当前请求路径：嵌套页面的子资源将以它为 Referer。
+                    self._remember_claim(user_id, upstream_path, workspace_scope)
+                    return workspace_scope, upstream_path
+            remembered = self._claimed_scope_for(user_id, referer_path)
+            if remembered is not None:
+                self._remember_claim(user_id, upstream_path, remembered)
+                return remembered, upstream_path
+        self._remember_claim(user_id, upstream_path, WORKSPACE_SCOPE_PERSONAL)
+        return WORKSPACE_SCOPE_PERSONAL, upstream_path
+
+    def _remember_claim(self, user_id: str, path: str, workspace_scope: str) -> None:
+        """记录（或刷新）某用户路径被某 scope 的页面认领；带 TTL 与容量上限。"""
+        if not path or path == "/":
+            return
+        now = time.monotonic()
+        if len(self._claimed_scopes) >= self._CLAIM_MAX_ENTRIES:
+            self._claimed_scopes = {
+                key: (value, seen)
+                for key, (value, seen) in self._claimed_scopes.items()
+                if now - seen < self._CLAIM_TTL_SECONDS
+            }
+        if len(self._claimed_scopes) >= self._CLAIM_MAX_ENTRIES:
+            oldest = min(self._claimed_scopes.items(), key=lambda item: item[1][1])[0]
+            self._claimed_scopes.pop(oldest, None)
+        self._claimed_scopes[(user_id, path)] = (workspace_scope, now)
+
+    def _claimed_scope_for(self, user_id: str, path: str) -> str | None:
+        remembered = self._claimed_scopes.get((user_id, path))
+        if remembered is None:
+            return None
+        workspace_scope, seen = remembered
+        if time.monotonic() - seen >= self._CLAIM_TTL_SECONDS:
+            self._claimed_scopes.pop((user_id, path), None)
+            return None
+        return workspace_scope
+
     def _workspace_auth(
-        self, user_id: str, upstream_path: str, scope: Scope
+        self, user_id: str, upstream_path: str, scope: Scope, workspace_scope: str
     ) -> tuple[str, str] | None:
         """根导航需要补 DSH 启动 token 时返回该鉴权入口。
 
@@ -429,7 +559,7 @@ class AgentWorkspaceProxyMiddleware:
             return None
         if "token=" in scope.get("query_string", b"").decode("latin-1"):
             return None
-        return self.service.dsh.workspace_auth(user_id)
+        return self.service.dsh.workspace_auth(user_id, scope=workspace_scope)
 
     async def _perform_exchange(
         self,
@@ -467,6 +597,8 @@ class AgentWorkspaceProxyMiddleware:
         target: str,
         upstream_path: str,
         auth_query: str,
+        prefix: str = WORKSPACE_PROXY_PREFIX,
+        workspace_scope: str = WORKSPACE_SCOPE_PERSONAL,
     ) -> None:
         """服务端完成 DSH 首次鉴权：带 token 换取会话 Cookie 后转发最终页面。
 
@@ -496,7 +628,7 @@ class AgentWorkspaceProxyMiddleware:
         if pair is None:
             try:
                 refreshed = await asyncio.to_thread(
-                    self.service.dsh.refresh_workspace_auth, user_id
+                    self.service.dsh.refresh_workspace_auth, user_id, scope=workspace_scope
                 )
             except Exception as exc:
                 logger.warning(
@@ -532,11 +664,11 @@ class AgentWorkspaceProxyMiddleware:
                 send,
                 upstream_path=upstream_path,
                 target=target,
-                location_prefix=WORKSPACE_PROXY_PREFIX,
+                location_prefix=prefix,
                 location_key="",
                 error_label="DSH workspace proxy failed",
                 response_header_builder=lambda headers: _workspace_response_headers(
-                    headers, target=target
+                    headers, target=target, prefix=prefix
                 ),
                 request_header_overrides=_request_overrides(scope, target),
             )
@@ -559,11 +691,11 @@ class AgentWorkspaceProxyMiddleware:
             send,
             upstream_path=follow_path,
             target=target,
-            location_prefix=WORKSPACE_PROXY_PREFIX,
+            location_prefix=prefix,
             location_key="",
             error_label="DSH workspace proxy failed",
             response_header_builder=lambda headers: _workspace_response_headers(
-                headers, target=target
+                headers, target=target, prefix=prefix
             ),
             query_override=follow_query,
             request_header_overrides={
@@ -577,14 +709,20 @@ class AgentWorkspaceProxyMiddleware:
             extra_response_headers=_session_cookie_headers(exchange.headers, authority),
         )
 
-    async def _resolve_target(self, user_id: str) -> str | None:
-        target = self.service.dsh.require_runtime_target(user_id)
+    async def _resolve_target(self, user_id: str, workspace_scope: str) -> str | None:
+        target = self.service.dsh.require_runtime_target(user_id, scope=workspace_scope)
         if target is not None:
             return target
-        logger.info("DSH Workspace proxy triggered on-demand startup user=%s", user_id)
+        logger.info(
+            "DSH Workspace proxy triggered on-demand startup user=%s scope=%s",
+            user_id,
+            workspace_scope,
+        )
         try:
             await asyncio.wait_for(
-                asyncio.to_thread(self.service.dsh.ensure_running, user_id),
+                asyncio.to_thread(
+                    self.service.dsh.ensure_running, user_id, scope=workspace_scope
+                ),
                 timeout=ENSURE_TIMEOUT_SECONDS,
             )
         except AgentBridgeError:
@@ -592,12 +730,17 @@ class AgentWorkspaceProxyMiddleware:
             # returned directly to the caller (e.g., users without a group receive 403)
             raise
         except TimeoutError:
-            logger.warning("DSH Workspace on-demand startup timed out user=%s timeout=%.0fs", user_id, ENSURE_TIMEOUT_SECONDS)
+            logger.warning("DSH Workspace on-demand startup timed out user=%s scope=%s timeout=%.0fs", user_id, workspace_scope, ENSURE_TIMEOUT_SECONDS)
             raise BackendUnavailable("DSH workspace startup timed out, please try again later") from None
-        return self.service.dsh.require_runtime_target(user_id)
+        return self.service.dsh.require_runtime_target(user_id, scope=workspace_scope)
 
     async def _proxy_websocket(
-        self, scope: Scope, receive: Receive, send: Send, upstream_path: str
+        self,
+        scope: Scope,
+        receive: Receive,
+        send: Send,
+        upstream_path: str,
+        workspace_scope: str = WORKSPACE_SCOPE_PERSONAL,
     ) -> None:
         from websockets.asyncio.client import connect
         from websockets.exceptions import WebSocketException
@@ -611,7 +754,7 @@ class AgentWorkspaceProxyMiddleware:
 
         try:
             user_id = self.identity_resolver.resolve(HTTPConnection(scope)).user_id
-            target = await self._resolve_target(user_id)
+            target = await self._resolve_target(user_id, workspace_scope)
         except AgentBridgeError as exc:
             await send({"type": "websocket.close", "code": 1008, "reason": exc.message})
             return

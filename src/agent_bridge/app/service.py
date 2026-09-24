@@ -453,11 +453,12 @@ class AgentBridgeService:
             )
         service.model_evaluations.recover_interrupted_runs()
         recovered_dsh = service.dsh.recover()
-        if recovered_dsh["kept"] or recovered_dsh["cleaned"]:
+        if recovered_dsh["kept"] or recovered_dsh["cleaned"] or recovered_dsh["stopped_shared"]:
             logger.info(
-                "DSH Runtime 遗留实例识别完成 kept=%d cleaned=%d",
+                "DSH Runtime 遗留实例识别完成 kept=%d cleaned=%d stopped_shared=%d",
                 recovered_dsh["kept"],
                 recovered_dsh["cleaned"],
+                recovered_dsh["stopped_shared"],
             )
         migrate_toml_backends_to_db(paths, service.store)
         service.registry = create_registry_from_db(paths, service.store)

@@ -8,10 +8,17 @@
 spec 列表，0600、归属目标 Linux 用户）：web 进程启动前补装名单中尚未
 记录的条目，全部就位后不再触盘——插件安装实际只发生在首次初始化，以及
 版本名单新增条目时的一次补装；名单删除条目不会卸载已装插件。
+
+在此之上维护一份依赖指纹 ``<DSH_HOME>/.agent-bridge-plugin-state.json``
+（受管清单规范化后的 SHA-256）：依赖未变化且上次全部安装成功时，冷启动
+直接跳过全部插件命令；任一插件安装失败/超时不写成功状态，下次启动重试。
+状态文件按 DSH_HOME 隔离，个人与小组共享工作台互不影响。
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 from pathlib import Path
@@ -26,6 +33,10 @@ PLUGIN_PROFILE = "web"
 PLUGIN_LIST_FILENAME = "dsh-plugins.txt"
 # 已安装 marker 文件（相对 DSH_HOME）。
 PLUGIN_MARKER_FILENAME = "agent-bridge-plugins.txt"
+# 依赖指纹状态文件（相对 DSH_HOME）；损坏或缺失视为需要重新校验/安装。
+PLUGIN_STATE_FILENAME = ".agent-bridge-plugin-state.json"
+# 指纹算法版本：影响安装结果的声明格式变化时递增，强制全量重装。
+PLUGIN_STATE_FORMAT_VERSION = 1
 # 显式声明「不构建」的原生依赖（随版本维护）：pnpm 10 默认拦截依赖的
 # install/postinstall 脚本并给出 ``Ignored build scripts`` 待定告警，构建
 # 与否悬而未决。node-pty 只随包附带 win32/darwin 预编译、Linux 必须走
@@ -146,8 +157,65 @@ def build_install_command(dsh_binary: str, spec: str) -> list[str]:
     return [dsh_binary, "plugin", "--profile", PLUGIN_PROFILE, "add", spec]
 
 
+def plugin_state_path(dsh_home: Path) -> Path:
+    return Path(dsh_home) / PLUGIN_STATE_FILENAME
+
+
+def compute_plugin_fingerprint(specs: list[str]) -> str:
+    """对规范化后的受管插件清单计算 SHA-256 指纹。
+
+    指纹覆盖影响安装结果的全部声明（插件名/版本/tag/commit/来源都体现在
+    spec 字符串中）与清单格式版本；解析入口 ``parse_plugin_list`` 已保证
+    去空白、去注释、保序去重，同一份名单文本得到稳定指纹。
+    """
+    canonical = json.dumps(
+        {"format_version": PLUGIN_STATE_FORMAT_VERSION, "specs": list(specs)},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return f"sha256:{digest}"
+
+
+def read_plugin_state(dsh_home: Path) -> dict | None:
+    """读取依赖指纹状态；文件缺失或损坏时返回 None（触发重新校验/安装）。"""
+    path = plugin_state_path(dsh_home)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError):
+        logger.warning("DSH 插件依赖状态文件损坏，将重新校验安装 path=%s", path)
+        return None
+    if not isinstance(payload, dict) or not payload.get("fingerprint"):
+        return None
+    return payload
+
+
+def write_plugin_state(dsh_home: Path, *, fingerprint: str, specs: list[str]) -> Path:
+    """覆写依赖指纹状态（调用方负责归属与权限）；仅在全部插件安装成功后调用。"""
+    from agent_bridge.core.timeutil import utc_iso
+
+    path = plugin_state_path(dsh_home)
+    path.write_text(
+        json.dumps(
+            {
+                "fingerprint": fingerprint,
+                "installed_at": utc_iso(),
+                "format_version": PLUGIN_STATE_FORMAT_VERSION,
+                "plugins": list(specs),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
 def ensure_marker_owner(path: Path, *, uid: int, gid: int) -> None:
-    """root 下把 marker 归属目标 Linux 用户（非 root 或同用户时跳过）。"""
+    """root 下把 marker/状态文件归属目标 Linux 用户（非 root 或同用户时跳过）。"""
     if os.geteuid() != 0 or uid == os.geteuid():
         return
     try:

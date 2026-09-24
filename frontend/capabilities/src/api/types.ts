@@ -1472,8 +1472,11 @@ export interface DshRuntimeConfigUpdate {
   expected_edit_token?: string | null
 }
 
+export type DshWorkspaceScope = 'personal' | 'shared'
+
 export interface DshRuntimeStatus {
   user_id: string
+  scope: DshWorkspaceScope
   group_key: string | null
   linux_user: string
   config_dir: string
@@ -1486,6 +1489,7 @@ export interface DshRuntimeStatus {
 
 export interface DshWorkspaceAuthorization {
   user_id: string
+  scope: DshWorkspaceScope
   group_key: string | null
   linux_user: string
   config_dir: string

@@ -597,6 +597,162 @@ def test_install_plugins_writes_build_blocks_without_commands(
     assert blocked["allowBuilds"] == {"node-pty": False}
 
 
+# -- 空闲回收默认值与插件依赖指纹（issue #14） --
+
+
+def test_default_idle_timeout_is_720_and_explicit_config_preserved(service) -> None:
+    from agent_bridge.dsh.config import DEFAULT_IDLE_TIMEOUT_MINUTES
+
+    assert DEFAULT_IDLE_TIMEOUT_MINUTES == 720
+    # 未显式保存（无配置行 / 行值为 0）时回落新默认 720。
+    assert service.dsh_configs.runtime_config_for_runtime()["idle_timeout_minutes"] == 720
+    with service.store.connect() as conn:
+        conn.execute(
+            "INSERT INTO dsh_runtime_config (id, idle_timeout_minutes) VALUES (1, 0)"
+            " ON CONFLICT(id) DO UPDATE SET idle_timeout_minutes = 0"
+        )
+    assert service.dsh_configs.runtime_config_for_runtime()["idle_timeout_minutes"] == 720
+    # 已显式保存的值（如升级前的 120）不被默认值覆盖。
+    with service.store.connect() as conn:
+        conn.execute("UPDATE dsh_runtime_config SET idle_timeout_minutes = 120 WHERE id = 1")
+    assert service.dsh_configs.runtime_config_for_runtime()["idle_timeout_minutes"] == 120
+
+
+def test_plugin_fingerprint_hit_skips_all_install_commands(
+    service, home, passwd_lookup, monkeypatch, tmp_path
+) -> None:
+    from agent_bridge.dsh import plugins
+
+    configure_runtime(service)
+    list_path = tmp_path / "dsh-plugins.txt"
+    list_path.write_text("dsh-context\ndeepseek-idesign\n", encoding="utf-8")
+    monkeypatch.setattr(plugins, "plugin_list_path", lambda: list_path)
+    launcher = install_fake_launcher(service, home, passwd_lookup)
+    patch_lifecycle(service, monkeypatch, launcher=launcher)
+    config_dir = home / "groupa" / ".config" / "dsh" / "user1"
+    config_dir.mkdir(parents=True)
+    _seed_profile(config_dir)
+
+    service.dsh.ensure_running("user1")
+    first_install_commands = len(launcher.once_calls)
+    assert first_install_commands == 2
+    state_path = plugins.plugin_state_path(config_dir)
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["fingerprint"] == plugins.compute_plugin_fingerprint(
+        ["dsh-context", "deepseek-idesign"]
+    )
+    assert state["plugins"] == ["dsh-context", "deepseek-idesign"]
+
+    # 依赖未变化：重启完全跳过插件安装命令（零 run_once）。
+    service.dsh._stop_state(service.dsh._read_state("personal", "user1"), "personal", "user1")
+    service.dsh.ensure_running("user1")
+    assert len(launcher.once_calls) == first_install_commands
+    assert (
+        json.loads(state_path.read_text(encoding="utf-8"))["fingerprint"] == state["fingerprint"]
+    )
+
+
+def test_plugin_fingerprint_change_triggers_reinstall(
+    service, home, passwd_lookup, monkeypatch, tmp_path
+) -> None:
+    from agent_bridge.dsh import plugins
+
+    configure_runtime(service)
+    list_path = tmp_path / "dsh-plugins.txt"
+    list_path.write_text("dsh-context\n", encoding="utf-8")
+    monkeypatch.setattr(plugins, "plugin_list_path", lambda: list_path)
+    launcher = install_fake_launcher(service, home, passwd_lookup)
+    patch_lifecycle(service, monkeypatch, launcher=launcher)
+    config_dir = home / "groupa" / ".config" / "dsh" / "user1"
+    config_dir.mkdir(parents=True)
+    _seed_profile(config_dir)
+
+    service.dsh.ensure_running("user1")
+    assert len(launcher.once_calls) == 1
+    # 名单版本变化（版本号变化）→ 重新执行安装。
+    list_path.write_text("dsh-context@0.9.0\n", encoding="utf-8")
+    service.dsh._stop_state(service.dsh._read_state("personal", "user1"), "personal", "user1")
+    service.dsh.ensure_running("user1")
+    assert len(launcher.once_calls) == 2
+    state = json.loads(plugins.plugin_state_path(config_dir).read_text(encoding="utf-8"))
+    assert state["plugins"] == ["dsh-context@0.9.0"]
+
+
+def test_plugin_failure_does_not_write_success_fingerprint_and_retries(
+    service, home, passwd_lookup, monkeypatch, tmp_path
+) -> None:
+    from agent_bridge.dsh import plugins
+
+    configure_runtime(service)
+    list_path = tmp_path / "dsh-plugins.txt"
+    list_path.write_text("dsh-context\ndsh-broken\n", encoding="utf-8")
+    monkeypatch.setattr(plugins, "plugin_list_path", lambda: list_path)
+    launcher = install_fake_launcher(service, home, passwd_lookup)
+    patch_lifecycle(service, monkeypatch, launcher=launcher)
+    config_dir = home / "groupa" / ".config" / "dsh" / "user1"
+    config_dir.mkdir(parents=True)
+    _seed_profile(config_dir)
+
+    def handler(command: list[str]) -> tuple[int, str]:
+        return (1, "install failed") if "dsh-broken" in command else (0, "installed")
+
+    launcher.once_handler = handler
+    service.dsh.ensure_running("user1")
+    state_path = plugins.plugin_state_path(config_dir)
+    # 安装失败：不写成功指纹
+    assert not state_path.exists()
+    commands_after_first_start = len(launcher.once_calls)
+
+    # 下次启动重试失败条目（成功条目不重装），全部就位后才写指纹。
+    launcher.once_handler = None
+    service.dsh._stop_state(service.dsh._read_state("personal", "user1"), "personal", "user1")
+    service.dsh.ensure_running("user1")
+    retried_specs = [
+        call["command"][-1] for call in launcher.once_calls[commands_after_first_start:]
+    ]
+    assert retried_specs == ["dsh-broken"]
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["plugins"] == ["dsh-context", "dsh-broken"]
+
+
+def test_plugin_corrupted_state_rechecks_and_rewrites(
+    service, home, passwd_lookup, monkeypatch, tmp_path
+) -> None:
+    from agent_bridge.dsh import plugins
+
+    configure_runtime(service)
+    list_path = tmp_path / "dsh-plugins.txt"
+    list_path.write_text("dsh-context\n", encoding="utf-8")
+    monkeypatch.setattr(plugins, "plugin_list_path", lambda: list_path)
+    launcher = install_fake_launcher(service, home, passwd_lookup)
+    patch_lifecycle(service, monkeypatch, launcher=launcher)
+    config_dir = home / "groupa" / ".config" / "dsh" / "user1"
+    config_dir.mkdir(parents=True)
+    _seed_profile(config_dir)
+
+    service.dsh.ensure_running("user1")
+    state_path = plugins.plugin_state_path(config_dir)
+    state_path.write_text("{not-json", encoding="utf-8")
+
+    # 状态损坏：重新校验；marker 齐全时无需执行安装命令即可补写指纹。
+    service.dsh._stop_state(service.dsh._read_state("personal", "user1"), "personal", "user1")
+    service.dsh.ensure_running("user1")
+    assert len(launcher.once_calls) == 1
+    assert json.loads(state_path.read_text(encoding="utf-8"))["plugins"] == ["dsh-context"]
+
+
+def test_plugin_fingerprint_is_stable_and_version_sensitive(tmp_path) -> None:
+    from agent_bridge.dsh import plugins
+
+    base = plugins.compute_plugin_fingerprint(["a@1", "b@2"])
+    assert base == plugins.compute_plugin_fingerprint(["a@1", "b@2"])
+    # 顺序与内容都影响指纹
+    assert base != plugins.compute_plugin_fingerprint(["b@2", "a@1"])
+    assert base != plugins.compute_plugin_fingerprint(["a@2", "b@2"])
+    assert base != plugins.compute_plugin_fingerprint(["a@1", "b@2", "c@3"])
+    assert base.startswith("sha256:")
+
+
 def test_plugins_install_before_web_start_and_only_once(
     service, home, passwd_lookup, monkeypatch, tmp_path
 ) -> None:
@@ -622,7 +778,7 @@ def test_plugins_install_before_web_start_and_only_once(
     assert plugins.read_installed_specs(config_dir) == ["dsh-context", "deepseek-idesign"]
 
     # 重启 runtime：marker 齐全，直接启动、不再执行任何安装命令
-    service.dsh._stop_state(service.dsh._read_state("user1"), "user1")
+    service.dsh._stop_state(service.dsh._read_state("personal", "user1"), "personal", "user1")
     service.dsh.ensure_running("user1")
     assert len(launcher.once_calls) == 2
     second_start_index = len(launcher.order) - 1
@@ -630,7 +786,7 @@ def test_plugins_install_before_web_start_and_only_once(
 
     # 名单缺失（等价于版本名单为空）同样零执行
     list_path.unlink()
-    service.dsh._stop_state(service.dsh._read_state("user1"), "user1")
+    service.dsh._stop_state(service.dsh._read_state("personal", "user1"), "personal", "user1")
     service.dsh.ensure_running("user1")
     assert len(launcher.once_calls) == 2
 
@@ -687,7 +843,7 @@ def test_auth_entry_is_captured_from_start_log(service, home, passwd_lookup, mon
         encoding="utf-8",
     )
     service.dsh.ensure_running("user1")
-    state = service.dsh._read_state("user1")
+    state = service.dsh._read_state("personal", "user1")
     assert state["auth_path"] == "/"
     assert state["auth_query"] == "token=launch-token-abc"
     assert service.dsh.workspace_auth("user1") == ("/", "token=launch-token-abc")
@@ -732,13 +888,13 @@ def test_dead_process_state_is_restarted(service, home, passwd_lookup, monkeypat
         "started_at": time.time() - 3600,
         "last_access_at": time.time() - 3600,
     }
-    service.dsh._write_state("user1", state)
+    service.dsh._write_state("personal", "user1", state)
 
     result = service.dsh.ensure_running("user1")
     assert result["status"] == "running"
     assert len(launcher.starts) == 1
     assert terminated == []  # 进程已死，无需发信号
-    assert service.dsh._read_state("user1")["pid"] == launcher.starts[0]["pid"]
+    assert service.dsh._read_state("personal", "user1")["pid"] == launcher.starts[0]["pid"]
 
 
 def test_wedged_process_is_restarted_after_timeout(service, home, passwd_lookup, monkeypatch) -> None:
@@ -758,7 +914,7 @@ def test_wedged_process_is_restarted_after_timeout(service, home, passwd_lookup,
         "started_at": time.time() - 3600,
         "last_access_at": time.time() - 3600,
     }
-    service.dsh._write_state("user1", state)
+    service.dsh._write_state("personal", "user1", state)
 
     result = service.dsh.ensure_running("user1")
     assert result["status"] == "running"
@@ -783,7 +939,7 @@ def test_starting_instance_is_reused_without_restart(service, home, passwd_looku
         "started_at": time.time() - 5,
         "last_access_at": time.time() - 5,
     }
-    service.dsh._write_state("user1", state)
+    service.dsh._write_state("personal", "user1", state)
 
     result = service.dsh.ensure_running("user1")
     assert result["status"] == "starting"
@@ -811,7 +967,7 @@ def test_group_change_restarts_runtime(service, home, passwd_lookup, monkeypatch
         "started_at": time.time(),
         "last_access_at": time.time(),
     }
-    service.dsh._write_state("user1", state)
+    service.dsh._write_state("personal", "user1", state)
 
     service.access.set_user_group(actor="root", user_id="user1", group_key="groupb")
     result = service.dsh.ensure_running("user1")
@@ -839,11 +995,11 @@ def test_stop_runtime_keeps_config_dir(service, home, passwd_lookup, monkeypatch
         "started_at": time.time(),
         "last_access_at": time.time(),
     }
-    service.dsh._write_state("user1", state)
+    service.dsh._write_state("personal", "user1", state)
 
     stopped = service.dsh.stop_runtime("user1")
     assert stopped["stopped"] is True
-    assert service.dsh._read_state("user1") is None
+    assert service.dsh._read_state("personal", "user1") is None
     # 停止 Runtime 不删除用户 DSH 配置和 session 数据
     assert (config_dir / "session.json").exists()
 
@@ -855,6 +1011,7 @@ def test_idle_reaper_stops_expired_only(service, home, passwd_lookup, monkeypatc
     old = time.time() - 10 * 24 * 60 * 60
     for user_id, pid, port, last_access in (("user1", 410300, 48400, old), ("user2", 410301, 48401, time.time())):
         service.dsh._write_state(
+            "personal",
             user_id,
             {
                 "user_id": user_id,
@@ -871,14 +1028,15 @@ def test_idle_reaper_stops_expired_only(service, home, passwd_lookup, monkeypatc
 
     stopped = service.dsh.stop_idle_expired()
     assert stopped == ["user1"]
-    assert service.dsh._read_state("user1") is None
-    assert service.dsh._read_state("user2") is not None
+    assert service.dsh._read_state("personal", "user1") is None
+    assert service.dsh._read_state("personal", "user2") is not None
     assert 410300 in terminated and 410301 not in terminated
 
 
 def test_touch_refreshes_last_access(service, monkeypatch) -> None:
     old = time.time() - 3600
     service.dsh._write_state(
+        "personal",
         "user1",
         {
             "user_id": "user1",
@@ -893,13 +1051,14 @@ def test_touch_refreshes_last_access(service, monkeypatch) -> None:
         },
     )
     service.dsh.touch_runtime("user1")
-    assert service.dsh._read_state("user1")["last_access_at"] > old
+    assert service.dsh._read_state("personal", "user1")["last_access_at"] > old
 
 
 def test_recover_cleans_dead_and_keeps_alive(service, monkeypatch) -> None:
     patch_lifecycle(service, monkeypatch, alive_pids={410500}, healthy_ports={48400})
     for user_id, pid in (("user1", 410500), ("user2", 410501)):
         service.dsh._write_state(
+            "personal",
             user_id,
             {
                 "user_id": user_id,
@@ -914,15 +1073,14 @@ def test_recover_cleans_dead_and_keeps_alive(service, monkeypatch) -> None:
             },
         )
     result = service.dsh.recover()
-    assert result == {"kept": 1, "cleaned": 1}
-    assert service.dsh._read_state("user1") is not None
-    assert service.dsh._read_state("user2") is None
+    assert result == {"kept": 1, "cleaned": 1, "stopped_shared": 0}
+    assert service.dsh._read_state("personal", "user1") is not None
+    assert service.dsh._read_state("personal", "user2") is None
 
 
 def test_port_pool_skips_occupied(service, monkeypatch) -> None:
     service.dsh._write_state(
-        "user2",
-        {
+            "personal", "user2", {
             "user_id": "user2",
             "group_key": "groupa",
             "linux_user": "groupa",
@@ -942,8 +1100,7 @@ def test_port_pool_skips_occupied(service, monkeypatch) -> None:
 def test_require_runtime_target_reads_registered_state_only(service, monkeypatch) -> None:
     patch_lifecycle(service, monkeypatch, alive_pids={410700}, healthy_ports={48410})
     service.dsh._write_state(
-        "user1",
-        {
+            "personal", "user1", {
             "user_id": "user1",
             "group_key": "groupa",
             "linux_user": "groupa",
@@ -958,7 +1115,7 @@ def test_require_runtime_target_reads_registered_state_only(service, monkeypatch
     target = service.dsh.require_runtime_target("user1")
     assert target == "http://127.0.0.1:48410"
     # 访问刷新了空闲时间
-    assert service.dsh._read_state("user1")["last_access_at"] > time.time() - 60
+    assert service.dsh._read_state("personal", "user1")["last_access_at"] > time.time() - 60
     assert service.dsh.require_runtime_target("user2") is None
 
 

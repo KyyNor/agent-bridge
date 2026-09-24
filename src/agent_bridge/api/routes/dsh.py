@@ -17,23 +17,31 @@ def create_dsh_routes(service, actor) -> APIRouter:
     router = APIRouter(prefix="/dsh", tags=["dsh"])
 
     @router.get("/runtime")
-    def get_runtime(current_actor: str = Depends(actor)) -> dict[str, Any]:
-        return service.dsh.runtime_status(current_actor)
+    def get_runtime(
+        scope: str = "personal", current_actor: str = Depends(actor)
+    ) -> dict[str, Any]:
+        return service.dsh.runtime_status(current_actor, scope=scope)
 
     @router.post("/workspace/authorize")
     def authorize_workspace(
         payload: DshWorkspaceAuthorizeRequest,
         current_actor: str = Depends(actor),
     ) -> dict[str, Any]:
-        return service.dsh.authorize_workspace(current_actor, profile_key=payload.profile_key)
+        return service.dsh.authorize_workspace(
+            current_actor, profile_key=payload.profile_key, scope=payload.scope
+        )
 
     @router.post("/runtime/ensure")
-    def ensure_runtime(current_actor: str = Depends(actor)) -> dict[str, Any]:
-        return service.dsh.ensure_running(current_actor)
+    def ensure_runtime(
+        scope: str = "personal", current_actor: str = Depends(actor)
+    ) -> dict[str, Any]:
+        return service.dsh.ensure_running(current_actor, scope=scope)
 
     @router.post("/runtime/stop")
-    def stop_runtime(current_actor: str = Depends(actor)) -> dict[str, Any]:
-        return service.dsh.stop_runtime(current_actor)
+    def stop_runtime(
+        scope: str = "personal", current_actor: str = Depends(actor)
+    ) -> dict[str, Any]:
+        return service.dsh.stop_runtime(current_actor, scope=scope)
 
     @router.get("/runtimes")
     def list_runtimes(current_actor: str = Depends(actor)) -> dict[str, Any]:
