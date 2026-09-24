@@ -768,6 +768,11 @@ CREATE TABLE IF NOT EXISTS workflow_run_artifacts (
 );
 CREATE INDEX IF NOT EXISTS idx_workflow_run_artifacts_run_node
   ON workflow_run_artifacts(run_id, node_id);
+-- 数据生命周期删除历史产物时的引用保护（NOT EXISTS 按 artifact_id 反查）：
+-- 主键 (run_id, node_id, artifact_id) 的前缀覆盖不到 artifact_id，缺该索引
+-- 会退化为逐行扫描。
+CREATE INDEX IF NOT EXISTS idx_workflow_run_artifacts_artifact
+  ON workflow_run_artifacts(artifact_id);
 
 CREATE TABLE IF NOT EXISTS workflow_run_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

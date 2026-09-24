@@ -56,7 +56,14 @@ def _make_tool_log(store, log_id: str, days_ago: float) -> None:
         )
 
 
-def _make_agent_run(store, run_key: str, days_ago: float, *, cwd: str | None = None) -> None:
+def _make_agent_run(
+    store,
+    run_key: str,
+    days_ago: float,
+    *,
+    cwd: str | None = None,
+    status: str = "completed",
+) -> None:
     store.agent_runs.create(
         run_key=run_key,
         agent_name="design_workflow",
@@ -69,7 +76,8 @@ def _make_agent_run(store, run_key: str, days_ago: float, *, cwd: str | None = N
     )
     with store.log_connect() as conn:
         conn.execute(
-            "UPDATE agent_runs SET created_at = ? WHERE run_key = ?", (_stamp(days_ago), run_key)
+            "UPDATE agent_runs SET created_at = ?, status = ? WHERE run_key = ?",
+            (_stamp(days_ago), status, run_key),
         )
 
 
@@ -288,6 +296,17 @@ def test_workflow_run_logs_and_script_runs_windows(service, retention) -> None:
 
 
 # -- P1：workflow_runs 级联 + 产物 + FTS + temp_dir --
+
+
+def _insert_workflow_run_row(conn, run_id: str, status: str, days_ago: float) -> None:
+    conn.execute(
+        """
+        INSERT INTO workflow_runs (run_id, workflow_key, profile_key, status, temp_dir,
+                                   started_at, finished_at)
+        VALUES (?, 'wf_ret', 'dev', ?, '', ?, ?)
+        """,
+        (run_id, status, _stamp(days_ago), _stamp(days_ago)),
+    )
 
 
 def _seed_workflow_run(store, run_id: str, days_ago: float, *, temp_dir: str = "") -> None:
@@ -825,3 +844,184 @@ def test_first_upgrade_cleanup_failure_leaves_no_marker(service, retention, monk
             "SELECT value FROM data_retention_meta WHERE key = 'retention_v1.cleanup'"
         ).fetchone()
     assert row is None
+
+
+# -- review 二轮修复回归：引用保护、活动任务保护、首启 VACUUM 阻塞 --
+
+
+def test_stale_artifact_referenced_by_recent_run_is_protected(service, retention) -> None:
+    """超期历史产物仍被保留期内的 run 复用时不得删除；引用 run 超窗后才可删。"""
+    _seed_workflow_run(service.store, "run_recent", 10)
+    service.store.upsert_workflow_artifact(
+        workflow_key="wf_ret",
+        profile_key="dev",
+        run_id="run_recent",
+        task_key="t1",
+        title="复用产物",
+        path="reports/reuse.md",
+        tags=[],
+        format="markdown",
+        summary="摘要",
+        content="被复用的产物 unique_artifact_guard",
+        metadata={},
+    )
+    artifact = service.store.search_workflow_artifacts(
+        profile_key="dev", query="unique_artifact_guard", tags=[], path=None,
+        workflow_key=None, limit=10,
+    )[0]
+    # 该产物 70 天前产出且已非 current，但被 10 天前的 run 经
+    # workflow_run_artifacts 复用引用。
+    with service.store.connect() as conn:
+        conn.execute(
+            "UPDATE workflow_artifacts SET is_current = 0, updated_at = ? WHERE artifact_id = ?",
+            (_stamp(70), artifact["artifact_id"]),
+        )
+        conn.execute(
+            """
+            INSERT INTO workflow_run_artifacts (run_id, node_id, artifact_id)
+            VALUES ('run_recent', 'n1', ?)
+            ON CONFLICT(run_id, node_id, artifact_id) DO NOTHING
+            """,
+            (artifact["artifact_id"],),
+        )
+
+    summary = retention.run_daily_cleanup()
+
+    assert summary["main_db"]["deleted"]["workflow_artifacts"] == 0
+    with service.store.connect() as conn:
+        kept = conn.execute(
+            "SELECT COUNT(*) FROM workflow_artifacts WHERE artifact_id = ?",
+            (artifact["artifact_id"],),
+        ).fetchone()[0]
+        refs = conn.execute(
+            "SELECT COUNT(*) FROM workflow_run_artifacts WHERE artifact_id = ?",
+            (artifact["artifact_id"],),
+        ).fetchone()[0]
+    assert kept == 1
+    assert refs == 1
+
+    # 引用它的 run 超过历史窗口：run 与引用行级联删除，本轮即可清理该产物。
+    with service.store.connect() as conn:
+        conn.execute(
+            "UPDATE workflow_runs SET started_at = ?, finished_at = ? WHERE run_id = 'run_recent'",
+            (_stamp(61), _stamp(61)),
+        )
+    summary = retention.run_daily_cleanup()
+
+    assert summary["main_db"]["deleted"]["workflow_runs"] == 1
+    assert summary["main_db"]["deleted"]["workflow_artifacts"] == 1
+    with service.store.connect() as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM workflow_artifacts WHERE artifact_id = ?",
+            (artifact["artifact_id"],),
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM workflow_run_artifacts WHERE artifact_id = ?",
+            (artifact["artifact_id"],),
+        ).fetchone()[0] == 0
+
+
+def test_long_running_agent_run_survives_ttl_and_keeps_directory(
+    service, retention, wm_paths
+) -> None:
+    """>60 天仍 running 的 agent_run：DB 行与目录都不做 TTL 删除。"""
+    import os
+    import time
+
+    base = wm_paths.run_dir / "agent-runs"
+    base.mkdir(parents=True, exist_ok=True)
+    run_dir = base / "agent_long_running"
+    run_dir.mkdir()
+    (run_dir / "messages.jsonl").write_text("{}", encoding="utf-8")
+    old_epoch = time.time() - 70 * 86400
+    os.utime(run_dir, (old_epoch, old_epoch))
+
+    _make_agent_run(service.store, "run_long", 70, cwd=str(run_dir))
+    with service.store.log_connect() as conn:
+        conn.execute("UPDATE agent_runs SET status = 'running' WHERE run_key = 'run_long'")
+
+    summary = retention.run_daily_cleanup()
+
+    assert summary["logs_db"]["deleted"]["agent_runs"] == 0
+    assert summary["logs_db"]["slimmed"]["agent_runs"] == 0
+    assert summary["dirs"]["agent_run_dirs"] == 0
+    assert service.store.agent_runs.get("run_long") is not None
+    assert run_dir.exists()
+
+    # 任务结束后按窗口正常清理（行删除 + 目录回收）。
+    with service.store.log_connect() as conn:
+        conn.execute("UPDATE agent_runs SET status = 'completed' WHERE run_key = 'run_long'")
+    summary = retention.run_daily_cleanup()
+    assert summary["logs_db"]["deleted"]["agent_runs"] == 1
+    assert summary["dirs"]["agent_run_dirs"] == 1
+    assert not run_dir.exists()
+
+
+def test_active_workflow_and_evaluation_runs_are_not_deleted(service, retention) -> None:
+    """>60 天仍 running 的 workflow run / model evaluation run 不做 TTL 删除。"""
+    _seed_workflow_run(service.store, "run_done_long", 70)
+    with service.store.connect() as conn:
+        _insert_workflow_run_row(conn, "run_active_long", "running", 70)
+        conn.execute(
+            """
+            INSERT INTO model_evaluation_runs (run_id, model_name, base_url, datasets_json,
+                                               status, work_dir, created_by, created_at)
+            VALUES ('eval_active_long', 'm1', 'http://x', '[]', 'running', '', 'root', ?)
+            """,
+            (_stamp(70),),
+        )
+        conn.execute(
+            """
+            INSERT INTO model_evaluation_runs (run_id, model_name, base_url, datasets_json,
+                                               status, work_dir, created_by, created_at)
+            VALUES ('eval_done_long', 'm1', 'http://x', '[]', 'completed', '', 'root', ?)
+            """,
+            (_stamp(70),),
+        )
+
+    summary = retention.run_daily_cleanup()
+
+    assert summary["main_db"]["deleted"]["workflow_runs"] == 1
+    assert summary["main_db"]["deleted"]["model_evaluation_runs"] == 1
+    with service.store.connect() as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM workflow_runs WHERE run_id = 'run_active_long'"
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM workflow_runs WHERE run_id = 'run_done_long'"
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM model_evaluation_runs WHERE run_id = 'eval_active_long'"
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM model_evaluation_runs WHERE run_id = 'eval_done_long'"
+        ).fetchone()[0] == 0
+
+
+def test_artifact_reference_guard_index_exists(service) -> None:
+    with service.store.connect() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'index'"
+            " AND name = 'idx_workflow_run_artifacts_artifact'"
+        ).fetchone()
+    assert row is not None
+
+
+def test_app_startup_runs_first_upgrade_before_serving(wm_paths) -> None:
+    """首启迁移（含一次性 VACUUM）在应用就绪前阻塞完成：进入 lifespan 即已落 marker。"""
+    from fastapi.testclient import TestClient
+
+    from agent_bridge.api.app import create_app
+
+    app = create_app(wm_paths, {"root"})
+    with TestClient(app):
+        service = app.state.agent_bridge_service
+        with service.store.connect() as conn:
+            markers = {
+                row["key"]: row["value"]
+                for row in conn.execute("SELECT key, value FROM data_retention_meta").fetchall()
+            }
+        assert markers.get("retention_v1.cleanup") == "done"
+        assert markers.get("retention_v1.main_vacuum") == "done"
+        # 迁移完成后日常调度器已启动。
+        assert service.data_retention_scheduler.get_status()["running"] is True

@@ -56,19 +56,16 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
         logger.info("Agent Bridge 服务启动 root=%s", resolved_paths.root)
         service.store.init_schema()
 
-        # 数据生命周期 v1 首次升级迁移（历史清理 + 一次性 VACUUM，marker 幂等）：
-        # 大库清理/VACUUM 可能耗时较长，放后台线程执行，不阻塞 /health 就绪。
-        # 日常清理调度器在迁移完成后才启动，避免与首启清理竞态；迁移内部使用
-        # 阻塞清理路径，只有真实完成清理才落 marker，失败留待下次启动重试。
-        async def _run_data_retention_bootstrap() -> None:
-            try:
-                await asyncio.to_thread(service.data_retention.run_first_upgrade)
-            except Exception:
-                logger.error("数据生命周期首次升级迁移失败，将在下次启动重试", exc_info=True)
-            finally:
-                service.data_retention_scheduler.start()
-
-        asyncio.create_task(_run_data_retention_bootstrap())
+        # 数据生命周期 v1 首次升级迁移（历史清理 + 一次性 VACUUM，marker 幂等）
+        # 在应用就绪前**阻塞执行**：大库 VACUUM 会与业务 SQLite 请求争锁，宁可
+        # 让启动窗口内服务不可用，也不与正常请求并发；期间 /health 不就绪。
+        # 迁移内部使用阻塞清理路径，只有真实完成清理才落 marker，失败记录后
+        # 留待下次启动重试（不阻塞后续启动流程）。
+        try:
+            await asyncio.to_thread(service.data_retention.run_first_upgrade)
+        except Exception:
+            logger.error("数据生命周期首次升级迁移失败，将在下次启动重试", exc_info=True)
+        service.data_retention_scheduler.start()
         try:
             service.align_backends()
         except Exception:
@@ -102,12 +99,12 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
         service.plugin_update_scheduler.start()
         service.doc_sync_scheduler.start()
         service.workflow_scheduler.start()
-        # data_retention_scheduler 由 _run_data_retention_bootstrap 完成后启动。
+        # data_retention_scheduler 已在首次升级迁移完成后启动（见上）。
         service.dsh.start()
         asyncio.create_task(service.business_ledgers.load_all_async())
         logger.info(
             "调度器已启动 codegraph/understand/plugin_update/doc_sync/workflow/dsh"
-            "（data_retention 待首次迁移完成后启动）"
+            "（data_retention 随首次迁移完成已启动）"
         )
         yield
         logger.info("Agent Bridge 服务停止 root=%s", resolved_paths.root)

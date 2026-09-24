@@ -100,8 +100,9 @@ def test_save_sync_config_cleans_up_with_new_retention_config(wm_paths) -> None:
             "UPDATE tool_call_logs SET created_at = ? WHERE log_id = ?",
             (old_created_at, old_log["log_id"]),
         )
+        # 明确已结束状态：运行中的 agent_run 受活动任务保护不做 TTL 删除。
         conn.execute(
-            "UPDATE agent_runs SET created_at = ? WHERE run_key = ?",
+            "UPDATE agent_runs SET created_at = ?, status = 'completed' WHERE run_key = ?",
             (old_created_at, old_run["run_key"]),
         )
 

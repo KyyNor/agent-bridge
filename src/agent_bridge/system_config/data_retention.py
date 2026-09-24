@@ -54,6 +54,18 @@ LEDGER_VACUUM_FREELIST_RATIO = 0.1
 
 _CLEANUP_TIME_PATTERN = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 
+# 活动任务保护：有明确运行状态的历史表不做 TTL 删除（slim/delete/目录回收共用
+# 同一谓词，防止删除与计数口径漂移）。
+ACTIVE_STATUSES = ("running", "pending")
+ACTIVE_STATUS_SQL = ", ".join(f"'{status}'" for status in ACTIVE_STATUSES)
+_WORKFLOW_RUN_STALE_WHERE = (
+    "datetime(COALESCE(finished_at, started_at)) < datetime(?) "
+    f"AND status NOT IN ({ACTIVE_STATUS_SQL})"
+)
+_MODEL_EVALUATION_STALE_WHERE = (
+    f"datetime(created_at) < datetime(?) AND status NOT IN ({ACTIVE_STATUS_SQL})"
+)
+
 DATA_RETENTION_META_SCHEMA = """
 CREATE TABLE IF NOT EXISTS data_retention_meta (
   key TEXT PRIMARY KEY,
@@ -285,12 +297,16 @@ class DataRetentionService:
         deleted: dict[str, int] = {}
         slimmed: dict[str, int] = {}
 
+        # 运行中的 run 永不 slim/删除：行本身是目录清理的活跃保护信息，
+        # 删除会导致长跑任务的过程目录被误回收；已完成行才按窗口处理。
         deleted["agent_runs"] = self._batched_statement(
             self._store.log_connect,
             """
             DELETE FROM agent_runs WHERE rowid IN (
               SELECT rowid FROM agent_runs
-              WHERE datetime(created_at) < datetime(?) LIMIT ?
+              WHERE datetime(created_at) < datetime(?)
+                AND status != 'running'
+              LIMIT ?
             )
             """,
             (history_cutoff,),
@@ -304,6 +320,7 @@ class DataRetentionService:
               SELECT rowid FROM agent_runs
               WHERE datetime(created_at) < datetime(?)
                 AND datetime(created_at) >= datetime(?)
+                AND status != 'running'
                 AND (prompt != '' OR events_json != '[]'
                      OR result_json IS NOT NULL OR output_schema_json IS NOT NULL)
               LIMIT ?
@@ -364,6 +381,7 @@ class DataRetentionService:
               SELECT rowid FROM script_runs
               WHERE datetime(created_at) < datetime(?)
                 AND datetime(created_at) >= datetime(?)
+                AND status != 'running'
                 AND (stdout != '' OR stderr != '' OR result_json != '{}')
               LIMIT ?
             )
@@ -375,7 +393,9 @@ class DataRetentionService:
             """
             DELETE FROM script_runs WHERE rowid IN (
               SELECT rowid FROM script_runs
-              WHERE datetime(created_at) < datetime(?) LIMIT ?
+              WHERE datetime(created_at) < datetime(?)
+                AND status != 'running'
+              LIMIT ?
             )
             """,
             (history_cutoff,),
@@ -383,14 +403,16 @@ class DataRetentionService:
 
         # P1：workflow_runs 删除；节点运行与 run-artifact 关联随外键级联，
         # 行删除后同步回收 temp_dir 磁盘目录。级联行数以删除前的从属行数为准。
+        # 运行中/待处理的 run 不做 TTL 删除（活动任务保护）。
         cascade_counts = self._count_workflow_run_cascades(history_cutoff)
         temp_dirs = self._collect_workflow_temp_dirs(history_cutoff)
         deleted["workflow_runs"] = self._batched_statement(
             self._store.connect,
-            """
+            f"""
             DELETE FROM workflow_runs WHERE rowid IN (
               SELECT rowid FROM workflow_runs
-              WHERE datetime(COALESCE(finished_at, started_at)) < datetime(?) LIMIT ?
+              WHERE {_WORKFLOW_RUN_STALE_WHERE}
+              LIMIT ?
             )
             """,
             (history_cutoff,),
@@ -405,14 +427,23 @@ class DataRetentionService:
                 self._workflow_run_root(),
             )
 
-        # P1：历史产物（is_current = 0）；当前产物永久保留。FTS 内容表与
-        # 虚拟表由 workflow_artifacts 上的 DELETE 触发器同步清理。
+        # P1：历史产物（is_current = 0）；当前产物永久保留。删除必须带引用保护：
+        # 旧产物可能仍被保留期内的较新 run 经 workflow_run_artifacts 复用引用
+        # （上面的 workflow_runs 删除已级联清掉超期 run 的引用，此处 NOT EXISTS
+        # 命中的即“仍被保留中的 run 引用”），留下悬空引用会让历史详情缺产物、
+        # 增量规划报 artifact_missing。FTS 内容表与虚拟表由 DELETE 触发器同步。
         deleted["workflow_artifacts"] = self._batched_statement(
             self._store.connect,
             """
             DELETE FROM workflow_artifacts WHERE rowid IN (
-              SELECT rowid FROM workflow_artifacts
-              WHERE is_current = 0 AND datetime(updated_at) < datetime(?) LIMIT ?
+              SELECT a.rowid FROM workflow_artifacts a
+              WHERE a.is_current = 0
+                AND datetime(a.updated_at) < datetime(?)
+                AND NOT EXISTS (
+                  SELECT 1 FROM workflow_run_artifacts ra
+                  WHERE ra.artifact_id = a.artifact_id
+                )
+              LIMIT ?
             )
             """,
             (history_cutoff,),
@@ -423,11 +454,11 @@ class DataRetentionService:
         with self._store.connect() as conn:
             deleted["model_evaluation_executions"] = int(
                 conn.execute(
-                    """
+                    f"""
                     SELECT COUNT(*) FROM model_evaluation_executions
                     WHERE run_id IN (
                       SELECT run_id FROM model_evaluation_runs
-                      WHERE datetime(created_at) < datetime(?)
+                      WHERE {_MODEL_EVALUATION_STALE_WHERE}
                     )
                     """,
                     (history_cutoff,),
@@ -435,10 +466,11 @@ class DataRetentionService:
             )
         deleted["model_evaluation_runs"] = self._batched_statement(
             self._store.connect,
-            """
+            f"""
             DELETE FROM model_evaluation_runs WHERE rowid IN (
               SELECT rowid FROM model_evaluation_runs
-              WHERE datetime(created_at) < datetime(?) LIMIT ?
+              WHERE {_MODEL_EVALUATION_STALE_WHERE}
+              LIMIT ?
             )
             """,
             (history_cutoff,),
@@ -541,9 +573,9 @@ class DataRetentionService:
     def _collect_workflow_temp_dirs(self, history_cutoff: str) -> list[str]:
         with self._store.connect() as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT temp_dir FROM workflow_runs
-                WHERE datetime(COALESCE(finished_at, started_at)) < datetime(?)
+                WHERE {_WORKFLOW_RUN_STALE_WHERE}
                   AND temp_dir IS NOT NULL AND temp_dir != ''
                 """,
                 (history_cutoff,),
@@ -568,9 +600,9 @@ class DataRetentionService:
     def _collect_model_evaluation_work_dirs(self, history_cutoff: str) -> list[str]:
         with self._store.connect() as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT work_dir FROM model_evaluation_runs
-                WHERE datetime(created_at) < datetime(?)
+                WHERE {_MODEL_EVALUATION_STALE_WHERE}
                   AND work_dir IS NOT NULL AND work_dir != ''
                 """,
                 (history_cutoff,),
@@ -657,9 +689,7 @@ class DataRetentionService:
 
     def _count_workflow_run_cascades(self, history_cutoff: str) -> dict[str, int]:
         """统计将随 workflow_runs 级联删除的从属行数（外键 ON DELETE CASCADE）。"""
-        stale_where = (
-            "FROM workflow_runs WHERE datetime(COALESCE(finished_at, started_at)) < datetime(?)"
-        )
+        stale_where = f"FROM workflow_runs WHERE {_WORKFLOW_RUN_STALE_WHERE}"
         with self._store.connect() as conn:
             node_runs = conn.execute(
                 f"""
