@@ -77,13 +77,15 @@ uv run agent-bridge server stop
 
 ## DSH Web Runtime
 
-Agent Bridge 可为每个业务用户托管一个 DSH Web 实例（DeepSeek Harness 浏览器
-工作台，试用/评估阶段）。实例按需启动、只在 `127.0.0.1` 上监听动态端口、
-以该用户所属小组映射出的 Linux 用户身份运行；同一小组的多个业务用户共享
-Linux uid，但各自的 DSH 配置目录互相独立：
+Agent Bridge 可为每个业务用户托管 DSH Web 实例（DeepSeek Harness 浏览器
+工作台，试用/评估阶段），并提供**个人**与**小组共享**两种工作空间范围。
+实例按需启动、只在 `127.0.0.1` 上监听动态端口、以业务用户所属小组映射出的
+Linux 用户身份运行；同一小组的多个业务用户共享 Linux uid。两种范围的
+`DSH_HOME` 互相独立：
 
 ```text
-/home/<linux-user>/.config/dsh/<business-user>/
+个人：/home/<linux-user>/.config/dsh/<business-user>/
+小组：/home/<linux-user>/.config/dsh/<linux-user>/   # 同组业务用户共享
 ```
 
 该目录同时是 DSH 的 `DSH_HOME`：DSH 自身在其中创建 `profiles/`、`storages/`
@@ -95,8 +97,10 @@ Linux uid，但各自的 DSH 配置目录互相独立：
 
 - **公共接入（全局）**：`base_url`、`available_models[]`，以及启动命令模板
   （默认 `dsh web {patch} --host 127.0.0.1 --port {port} --no-open`）与空闲
-  回收阈值（分钟，默认 120）。`base_url` 留空时回落为系统「公共模型配置」的
-  Base URL；`--no-open` 关闭 DSH 的浏览器自启（工作台经站内反向代理访问）。
+  回收阈值（分钟，默认 720 = 12 小时；升级不会覆盖已显式保存的值）。`base_url`
+  留空时回落为系统「公共模型配置」的 Base URL；`--no-open` 关闭 DSH 的浏览器
+  自启（工作台经站内反向代理访问）。空闲回收严格按最后一次实际访问/操作时间
+  （`last_access_at`）判断，进入工作台、反向代理访问与保活查询都会刷新。
 - **组级配置**：`linux_user`（小组映射的 Linux 用户，默认取小组标识）、
   `default_model`（必须取自全局可用模型列表）与敏感的 `api_key`（只写不回显）。
 
@@ -116,7 +120,12 @@ settings（主题、onboarding 等）原样保留。
 （运行中的 DSH 不会热加载 profile 变更，先启动后安装会出现首访无插件的竞态），
 成功条目记入 `<DSH_HOME>/agent-bridge-plugins.txt`；已就位的条目不会重装，
 失败或超出总预算的条目不阻塞启动、会在下次 runtime 启动时自动重试，从名单
-移除条目不会卸载已装插件。
+移除条目不会卸载已装插件。在此之上维护依赖指纹
+`<DSH_HOME>/.agent-bridge-plugin-state.json`（受管清单规范化后的 SHA-256）：
+依赖未变化且上次全部安装成功时，冷启动直接跳过全部插件命令；任一插件失败或
+超时不写成功指纹，下次启动重试。指纹状态按 DSH_HOME 隔离，个人与小组共享
+工作台互不影响；启动日志明确区分「依赖未变化，跳过安装」与「依赖发生变化，
+开始安装」并记录插件阶段耗时与 Runtime 总启动耗时。
 
 原生依赖构建：安装前会初始化 profile 并显式声明**不构建**原生依赖
 （`pnpm-workspace.yaml` 的 `allowBuilds: {node-pty: false}`，`BLOCKED_BUILDS` 随
@@ -129,20 +138,37 @@ node-pty 的能力（如 dsh-better-sidebar 的终端）由插件自身降级并
 
 ### DSH Workspace 与能力平面
 
-「DSH 工作台」页面列出当前工作台状态（运行中/未运行、Linux 用户、当前能力平面、
-空闲时长，可一键停止），选择能力平面后点「进入工作台」，会在**新标签页**打开
-伪全屏工作台 `/workspace/live`；浏览器地址始终是 Agent Bridge，不暴露 DSH 端口。
+「DSH 工作台」页面先选择**工作空间范围**——个人（默认）或小组，再选择能力
+平面后点「进入 DSH」，会在**新标签页**打开伪全屏工作台 `/workspace/live`；
+浏览器地址始终是 Agent Bridge，不暴露 DSH 端口。页面列出当前工作台状态
+（运行中/未运行、Linux 用户、当前能力平面、空闲时长，可一键停止；停止小组
+共享工作台会影响同组成员，操作前有明确提示）。浏览器用 localStorage 记住
+上次的选择 `{scope, profileKey}`（首次默认 personal），只记忆选择、不因打开
+页面自动启动 Runtime。
 
-反向代理 `/agent-workspace/**` 复用 dashboard 代理的流式转发骨架，支持 HTTP、
-WebSocket 与 SSE 长连接；Host/Origin 指向目标，`Location` 重写回前缀。代理目标
-只能来自当前登录业务用户已登记的 runtime，不接受 URL 指定端口；代理命中即刷新
-空闲时间，未运行时自动按需启动。
+**小组共享工作台**：同一 Linux 用户下全部业务用户复用**同一个** DSH Web
+进程、端口与 `DSH_HOME`（session/记忆/工作区状态全组共享），相当于多个浏览
+器窗口访问同一个 DSH Web。共享 Runtime 启动前由首位进入的成员选择能力平面
+（该选择成为本次共享 Runtime 的 active profile）；已运行时后续成员直接进入
+现有 Runtime、能力平面锁定只读，不会因平面不同并行启动第二个进程；空闲回收
+或显式停止后，下次进入重新允许选择。任一成员的访问都刷新共享 Runtime 的
+空闲时间；目标只能由当前业务用户所属小组映射的 Linux 用户推导，无法访问他
+人小组的共享 Runtime。共享 Runtime 正在注入能力平面时，无该平面权限的成员
+会被拒绝进入（避免经他人 capability 越权调用 MCP）。
+
+反向代理 `/agent-workspace/**`（个人）与 `/agent-workspace-shared/**`（小组）
+复用 dashboard 代理的流式转发骨架，支持 HTTP、WebSocket 与 SSE 长连接；
+Host/Origin 指向目标，`Location` 重写回各自前缀。代理目标只能来自当前登录
+业务用户已登记的 runtime，不接受 URL 指定端口；代理命中即刷新空闲时间，
+未运行时自动按需启动。
 
 DSH 前端以 `<base href="/">` 用根绝对路径请求资源、插件模块、`/api/**` 与实时
-通道（`/api/remote.mux`），这些请求不在 `/agent-workspace` 前缀下：代理按 Referer
-（HTTP）与同源 Origin（WebSocket）把它们认领给工作台，`/api/v1/**`、
-`/agent-bridge/**` 等平台自身路径不受影响；上游 `Origin` 改写为目标 origin，
-会话 Cookie 保持 `Path=/`，使前缀外的请求与 WS 握手同样携带会话。
+通道（`/api/remote.mux`），这些请求不在工作台前缀下：代理按 Referer
+（HTTP）与同源 Origin（WebSocket）把它们认领给对应范围的工作台（Referer 带
+哪个前缀就是哪个 scope；嵌套文档的子资源按“最近认领该路径的 scope”继续归
+属），`/api/v1/**`、`/agent-bridge/**` 等平台自身路径不受影响；上游 `Origin`
+改写为目标 origin，会话 Cookie 保持 `Path=/`，使前缀外的请求与 WS 握手同样
+携带会话。
 
 DSH 的首次访问必须携带启动 token（``GET /?token=…`` 换取会话 Cookie，否则返回
 "authentication required"）：代理在服务端完成这次换取——每次根导航都用捕获的
@@ -156,8 +182,10 @@ Cookie，token 不出现在地址栏。DSH 会话 Cookie 由 DSH 进程内密钥
 覆盖文件（`<DSH_HOME>/agent-bridge-mcp.patch.yml`，插入 `dsh-mcp-client`
 streamable-http 实例并携带 Profile 与 capability 头），通过启动命令的
 `{patch}` 占位符以 `--patch` 注入。DSH 作为 MCP client 携带 capability 请求
-`/mcp`，服务端按既有 Profile 权限体系过滤工具并归属业务用户审计；切换（含退出）
-能力平面会回收重启实例，重复进入同一平面只刷新 capability。
+`/mcp`，服务端按既有 Profile 权限体系过滤工具并归属业务用户审计；个人范围下
+切换（含退出）能力平面会回收重启实例，重复进入同一平面只刷新 capability；
+小组共享范围下运行期间平面锁定为 active profile，各进入成员获得绑定自己身份
+的 capability（平面即 active profile），停止后重选。
 
 ## 模型评估运行时
 

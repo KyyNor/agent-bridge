@@ -190,11 +190,18 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
 （root 下用 `Popen(user=, group=)`，不用 `preexec_fn`）；`injection.py` 负责把模型
 接入写进 DSH 原生配置。
 
-- 进程语义与 claude-mem worker 一致：`run/dsh-runtimes/<user>.json` 状态文件记录
-  pid/port/访问时间/鉴权入口，SIGTERM→SIGKILL 升级回收并按进程组发信号；内存保留
+- 进程语义与 claude-mem worker 一致：状态文件记录 pid/port/访问时间/鉴权入口
+  （个人 `run/dsh-runtimes/<user>.json`，共享 `run/dsh-runtimes/shared/<linux-user>.json`），
+  SIGTERM→SIGKILL 升级回收并按进程组发信号；内存保留
   Popen 句柄用于 wait 回收，避免僵尸进程被误判升级 SIGKILL。
-- 每个业务用户至多一个实例；`DSH_HOME` 指向 `<linux home>/.config/dsh/<business-user>/`
-  （取 passwd 的 home），不进入 `AGENT_BRIDGE_ROOT/data`。停止实例不删除用户配置。
+- 工作空间范围（scope）：`personal` 每个业务用户至多一个实例，`DSH_HOME` 指向
+  `<linux home>/.config/dsh/<business-user>/`；`shared` 同一 Linux 用户对应一个
+  共享实例（runtime key = `linux_user`），`DSH_HOME` 为
+  `<linux home>/.config/dsh/<linux-user>/`，同组成员复用同一进程/端口/DSH_HOME。
+  共享实例运行期间能力平面锁定为启动时的 active profile（后到成员直接进入、
+  不重启不并行起第二个进程；无 active profile 权限的成员拒绝进入），停止/空闲
+  回收后重选。`_authorize_shared_workspace` 全程持服务锁（RLock 重入），并发
+  进入原子化。均不进入 `AGENT_BRIDGE_ROOT/data`；停止实例不删除用户配置。
 - **模型接入走 DSH 原生 settings.yaml**：公共 `base_url`（留空回落系统「公共模型配置」
   的 Base URL）与 `available_models`、组级 `default_model` 合并写入该用户
   `DSH_HOME/settings.yaml` 的 `llm-pi-ai.providers.agent-bridge` 与
@@ -213,7 +220,10 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
   launcher 的 `run_once` 以目标 Linux 用户身份同步执行 `dsh plugin --profile web
   add <spec>` 装完（不携带组级 API Key；运行中的 DSH 不热加载 profile 变更，
   后装会出现首访无插件竞态）；成功条目记入 `<DSH_HOME>/agent-bridge-plugins.txt`
-  （0600），因此实际只在首次初始化（及版本名单新增条目）执行，失败/超出总预算
+  （0600）；依赖指纹 `<DSH_HOME>/.agent-bridge-plugin-state.json`（受管清单
+  规范化 + 格式版本的 SHA-256）在**全部**所需插件成功安装后才写入，命中即跳过
+  全部插件命令（状态损坏视为需重新校验；失败不写成功指纹）。指纹按 DSH_HOME
+  隔离，个人与共享互不影响。失败/超出总预算
   （`PLUGIN_INSTALL_TOTAL_BUDGET_SECONDS`，安装持有服务锁必须封顶）的条目不
   阻塞启动、下次启动自动重试，从名单移除条目不卸载已装插件。安装前经
   `ensure_build_blocks` 在 profile `pnpm-workspace.yaml` 显式声明不构建原生依赖
@@ -223,25 +233,32 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
   headers——默认跳过保证整份名单装得上，终端等能力由插件自行降级。
 - `dsh_group_configs`/`dsh_runtime_config` 两张表经 `DshConfigRepository` 持久化；
   `api_key` 沿用“只返回 api_key_set + clear_api_key”的敏感配置模式。
-- 空闲回收是服务内守护线程（默认 120 分钟阈值，随全局配置读取）；app lifespan
-  启动 `dsh.start()`，装配期 `recover()` 识别遗留实例，停止期 `stop_all()`。
+- 空闲回收是服务内守护线程（默认 720 分钟 = 12 小时阈值，随全局配置读取；
+  升级只改默认值、不覆盖已显式保存的配置），严格按 `last_access_at`（最后一次
+  实际访问/操作）判断，进入/代理/保活都刷新；app lifespan 启动 `dsh.start()`，
+  装配期 `recover()` 识别遗留实例（含共享），停止期 `stop_all()`。
 - 管理接口（组配置、全局配置、实例列表）仅 admins；用户态接口只暴露状态，不
   暴露动态端口与 pid。
-- Workspace 反向代理位于 `api/workspace_proxy.py`：`/agent-workspace/**` 复用
-  dashboard 代理的 `_proxy_stream_response` 骨架（`response_header_builder` /
+- Workspace 反向代理位于 `api/workspace_proxy.py`：`/agent-workspace/**`（个人）
+  与 `/agent-workspace-shared/**`（共享）复用 dashboard 代理的
+  `_proxy_stream_response` 骨架（`response_header_builder` /
   `query_override` / `request_header_overrides` / `extra_response_headers` hook
   承载 Location 改写、首访 token、Cookie 与 Origin 覆盖），WebSocket 用
   `websockets` client 桥接并剥离下游握手头。目标只能来自 `require_runtime_target`
-  （按当前登录用户解析，命中即刷新空闲时间），未运行时线程化兜底 `ensure_running`。
+  （按当前登录用户 + scope 解析；共享目标由所属小组映射的 Linux 用户推导，
+  命中即刷新空闲时间），未运行时线程化兜底 `ensure_running`。
 - DSH 前端按 `<base href="/">` 以根绝对路径请求资源、插件模块与 `/api/**`
   （`/api/remote.mux` 是 WS 通道），因此 `workspace_escape_path` 会在前缀之外认领
-  这些请求：HTTP 依据 `Referer: …/agent-workspace/…`，WebSocket 依据与请求 Host
-  同 authority 的 `Origin`（Agent Bridge 自身没有 WS 端点）。工作台内的嵌套文档
+  这些请求：HTTP 依据 `Referer: …/agent-workspace…/…`（两个前缀分别归属
+  personal/shared scope），WebSocket 依据与请求 Host 同 authority 的 `Origin`
+  （Agent Bridge 自身没有 WS 端点，默认 personal）。工作台内的嵌套文档
   （插件 studio 等页面本身也服务在根路径下，如 `/ipollowork-design/studio/`）的
-  子资源与接口请求，Referer 已不在 `/agent-workspace/` 下，同 authority 且指向
-  非保留路径的 Referer 同样认领（外部站点因 authority 不同被排除）。
-  `RESERVED_PATH_PREFIXES`（`/api/v1`、`/agent-bridge`、`/static/capabilities`、
-  `/dashboard`、`/memory-dashboard`、`/health`）永不参与逃逸路由。
+  子资源与接口请求，Referer 已不在工作台前缀下：代理维护“路径 → 最近认领
+  scope”的短期记忆（TTL 6h）继续归属，同 authority 且指向非保留路径的 Referer
+  兜底认领（外部站点因 authority 不同被排除）。
+  `RESERVED_PATH_PREFIXES`（`/api/v1`、`/agent-bridge`、`/agent-workspace`、
+  `/agent-workspace-shared`、`/static/capabilities`、`/dashboard`、
+  `/memory-dashboard`、`/health`）永不参与逃逸路由。
 - 上游 `Origin` 必须改写为目标 origin（DSH 的 `/api/**` 浏览器信任栅栏要求 Host
   为回环且 Origin 与之匹配）；会话 Cookie 原样透传（`Path=/`），不得收窄到
   `/agent-workspace`，否则根绝对路径请求与 WS 握手都拿不到会话。部分 DSH 插件
@@ -269,7 +286,9 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
   校验后以业务用户身份 + `bind_actor_group` 进入既有权限体系，不与工作流
   capability 同时使用。MCP 注入是 DSH 的 loader patch 覆盖文件
   （`<DSH_HOME>/agent-bridge-mcp.patch.yml`，0600），经启动命令 `{patch}` →
-  `--patch` 生效；同平面重进只重写覆盖文件刷新 capability，切换平面回收重启。
+  `--patch` 生效；个人范围同平面重进只重写覆盖文件刷新 capability，切换平面回收
+  重启；共享范围运行期间平面锁定为 active profile，覆盖文件刷写为最新进入成员
+  的 capability（平面不变），DSH 重载覆盖文件后 MCP 调用切换到该成员身份。
 
 ## 工作流
 

@@ -25,13 +25,32 @@ from typing import Any
 import yaml
 
 from agent_bridge.core.defaults import DEFAULT_CLAUDE_CODE_MCP_TOOL_TIMEOUT_MS
-from agent_bridge.core.domain import AccessDenied
+from agent_bridge.core.domain import AccessDenied, ValidationError
 
 logger = logging.getLogger(__name__)
 
 DSH_CAPABILITY_HEADER = "X-Agent-Bridge-DSH-Capability"
 WORKSPACE_PROXY_PREFIX = "/agent-workspace"
+# 小组共享工作台的独立代理前缀：与个人前缀区分路由目标（同一浏览器可同时
+# 打开个人与共享工作台，前缀是代理判定 scope 的唯一依据）。
+WORKSPACE_PROXY_SHARED_PREFIX = "/agent-workspace-shared"
+WORKSPACE_PROXY_PREFIXES = (WORKSPACE_PROXY_PREFIX, WORKSPACE_PROXY_SHARED_PREFIX)
 DEFAULT_CAPABILITY_TTL_SECONDS = 24 * 60 * 60
+
+# 工作空间范围：personal 每个业务用户独立 DSH_HOME；shared 同一 Linux 用户
+# 下全部业务用户共享同一个 DSH Web Runtime（runtime 身份 = linux_user）。
+WORKSPACE_SCOPE_PERSONAL = "personal"
+WORKSPACE_SCOPE_SHARED = "shared"
+WORKSPACE_SCOPES = (WORKSPACE_SCOPE_PERSONAL, WORKSPACE_SCOPE_SHARED)
+DEFAULT_WORKSPACE_SCOPE = WORKSPACE_SCOPE_PERSONAL
+
+
+def normalize_workspace_scope(value: object) -> str:
+    """校验并归一化工作空间范围；非法值明确报错。"""
+    scope = str(value or "").strip() or DEFAULT_WORKSPACE_SCOPE
+    if scope not in WORKSPACE_SCOPES:
+        raise ValidationError(f"工作空间范围不合法：{value!r}（只支持 personal/shared）")
+    return scope
 
 # 注入的 MCP 插件行与覆盖文件名。
 MCP_OVERLAY_FILENAME = "agent-bridge-mcp.patch.yml"
@@ -119,6 +138,12 @@ class DshWorkspaceCapabilityRegistry:
             token = self._by_user.pop(user_id, None)
             if token is not None:
                 self._items.pop(token, None)
+
+    def revoke_all(self) -> None:
+        """清空全部 capability（服务停止回收全部 runtime 时调用）。"""
+        with self._lock:
+            self._items.clear()
+            self._by_user.clear()
 
     def _drop(self, capability: DshWorkspaceCapability) -> None:
         self._items.pop(capability.token, None)

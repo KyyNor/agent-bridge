@@ -1,0 +1,562 @@
+"""DSH 小组共享 Workspace（issue #13）的 scope、复用、Profile 锁定与隔离测试。"""
+
+from __future__ import annotations
+
+import json
+import os
+import threading
+import time
+import types
+from pathlib import Path
+
+import pytest
+import yaml
+
+
+class FakeProcess:
+    def __init__(self, pid: int) -> None:
+        self.pid = pid
+        self.returncode = None
+
+    def poll(self) -> int | None:
+        return self.returncode
+
+
+class FakeLauncher:
+    def __init__(self, pid: int = 430001) -> None:
+        self.next_pid = pid
+        self.starts: list[dict] = []
+        self.once_calls: list[list[str]] = []
+
+    def start(self, *, command, env, cwd, log_path, identity):
+        process = FakeProcess(self.next_pid)
+        self.next_pid += 1
+        port = 0
+        if "--port" in command:
+            try:
+                port = int(command[command.index("--port") + 1])
+            except (IndexError, ValueError):
+                port = 0
+        self.starts.append(
+            {"pid": process.pid, "command": list(command), "port": port, "log_path": str(log_path)}
+        )
+        return process
+
+    def run_once(self, *, command, env, cwd, identity, timeout_seconds):
+        self.once_calls.append(list(command))
+        return 0, "installed"
+
+
+@pytest.fixture
+def service(wm_paths):
+    from agent_bridge.app.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.access.upsert_group(actor="root", group_key="groupa", name="A 组")
+    for user_id in ("user1", "user2"):
+        svc.access.create_user(actor="root", user_id=user_id)
+        svc.access.set_user_group(actor="root", user_id=user_id, group_key="groupa")
+    # Profile 是组内资源：由 groupa 成员创建，避免归入 root 的维护组
+    svc.governance.upsert_profile("user1", "safe", "安全平面", "", "active")
+    svc.governance.upsert_profile("user1", "wide", "宽平面", "", "active")
+    return svc
+
+
+@pytest.fixture
+def home(tmp_path):
+    home = tmp_path / "linux-home"
+    home.mkdir()
+    return home
+
+
+@pytest.fixture
+def passwd_lookup(home):
+    def lookup(user: str):
+        return types.SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid(), pw_dir=str(home / user))
+
+    return lookup
+
+
+def configure_group(service) -> None:
+    service.dsh_configs.save_runtime_config(
+        "root",
+        web_command="dsh web {patch} --host 127.0.0.1 --port {port} --no-open",
+        idle_timeout_minutes=120,
+        base_url="http://model.internal/v1",
+        available_models=["gpt-x"],
+    )
+    service.dsh_configs.save_group_config(
+        "root",
+        group_key="groupa",
+        linux_user="groupa",
+        default_model="gpt-x",
+        api_key="sk-secret",
+    )
+
+
+def install_fakes(service, home, passwd_lookup, monkeypatch) -> FakeLauncher:
+    launcher = FakeLauncher()
+    service.dsh._launcher = launcher
+    service.dsh._passwd_lookup = passwd_lookup
+    monkeypatch.setattr(
+        service.dsh,
+        "_pid_alive",
+        staticmethod(lambda pid: any(start["pid"] == pid for start in launcher.starts)),
+    )
+    monkeypatch.setattr(
+        service.dsh,
+        "_probe_port",
+        staticmethod(lambda port: any(int(start["port"]) == port for start in launcher.starts)),
+    )
+    return launcher
+
+
+def shared_state_path(service, linux_user: str = "groupa") -> Path:
+    return (
+        service.dsh._state_dir()
+        / "shared"
+        / f"{linux_user}.json"
+    )
+
+
+# -- 目录与 runtime 身份 --
+
+
+def test_shared_scope_uses_linux_user_dsh_home_and_state(service, home, passwd_lookup, monkeypatch) -> None:
+    configure_group(service)
+    launcher = install_fakes(service, home, passwd_lookup, monkeypatch)
+
+    result = service.dsh.authorize_workspace("user1", profile_key="safe", scope="shared")
+
+    assert result["status"] == "running"
+    assert result["scope"] == "shared"
+    assert result["profile_key"] == "safe"
+    assert result["workspace_url"] == "/agent-workspace-shared/"
+    # 共享 DSH_HOME：<linux home>/.config/dsh/<linux-user>/
+    assert result["config_dir"] == str(home / "groupa" / ".config" / "dsh" / "groupa")
+    state = json.loads(shared_state_path(service).read_text(encoding="utf-8"))
+    assert state["scope"] == "shared"
+    assert state["user_id"] == "groupa"
+    assert state["linux_user"] == "groupa"
+    assert state["profile_key"] == "safe"
+
+    # 个人模式仍使用 <business-user> 目录，两者互不影响
+    personal = service.dsh.authorize_workspace("user1", profile_key="safe")
+    assert personal["config_dir"] == str(home / "groupa" / ".config" / "dsh" / "user1")
+    assert len(launcher.starts) == 2
+
+
+def test_personal_scope_unchanged_default(service, home, passwd_lookup, monkeypatch) -> None:
+    configure_group(service)
+    launcher = install_fakes(service, home, passwd_lookup, monkeypatch)
+
+    result = service.dsh.authorize_workspace("user1", profile_key="safe")
+    assert result["scope"] == "personal"
+    assert result["workspace_url"] == "/agent-workspace/"
+    assert not shared_state_path(service).exists()
+    assert service.dsh._state_path("personal", "user1").exists()
+
+
+# -- 共享 runtime 复用与 Profile 锁定 --
+
+
+def test_shared_runtime_reused_by_second_member_with_locked_profile(
+    service, home, passwd_lookup, monkeypatch
+) -> None:
+    from agent_bridge.dsh.workspace import mcp_overlay_path
+
+    configure_group(service)
+    launcher = install_fakes(service, home, passwd_lookup, monkeypatch)
+
+    first = service.dsh.authorize_workspace("user1", profile_key="safe", scope="shared")
+    assert len(launcher.starts) == 1
+    config_dir = home / "groupa" / ".config" / "dsh" / "groupa"
+    overlay_path = mcp_overlay_path(config_dir)
+    first_overlay = yaml.safe_load(overlay_path.read_text(encoding="utf-8"))
+    first_token = first_overlay[0]["insert"][0]["config"]["headers"]["X-Agent-Bridge-DSH-Capability"]
+
+    # 第二名成员请求不同平面：直接进入现有 Runtime，active profile 锁定为 safe
+    second = service.dsh.authorize_workspace("user2", profile_key="wide", scope="shared")
+    assert second["status"] == "running"
+    assert second["profile_key"] == "safe"
+    assert len(launcher.starts) == 1  # 不产生第二个进程
+    assert second["port"] if "port" in second else True
+    state = json.loads(shared_state_path(service).read_text(encoding="utf-8"))
+    assert state["pid"] == launcher.starts[0]["pid"]
+    assert state["profile_key"] == "safe"
+    # 覆盖文件刷新为第二名成员的 capability（平面仍为 safe）
+    second_overlay = yaml.safe_load(overlay_path.read_text(encoding="utf-8"))
+    entry = second_overlay[0]["insert"][0]
+    assert entry["config"]["headers"]["X-Agent-Bridge-MetaMCP-Profile"] == "safe"
+    assert entry["config"]["headers"]["X-Agent-Bridge-DSH-Capability"] != first_token
+
+
+def test_shared_profile_reselect_allowed_after_stop(service, home, passwd_lookup, monkeypatch) -> None:
+    configure_group(service)
+    launcher = install_fakes(service, home, passwd_lookup, monkeypatch)
+
+    service.dsh.authorize_workspace("user1", profile_key="safe", scope="shared")
+    assert len(launcher.starts) == 1
+
+    stopped = service.dsh.stop_runtime("user2", scope="shared")
+    assert stopped["stopped"] is True
+    assert stopped["scope"] == "shared"
+    assert stopped["runtime_key"] == "groupa"
+
+    # 共享 Runtime 停止后：下次进入重新允许选择 Profile
+    relaunched = service.dsh.authorize_workspace("user2", profile_key="wide", scope="shared")
+    assert relaunched["profile_key"] == "wide"
+    assert len(launcher.starts) == 2
+    state = json.loads(shared_state_path(service).read_text(encoding="utf-8"))
+    assert state["profile_key"] == "wide"
+
+
+def test_shared_without_profile_runs_plain_and_members_enter_without_injection(
+    service, home, passwd_lookup, monkeypatch
+) -> None:
+    configure_group(service)
+    launcher = install_fakes(service, home, passwd_lookup, monkeypatch)
+
+    plain = service.dsh.authorize_workspace("user1", profile_key=None, scope="shared")
+    assert plain["profile_key"] is None
+    assert len(launcher.starts) == 1
+    assert "--patch" not in launcher.starts[0]["command"]
+
+    # 运行中（active profile 为空）：成员即便请求平面也按无注入进入
+    again = service.dsh.authorize_workspace("user2", profile_key="safe", scope="shared")
+    assert again["profile_key"] is None
+    assert len(launcher.starts) == 1
+
+
+def test_shared_requires_active_profile_permission_for_entering_member(
+    service, home, passwd_lookup, monkeypatch
+) -> None:
+    configure_group(service)
+    launcher = install_fakes(service, home, passwd_lookup, monkeypatch)
+    service.dsh.authorize_workspace("user1", profile_key="safe", scope="shared")
+
+    # 其他组的用户无 groupa 的 safe 平面权限：即使映射到同一 Linux 用户，
+    # 也不得以他人 capability 越权进入共享工作台。
+    service.access.upsert_group(actor="root", group_key="groupb", name="B 组")
+    service.access.create_user(actor="root", user_id="outsider")
+    service.access.set_user_group(actor="root", user_id="outsider", group_key="groupb")
+    service.dsh_configs.save_group_config(
+        "root",
+        group_key="groupb",
+        linux_user="groupa",  # 映射到同一 Linux 用户的另一小组
+        default_model="gpt-x",
+        api_key="",
+    )
+    with pytest.raises(Exception):
+        service.dsh.authorize_workspace("outsider", profile_key="safe", scope="shared")
+    # 共享 runtime 不受影响
+    assert len(launcher.starts) == 1
+
+
+def test_shared_rejects_unassigned_or_unconfigured(service, monkeypatch) -> None:
+    service.access.create_user(actor="root", user_id="lonely")
+    with pytest.raises(Exception):
+        service.dsh.authorize_workspace("lonely", profile_key=None, scope="shared")
+
+    configure_group(service)
+    service.access.upsert_group(actor="root", group_key="groupz", name="Z 组")
+    service.access.create_user(actor="root", user_id="zuser")
+    service.access.set_user_group(actor="root", user_id="zuser", group_key="groupz")
+    with pytest.raises(Exception):
+        service.dsh.authorize_workspace("zuser", profile_key=None, scope="shared")
+
+
+def test_concurrent_shared_entries_start_single_process(
+    service, home, passwd_lookup, monkeypatch
+) -> None:
+    configure_group(service)
+    launcher = install_fakes(service, home, passwd_lookup, monkeypatch)
+
+    results: list[dict] = []
+    errors: list[Exception] = []
+
+    def enter(user_id: str, profile: str) -> None:
+        try:
+            results.append(
+                service.dsh.authorize_workspace(user_id, profile_key=profile, scope="shared")
+            )
+        except Exception as exc:  # pragma: no cover - 并发失败即测试失败
+            errors.append(exc)
+
+    threads = [
+        threading.Thread(target=enter, args=("user1", "safe")),
+        threading.Thread(target=enter, args=("user2", "wide")),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert not errors
+    assert len(launcher.starts) == 1
+    assert all(item["status"] == "running" for item in results)
+    # 先拿到服务锁的成员决定 active profile；后到者被锁定到同一平面。
+    # 谁先进入不确定，但两名成员必然观察到同一个 active profile。
+    assert len(results) == 2
+    assert len({item["profile_key"] for item in results}) == 1
+    state = json.loads(shared_state_path(service).read_text(encoding="utf-8"))
+    assert state["profile_key"] == results[0]["profile_key"]
+
+
+# -- 状态、保活与空闲回收 --
+
+
+def test_shared_status_target_and_touch_refresh(service, home, passwd_lookup, monkeypatch) -> None:
+    configure_group(service)
+    launcher = install_fakes(service, home, passwd_lookup, monkeypatch)
+    service.dsh.authorize_workspace("user1", profile_key="safe", scope="shared")
+
+    # 状态查询按 scope 区分
+    shared_status = service.dsh.runtime_status("user2", scope="shared")
+    assert shared_status["scope"] == "shared"
+    assert shared_status["status"] == "running"
+    assert shared_status["linux_user"] == "groupa"
+    assert shared_status["profile_key"] == "safe"
+    personal_status = service.dsh.runtime_status("user2")
+    assert personal_status["status"] == "stopped"
+
+    # 代理目标解析：成员按 Linux 用户命中共享 runtime，个人范围未运行
+    target = service.dsh.require_runtime_target("user2", scope="shared")
+    assert target is not None and target.endswith(f":{launcher.starts[0]['port']}")
+    assert service.dsh.require_runtime_target("user2") is None
+
+    # 任一成员的访问都刷新共享 runtime 的 last_access_at
+    state = json.loads(shared_state_path(service).read_text(encoding="utf-8"))
+    old_access = float(state["last_access_at"])
+    state["last_access_at"] = old_access - 3600
+    shared_state_path(service).write_text(json.dumps(state), encoding="utf-8")
+    assert service.dsh.require_runtime_target("user1", scope="shared") is not None
+    refreshed = json.loads(shared_state_path(service).read_text(encoding="utf-8"))
+    assert float(refreshed["last_access_at"]) > old_access - 3600
+
+
+def test_shared_idle_reaper_stops_shared_runtime(service, home, passwd_lookup, monkeypatch) -> None:
+    configure_group(service)
+    launcher = install_fakes(service, home, passwd_lookup, monkeypatch)
+    service.dsh.authorize_workspace("user1", profile_key="safe", scope="shared")
+
+    state = json.loads(shared_state_path(service).read_text(encoding="utf-8"))
+    state["last_access_at"] = time.time() - 10 * 24 * 60 * 60
+    shared_state_path(service).write_text(json.dumps(state), encoding="utf-8")
+
+    stopped = service.dsh.stop_idle_expired()
+    assert "groupa" in stopped
+    assert not shared_state_path(service).exists()
+    # 停止后可重新选择 Profile
+    relaunched = service.dsh.authorize_workspace("user1", profile_key="wide", scope="shared")
+    assert relaunched["profile_key"] == "wide"
+
+
+def test_personal_and_shared_runtimes_fully_isolated(service, home, passwd_lookup, monkeypatch) -> None:
+    configure_group(service)
+    launcher = install_fakes(service, home, passwd_lookup, monkeypatch)
+
+    service.dsh.authorize_workspace("user1", profile_key="safe")  # personal
+    service.dsh.authorize_workspace("user1", profile_key=None, scope="shared")
+
+    assert len(launcher.starts) == 2
+    assert service.dsh._state_path("personal", "user1").exists()
+    assert shared_state_path(service).exists()
+    # 个人平面切换重启个人实例，不影响共享实例
+    service.dsh.authorize_workspace("user1", profile_key="wide")
+    assert len(launcher.starts) == 3
+    shared_state = json.loads(shared_state_path(service).read_text(encoding="utf-8"))
+    assert shared_state["pid"] == launcher.starts[1]["pid"]
+    assert shared_state["profile_key"] is None
+
+
+def test_recover_and_list_include_shared_states(service, home, passwd_lookup, monkeypatch) -> None:
+    configure_group(service)
+    launcher = install_fakes(service, home, passwd_lookup, monkeypatch)
+    service.dsh.authorize_workspace("user1", profile_key="safe")
+    service.dsh.authorize_workspace("user1", profile_key="safe", scope="shared")
+
+    listing = service.dsh.list_runtimes("root")
+    scopes = {item["scope"] for item in listing}
+    assert scopes == {"personal", "shared"}
+
+    # 个人实例退出、共享实例存活：recover 只清失效状态
+    dead_pid = launcher.starts[0]["pid"]
+    launcher.starts[0]["pid"] = dead_pid  # keep reference
+    monkeypatch.setattr(
+        service.dsh,
+        "_pid_alive",
+        staticmethod(
+            lambda pid: pid != dead_pid
+            and any(start["pid"] == pid for start in launcher.starts)
+        ),
+    )
+    result = service.dsh.recover()
+    assert result == {"kept": 1, "cleaned": 1}
+    assert not service.dsh._state_path("personal", "user1").exists()
+    assert shared_state_path(service).exists()
+
+
+# -- 代理路由 --
+
+
+def test_proxy_route_matching_and_location_rewrite() -> None:
+    from agent_bridge.api.workspace_proxy import (
+        match_workspace_route,
+        rewrite_workspace_location,
+    )
+
+    assert match_workspace_route("/agent-workspace") == ("personal", "/")
+    assert match_workspace_route("/agent-workspace/ws") == ("personal", "/ws")
+    assert match_workspace_route("/agent-workspace-shared") == ("shared", "/")
+    assert match_workspace_route("/agent-workspace-shared/a/b") == ("shared", "/a/b")
+    assert match_workspace_route("/agent-workspace-other") is None
+    assert match_workspace_route("/api/v1/dsh/runtime") is None
+
+    target = "http://127.0.0.1:48400"
+    assert (
+        rewrite_workspace_location("/x", target=target, prefix="/agent-workspace-shared")
+        == "/agent-workspace-shared/x"
+    )
+    assert (
+        rewrite_workspace_location(
+            "http://127.0.0.1:48400/x?y=1", target=target, prefix="/agent-workspace-shared"
+        )
+        == "/agent-workspace-shared/x?y=1"
+    )
+
+
+def test_proxy_escape_claims_by_referer_scope() -> None:
+    from agent_bridge.api.workspace_proxy import AgentWorkspaceProxyMiddleware
+
+    middleware = AgentWorkspaceProxyMiddleware(app=None, service=None, identity_resolver=None)
+
+    def http_scope(path: str, referer: str | None) -> dict:
+        headers = [b"host", b"example.internal"] if False else []
+        raw_headers = [(b"host", b"example.internal")]
+        if referer is not None:
+            raw_headers.append((b"referer", referer.encode("utf-8")))
+        return {"type": "http", "path": path, "headers": raw_headers}
+
+    # 个人前缀 Referer → personal
+    assert middleware._resolve_escape_route(
+        http_scope("/api/chat", "http://example.internal/agent-workspace/")
+    ) == ("personal", "/api/chat")
+    # 共享前缀 Referer → shared
+    assert middleware._resolve_escape_route(
+        http_scope("/api/chat", "http://example.internal/agent-workspace-shared/x")
+    ) == ("shared", "/api/chat")
+    # 嵌套文档（无前缀 Referer）：先由工作台页面首次进入（Referer 带前缀），
+    # 其子资源再按“最近认领该路径的 scope”继续归属 shared
+    assert middleware._resolve_escape_route(
+        http_scope("/studio/", "http://example.internal/agent-workspace-shared/x")
+    ) == ("shared", "/studio/")
+    assert middleware._resolve_escape_route(
+        http_scope("/studio/page", "http://example.internal/studio/")
+    ) == ("shared", "/studio/page")
+    assert middleware._resolve_escape_route(
+        http_scope("/studio/page/asset.css", "http://example.internal/studio/page")
+    ) == ("shared", "/studio/page/asset.css")
+    # 无前缀且无记忆的 Referer 回落 personal
+    middleware._claimed_scopes.clear()
+    assert middleware._resolve_escape_route(
+        http_scope("/assets/app.js", "http://example.internal/other-page/")
+    ) == ("personal", "/assets/app.js")
+    # 保留前缀永不认领
+    assert middleware._resolve_escape_route(
+        http_scope("/api/v1/users", "http://example.internal/agent-workspace/")
+    ) is None
+
+
+# -- 插件状态按 DSH_HOME 隔离（issue #14 验收） --
+
+
+def test_plugin_fingerprint_state_isolated_per_dsh_home(
+    service, home, passwd_lookup, monkeypatch, tmp_path
+) -> None:
+    from agent_bridge.dsh import plugins
+
+    configure_group(service)
+    list_path = tmp_path / "dsh-plugins.txt"
+    list_path.write_text("dsh-context\n", encoding="utf-8")
+    monkeypatch.setattr(plugins, "plugin_list_path", lambda: list_path)
+    launcher = install_fakes(service, home, passwd_lookup, monkeypatch)
+
+    service.dsh.authorize_workspace("user1", profile_key=None)
+    service.dsh.authorize_workspace("user1", profile_key=None, scope="shared")
+
+    personal_state = plugins.plugin_state_path(home / "groupa" / ".config" / "dsh" / "user1")
+    shared_state = plugins.plugin_state_path(home / "groupa" / ".config" / "dsh" / "groupa")
+    assert personal_state.exists()
+    assert shared_state.exists()
+    # 各自独立的状态文件，内容互不影响
+    personal_payload = json.loads(personal_state.read_text(encoding="utf-8"))
+    shared_payload = json.loads(shared_state.read_text(encoding="utf-8"))
+    assert personal_payload["fingerprint"] == shared_payload["fingerprint"]
+    assert personal_payload["plugins"] == ["dsh-context"]
+
+    # 删除个人状态：只有个人 DSH_HOME 触发重新校验，共享不受影响
+    personal_state.unlink()
+    service.dsh.stop_runtime("user1")
+    service.dsh.authorize_workspace("user1", profile_key=None)
+    assert personal_state.exists()
+    assert json.loads(shared_state.read_text(encoding="utf-8"))["installed_at"] == shared_payload["installed_at"]
+
+
+# -- API 流程 --
+
+
+def test_shared_workspace_api_flow(service, home, passwd_lookup, monkeypatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from agent_bridge.api.app import create_app
+
+    configure_group(service)
+    client = TestClient(create_app(service.paths, {"root"}))
+    # create_app 会基于同一数据目录装配新的 service；进程类 fakes 需装在 app 实例上
+    app_service = client.app.state.agent_bridge_service
+    app_service.dsh._launcher = FakeLauncher()
+    app_service.dsh._passwd_lookup = passwd_lookup
+    app_launcher = app_service.dsh._launcher
+    monkeypatch.setattr(
+        app_service.dsh,
+        "_pid_alive",
+        staticmethod(lambda pid: any(start["pid"] == pid for start in app_launcher.starts)),
+    )
+    monkeypatch.setattr(
+        app_service.dsh,
+        "_probe_port",
+        staticmethod(lambda port: any(int(start["port"]) == port for start in app_launcher.starts)),
+    )
+    headers_user1 = {"X-Agent-Bridge-User": "user1"}
+    headers_user2 = {"X-Agent-Bridge-User": "user2"}
+
+    status = client.get("/api/v1/dsh/runtime?scope=shared", headers=headers_user1).json()
+    assert status["scope"] == "shared"
+    assert status["status"] == "stopped"
+    assert status["linux_user"] == "groupa"
+
+    authorized = client.post(
+        "/api/v1/dsh/workspace/authorize",
+        headers=headers_user1,
+        json={"profile_key": "safe", "scope": "shared"},
+    ).json()
+    assert authorized["status"] == "running"
+    assert authorized["workspace_url"] == "/agent-workspace-shared/"
+
+    # 第二名成员查看共享状态：运行中且 active profile 可见
+    shared_status = client.get("/api/v1/dsh/runtime?scope=shared", headers=headers_user2).json()
+    assert shared_status["status"] == "running"
+    assert shared_status["profile_key"] == "safe"
+
+    stopped = client.post("/api/v1/dsh/runtime/stop?scope=shared", headers=headers_user2).json()
+    assert stopped["stopped"] is True
+    assert stopped["scope"] == "shared"
+
+    # 非法 scope 被拒绝
+    bad = client.post(
+        "/api/v1/dsh/workspace/authorize",
+        headers=headers_user1,
+        json={"profile_key": None, "scope": "team"},
+    )
+    assert bad.status_code == 422

@@ -72,7 +72,7 @@ def test_real_process_lifecycle(dsh_service, tmp_path) -> None:
     assert status["status"] == "running"
     assert "port" not in status
 
-    state = service.dsh._read_state("user1")
+    state = service.dsh._read_state("personal", "user1")
     assert state is not None
     pid = int(state["pid"])
     port = int(state["port"])
@@ -105,12 +105,12 @@ def test_real_process_lifecycle(dsh_service, tmp_path) -> None:
     # 重复进入复用同一实例
     again = service.dsh.ensure_running("user1")
     assert again["status"] == "running"
-    assert service.dsh._read_state("user1")["pid"] == pid
+    assert service.dsh._read_state("personal", "user1")["pid"] == pid
 
     # 同 group 另一业务用户：独立目录、独立实例
     second = service.dsh.ensure_running("user2")
     assert second["status"] == "running"
-    state2 = service.dsh._read_state("user2")
+    state2 = service.dsh._read_state("personal", "user2")
     assert state2["pid"] != pid
     assert Path(str(state2["config_dir"])).name == "user2"
 
@@ -121,7 +121,7 @@ def test_real_process_lifecycle(dsh_service, tmp_path) -> None:
     (config_dir / "session.json").write_text("{}", encoding="utf-8")
     stopped = service.dsh.stop_runtime("user1")
     assert stopped["stopped"] is True
-    assert service.dsh._read_state("user1") is None
+    assert service.dsh._read_state("personal", "user1") is None
     assert (config_dir / "session.json").exists()
 
     deadline_port_free = service.dsh._probe_port(port)
@@ -146,4 +146,4 @@ def test_real_process_failure_reports_log_tail(dsh_service) -> None:
     with pytest.raises(Exception) as exc_info:
         service.dsh.ensure_running("user1")
     assert "exit" in str(exc_info.value) or "未就绪" in str(exc_info.value)
-    assert service.dsh._read_state("user1") is None
+    assert service.dsh._read_state("personal", "user1") is None

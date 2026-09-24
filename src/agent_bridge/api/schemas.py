@@ -47,9 +47,14 @@ class DshRuntimeConfigUpdateRequest(BaseModel):
 
 
 class DshWorkspaceAuthorizeRequest(BaseModel):
-    """选择能力平面；留空表示进入不带任何 MCP 的工作台。"""
+    """选择能力平面；留空表示进入不带任何 MCP 的工作台。
+
+    ``scope`` 为工作空间范围：``personal``（默认，业务用户独立 DSH_HOME）或
+    ``shared``（同一 Linux 用户下共享 runtime，运行期间能力平面锁定）。
+    """
 
     profile_key: str | None = Field(default=None, max_length=255)
+    scope: str = Field(default="personal", pattern="^(personal|shared)$")
 
 
 class ChangeAdminPasswordRequest(BaseModel):

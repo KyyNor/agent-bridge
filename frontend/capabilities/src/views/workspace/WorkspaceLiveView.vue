@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from '../../api/client'
+import type { DshWorkspaceScope } from '../../api/types'
 import { Button } from '../../components/ui/button'
 import { LoadingState } from '../../components/ui/feedback'
 import ErrorState from '../../components/ui/feedback/ErrorState.vue'
@@ -16,6 +17,13 @@ const iframeKey = ref(0)
 const keepAliveTimer: { id: number | null } = { id: null }
 
 const requestedProfile = typeof route.query.profile === 'string' ? route.query.profile : ''
+const scope = computed<DshWorkspaceScope>(() =>
+  route.query.scope === 'shared' ? 'shared' : 'personal',
+)
+// scope 决定 iframe 指向的代理前缀：个人与共享是两个独立的工作台入口。
+const iframeSrc = computed(() =>
+  scope.value === 'shared' ? '/agent-workspace-shared/' : '/agent-workspace/',
+)
 
 onMounted(enterWorkspace)
 onUnmounted(stopKeepAlive)
@@ -25,7 +33,7 @@ async function enterWorkspace() {
   errorMessage.value = ''
   stopKeepAlive()
   try {
-    const result = await api.authorizeDshWorkspace(requestedProfile || null)
+    const result = await api.authorizeDshWorkspace(requestedProfile || null, scope.value)
     activeProfile.value = result.profile_key
     phase.value = 'active'
     iframeKey.value += 1
@@ -50,7 +58,7 @@ function startKeepAlive() {
   // 定期查询自身 runtime：既能展示空闲状态，也能发现进程异常退出
   keepAliveTimer.id = window.setInterval(async () => {
     try {
-      const status = await api.getDshRuntimeStatus()
+      const status = await api.getDshRuntimeStatus(scope.value)
       if (status.status !== 'running' && status.status !== 'starting') {
         stopKeepAlive()
         errorMessage.value = 'DSH 工作台进程已停止或异常退出，请重新进入。'
@@ -75,7 +83,9 @@ function stopKeepAlive() {
   <div class="fixed inset-0 z-[60] flex flex-col bg-background">
     <div class="flex h-11 shrink-0 items-center justify-between border-b border-border bg-card px-4">
       <div class="flex items-center gap-3">
-        <span class="text-sm font-medium">DSH 工作台</span>
+        <span class="text-sm font-medium">
+          {{ scope === 'shared' ? '小组共享 DSH 工作台' : 'DSH 工作台' }}
+        </span>
         <span v-if="activeProfile" class="rounded-full bg-primary/10 px-2 py-px text-xs text-primary">
           能力平面：{{ activeProfile }}
         </span>
@@ -96,7 +106,7 @@ function stopKeepAlive() {
     <iframe
       v-else-if="phase === 'active'"
       :key="iframeKey"
-      src="/agent-workspace/"
+      :src="iframeSrc"
       class="h-full w-full flex-1 border-0 bg-background"
       title="DSH 工作台"
       allow="clipboard-read; clipboard-write"

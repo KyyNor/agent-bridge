@@ -28,7 +28,9 @@ logger = logging.getLogger(__name__)
 # ``--no-open`` 关闭 DSH 的浏览器自启（工作台经站内反向代理访问）。
 DEFAULT_DSH_WEB_COMMAND = "dsh web {patch} --host 127.0.0.1 --port {port} --no-open"
 COMMAND_PLACEHOLDERS = ("port", "patch")
-DEFAULT_IDLE_TIMEOUT_MINUTES = 120
+# 默认空闲回收：DSH 常被当作持续工作台使用，过短的窗口会频繁触发冷启动；
+# 回收严格按 last_access_at（最后一次实际访问/操作）判断，而非启动时间。
+DEFAULT_IDLE_TIMEOUT_MINUTES = 720
 MIN_IDLE_TIMEOUT_MINUTES = 1
 MAX_IDLE_TIMEOUT_MINUTES = 30 * 24 * 60
 

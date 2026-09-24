@@ -212,7 +212,7 @@ def test_authorize_injects_mcp_overlay_and_switching_profile_restarts(
     command = launcher.starts[0]["command"]
     assert "--patch" in command
     assert command[command.index("--patch") + 1] == str(overlay_path)
-    state = service.dsh._read_state("user1")
+    state = service.dsh._read_state("personal", "user1")
     assert state["profile_key"] == "safe"
     assert state["config_dir"] == str(config_dir)
 
@@ -231,7 +231,7 @@ def test_authorize_injects_mcp_overlay_and_switching_profile_restarts(
     switched = service.dsh.authorize_workspace("user1", profile_key="wide")
     assert switched["profile_key"] == "wide"
     assert len(launcher.starts) == 2
-    assert service.dsh._read_state("user1")["profile_key"] == "wide"
+    assert service.dsh._read_state("personal", "user1")["profile_key"] == "wide"
 
 
 def test_authorize_without_profile_enters_plain_workspace(service, home, passwd_lookup, monkeypatch) -> None:
@@ -251,7 +251,7 @@ def test_authorize_without_profile_enters_plain_workspace(service, home, passwd_
     assert len(launcher.starts) == 2
     assert "--patch" not in launcher.starts[1]["command"]
     assert not overlay_path.exists()
-    assert service.dsh._read_state("user1")["profile_key"] is None
+    assert service.dsh._read_state("personal", "user1")["profile_key"] is None
 
     # 首次进入就不选平面：不产生覆盖文件
     service.dsh.stop_runtime("user1")
@@ -421,8 +421,7 @@ def test_refresh_workspace_auth_picks_latest_banner(service, tmp_path) -> None:
         encoding="utf-8",
     )
     service.dsh._write_state(
-        "user1",
-        {
+            "personal", "user1", {
             "user_id": "user1",
             "group_key": "groupa",
             "linux_user": "groupa",
@@ -507,20 +506,26 @@ class _FakeDshService:
         self.auth_calls: list[str] = []
         self.refresh_calls: list[str] = []
 
-    def require_runtime_target(self, user_id: str) -> str | None:
+    def require_runtime_target(
+        self, user_id: str, *, scope: str = "personal"
+    ) -> str | None:
         if self._target is not None:
             self.touch_calls.append(user_id)
         return self._target
 
-    def ensure_running(self, user_id: str) -> dict:
+    def ensure_running(self, user_id: str, *, workspace=None, scope: str = "personal") -> dict:
         self.ensure_calls.append(user_id)
         return {"status": "running"}
 
-    def workspace_auth(self, user_id: str) -> tuple[str, str] | None:
+    def workspace_auth(
+        self, user_id: str, *, scope: str = "personal"
+    ) -> tuple[str, str] | None:
         self.auth_calls.append(user_id)
         return self._auth
 
-    def refresh_workspace_auth(self, user_id: str) -> tuple[str, str] | None:
+    def refresh_workspace_auth(
+        self, user_id: str, *, scope: str = "personal"
+    ) -> tuple[str, str] | None:
         self.refresh_calls.append(user_id)
         return self._refreshed_auth if self._refreshed_auth is not None else self._auth
 
@@ -1001,8 +1006,7 @@ def test_workspace_proxy_relays_websocket(service, home, passwd_lookup, monkeypa
             app_service.dsh, "_probe_port", staticmethod(lambda port: port == server.port)
         )
         app_service.dsh._write_state(
-            "user1",
-            {
+            "personal", "user1", {
                 "user_id": "user1",
                 "group_key": "groupa",
                 "linux_user": "groupa",
@@ -1024,7 +1028,7 @@ def test_workspace_proxy_relays_websocket(service, home, passwd_lookup, monkeypa
             websocket.send_bytes(b"\x01\x02")
             assert websocket.receive_bytes() == b"\x01\x02"
 
-        refreshed = app_service.dsh._read_state("user1")
+        refreshed = app_service.dsh._read_state("personal", "user1")
         assert float(refreshed["last_access_at"]) > time.time() - 60
     finally:
         server.stop()
