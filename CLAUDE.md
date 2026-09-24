@@ -57,6 +57,8 @@ CLI 根命令只有 `server`、`profile`、`memory`。不要在文档中添加�
 
 `workflow_artifacts` 的标题、摘要、路径和正文通过 jieba 预分词与 SQLite FTS5 索引检索；中文查询词按 `AND` 组合，长度至少 3 的 ASCII 标识符使用 FTS5 前缀匹配，短 token 和带分隔符的路径/标识符使用字面匹配。Profile、current/history、标签、格式和路径前缀仍由普通表条件过滤。原始产物正文不被改写，分词副本单独维护并随 artifact 生命周期同步。
 `artifacts_search` 结果通过公共 `DiskCacheStore` 做磁盘缓存，TTL 默认 8 小时，由系统配置中的 `artifact_search_cache_ttl_hours` 控制；检索请求每次读取当前配置，修改后立即生效。当前版本暂不因新产物或 current 状态变化主动清理检索缓存。
+
+历史数据由 `system_config/data_retention.py` 的统一生命周期任务治理：`knowledge_sync_config` 的 `retention_detail_days`（默认 20）/`retention_history_days`（默认 60）/`retention_cleanup_time`（默认 22:00）驱动每日一次的清理（`DataRetentionScheduler`）。详情窗口外清理大字段、历史窗口外删行（workflow 节点/运行产物关联与评测执行随外键级联、FTS 靠触发器同步、`is_current=1` 产物永不删），`run/agent-runs` 目录按详情窗口回收且保护运行中 run，`workflow_runs.temp_dir` 与模型评测 `work_dir` 随行删除。禁止恢复旧的写入路径 runtime log prune；日常只分批 DELETE + `wal_checkpoint`，VACUUM 只发生在 `2026_09_data_retention_v1` marker 守卫的首启迁移中（台账库仅 freelist 偏高时），marker 记录在主库 `data_retention_meta` 表；首启迁移在应用 ready 前阻塞完成（不与其他 SQLite 请求并发），且只有真实完成一轮清理才落 cleanup marker（skipped/异常都不落）。活动任务保护：`running`/`pending` 行不做 slim/delete（谓词与目录回收、级联计数共用 `ACTIVE_STATUS_SQL`）；历史产物删除必须带 `workflow_run_artifacts` 引用保护（`idx_workflow_run_artifacts_artifact` 支撑）。业务台账、知识库/文档、权限与 Script/Skill/Workflow 定义、`workflow_tasks` 不进 TTL。
 平台概览由独立 `DashboardOverviewService` 聚合，并使用公共 `DiskCacheStore` 缓存 4 小时；缓存键必须包含用户、所属小组、可见资源范围与日期区间，防止跨用户或跨小组复用。页面手动刷新必须绕过并重建当前缓存。
 
 领域失败抛 `AgentBridgeError` 子类，由 API 全局异常处理器转换为 HTTP 响应。重新分类错误时使用明确类型并 `raise ... from exc`，不要修改任意异常对象。

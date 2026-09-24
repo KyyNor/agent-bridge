@@ -574,6 +574,9 @@ CREATE TABLE IF NOT EXISTS knowledge_sync_config (
   workflow_max_runtime_minutes INTEGER NOT NULL DEFAULT 30,
   workflow_task_rerun_days INTEGER NOT NULL DEFAULT 30,
   log_retention_days INTEGER NOT NULL DEFAULT 180,
+  retention_detail_days INTEGER NOT NULL DEFAULT 20,
+  retention_history_days INTEGER NOT NULL DEFAULT 60,
+  retention_cleanup_time TEXT NOT NULL DEFAULT '22:00',
   mcp_timeout_seconds INTEGER NOT NULL DEFAULT 150,
   understand_timeout_minutes INTEGER NOT NULL DEFAULT 120,
   artifact_search_cache_ttl_hours INTEGER NOT NULL DEFAULT 8,
@@ -765,6 +768,11 @@ CREATE TABLE IF NOT EXISTS workflow_run_artifacts (
 );
 CREATE INDEX IF NOT EXISTS idx_workflow_run_artifacts_run_node
   ON workflow_run_artifacts(run_id, node_id);
+-- 数据生命周期删除历史产物时的引用保护（NOT EXISTS 按 artifact_id 反查）：
+-- 主键 (run_id, node_id, artifact_id) 的前缀覆盖不到 artifact_id，缺该索引
+-- 会退化为逐行扫描。
+CREATE INDEX IF NOT EXISTS idx_workflow_run_artifacts_artifact
+  ON workflow_run_artifacts(artifact_id);
 
 CREATE TABLE IF NOT EXISTS workflow_run_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

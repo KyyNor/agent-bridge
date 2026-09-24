@@ -40,7 +40,9 @@ const syncConfig = ref<KnowledgeSyncConfig>({
   workflow_max_concurrent_runs_per_workflow: 2,
   workflow_max_runtime_minutes: 30,
   workflow_task_rerun_days: 30,
-  log_retention_days: 180,
+  retention_detail_days: 20,
+  retention_history_days: 60,
+  retention_cleanup_time: '22:00',
   mcp_timeout_seconds: 150,
   understand_timeout_minutes: 120,
   artifact_search_cache_ttl_hours: 8,
@@ -258,8 +260,23 @@ const taskRerunDaysValid = computed(() =>
 const workflowRuntimeValid = computed(() =>
   Number.isInteger(syncConfig.value.workflow_max_runtime_minutes) && syncConfig.value.workflow_max_runtime_minutes >= 0,
 )
-const logRetentionValid = computed(() =>
-  Number.isInteger(syncConfig.value.log_retention_days) && syncConfig.value.log_retention_days > 0,
+const retentionDetailValid = computed(() =>
+  Number.isInteger(syncConfig.value.retention_detail_days) && syncConfig.value.retention_detail_days >= 1,
+)
+const retentionHistoryValid = computed(() =>
+  Number.isInteger(syncConfig.value.retention_history_days) && syncConfig.value.retention_history_days >= 1,
+)
+const retentionOrderValid = computed(() =>
+  retentionDetailValid.value
+  && retentionHistoryValid.value
+  && syncConfig.value.retention_detail_days <= syncConfig.value.retention_history_days,
+)
+const RETENTION_TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/
+const retentionTimeValid = computed(() =>
+  RETENTION_TIME_PATTERN.test(String(syncConfig.value.retention_cleanup_time || '').trim()),
+)
+const retentionValid = computed(() =>
+  retentionOrderValid.value && retentionTimeValid.value,
 )
 const mcpTimeoutValid = computed(() =>
   Number.isInteger(syncConfig.value.mcp_timeout_seconds) && syncConfig.value.mcp_timeout_seconds > 0,
@@ -284,7 +301,7 @@ const cronValid = computed(() =>
   && maxConcurrentRunsPerWorkflowValid.value
   && taskRerunDaysValid.value
   && workflowRuntimeValid.value
-  && logRetentionValid.value
+  && retentionValid.value
   && mcpTimeoutValid.value
   && understandTimeoutValid.value
   && artifactSearchCacheTtlValid.value,
@@ -732,10 +749,23 @@ async function deleteBackend(slug: string) {
           <span v-else class="text-xs text-destructive">请输入非负整数</span>
         </div>
         <div class="grid grid-cols-[12rem_minmax(0,auto)_1fr] items-center gap-4">
-          <div class="text-sm shrink-0 whitespace-nowrap">运行日志保留 <span class="text-xs text-muted-foreground">(天)</span></div>
-          <Input v-model.number="syncConfig.log_retention_days" type="number" min="1" placeholder="180" class="w-32 font-mono text-sm" />
-          <span v-if="logRetentionValid" class="text-xs text-muted-foreground">结构化调用日志与 Agent 运行记录仅保留最近 {{ syncConfig.log_retention_days }} 天</span>
+          <div class="text-sm shrink-0 whitespace-nowrap">详情保留天数 <span class="text-xs text-muted-foreground">(天)</span></div>
+          <Input v-model.number="syncConfig.retention_detail_days" type="number" min="1" placeholder="20" class="w-32 font-mono text-sm" />
+          <span v-if="retentionDetailValid" class="text-xs text-muted-foreground">Agent 运行详情、工具调用请求/响应与运行目录完整保留最近 {{ syncConfig.retention_detail_days }} 天</span>
           <span v-else class="text-xs text-destructive">请输入正整数</span>
+        </div>
+        <div class="grid grid-cols-[12rem_minmax(0,auto)_1fr] items-center gap-4">
+          <div class="text-sm shrink-0 whitespace-nowrap">历史保留天数 <span class="text-xs text-muted-foreground">(天)</span></div>
+          <Input v-model.number="syncConfig.retention_history_days" type="number" min="1" placeholder="60" class="w-32 font-mono text-sm" />
+          <span v-if="retentionOrderValid" class="text-xs text-muted-foreground">超过详情窗口后清理大字段仅留轻量摘要，超过 {{ syncConfig.retention_history_days }} 天的历史记录删除</span>
+          <span v-else-if="retentionHistoryValid" class="text-xs text-destructive">不能小于详情保留天数</span>
+          <span v-else class="text-xs text-destructive">请输入正整数</span>
+        </div>
+        <div class="grid grid-cols-[12rem_minmax(0,auto)_1fr] items-center gap-4">
+          <div class="text-sm shrink-0 whitespace-nowrap">每日清理时间</div>
+          <Input v-model="syncConfig.retention_cleanup_time" type="text" placeholder="22:00" class="w-32 font-mono text-sm" />
+          <span v-if="retentionTimeValid" class="text-xs text-muted-foreground">每天 {{ syncConfig.retention_cleanup_time }} 执行一次数据生命周期清理（运行日志、工作流历史与运行目录）</span>
+          <span v-else class="text-xs text-destructive">请输入 HH:MM 时间（24 小时制）</span>
         </div>
 
         <div class="flex items-center gap-3">
@@ -753,6 +783,13 @@ async function deleteBackend(slug: string) {
           </div>
           <div v-if="!schedulerStatus" class="py-4 text-center text-sm text-muted-foreground">无法获取调度状态</div>
           <div v-else class="space-y-3">
+            <div v-if="schedulerStatus.data_retention">
+              <div class="mb-2 flex items-center gap-3">
+                <span class="text-xs text-muted-foreground">数据生命周期</span>
+                <StatusBadge :status="schedulerStatus.data_retention.running ? 'running' : 'disabled'" :label="schedulerStatus.data_retention.running ? '运行中' : '已暂停'" />
+                <span class="font-mono text-xs text-muted-foreground">每日 {{ schedulerStatus.data_retention.cleanup_time }}</span>
+              </div>
+            </div>
             <div>
               <div class="mb-2 flex items-center gap-3">
                 <span class="text-xs text-muted-foreground">代码同步</span>

@@ -17,9 +17,6 @@ class SQLiteStore(SQLiteStoreFacade):
     def __init__(self, db_path: Path, log_db_path: Path | None = None) -> None:
         self.db_path = db_path
         self.log_db_path = log_db_path or db_path
-        self._runtime_log_retention_days = 180
-        self._last_runtime_log_prune_monotonic: float | None = None
-        self._runtime_log_prune_interval_seconds = 3600.0
         self._active_connection: ContextVar[sqlite3.Connection | None] = ContextVar(
             f"sqlite_store_connection_{id(self)}", default=None
         )
@@ -60,7 +57,7 @@ class SQLiteStore(SQLiteStoreFacade):
         self.dsh_config = DshConfigRepository(db_path, self.connect)
         self.model_evaluations = ModelEvaluationRepository(db_path, self.connect)
         self.onboarding = OnboardingRepository(db_path, self.connect)
-        self.agent_runs = AgentRunsRepository(self.log_db_path, self.log_connect, prune_callback=self.maybe_prune_runtime_logs)
+        self.agent_runs = AgentRunsRepository(self.log_db_path, self.log_connect)
 
     @staticmethod
     def _open_connection_at(db_path: Path) -> sqlite3.Connection:

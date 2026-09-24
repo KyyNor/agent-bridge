@@ -10,10 +10,9 @@ from agent_bridge.storage.types import row_to_dict
 
 
 class AgentRunsRepository:
-    def __init__(self, db_path, connect, prune_callback=None) -> None:
+    def __init__(self, db_path, connect) -> None:
         self._db_path = db_path
         self._connect = connect
-        self._prune_callback = prune_callback
 
     def create(
         self,
@@ -85,8 +84,6 @@ class AgentRunsRepository:
             log = row_to_dict(row)
             if log is None:
                 raise KeyError(f"agent run not found: {run_key}")
-        if callable(self._prune_callback):
-            self._prune_callback()
         return self._payload(log)
 
     def finish_run(
@@ -378,14 +375,6 @@ class AgentRunsRepository:
             )
             params.extend([like] * 6)
         return clauses, params
-
-    def purge_created_before(self, cutoff_created_at: str) -> int:
-        with self._connect() as conn:
-            cursor = conn.execute(
-                "DELETE FROM agent_runs WHERE created_at < ?",
-                (cutoff_created_at,),
-            )
-            return int(cursor.rowcount or 0)
 
     @staticmethod
     def _payload(row: dict[str, Any] | None) -> dict[str, Any] | None:

@@ -706,8 +706,12 @@ def test_frontend_knowledge_processing_config_page_has_sync_config() -> None:
 
     assert "定时任务管理" in source
     assert "code_sync_cron" in source
-    assert "log_retention_days" in source
-    assert "运行日志保留" in source
+    assert "retention_detail_days" in source
+    assert "retention_history_days" in source
+    assert "retention_cleanup_time" in source
+    assert "详情保留" in source
+    assert "历史保留" in source
+    assert "每日清理时间" in source
     assert "mcp_timeout_seconds" in source
     assert "MCP 超时" in source
     assert "doc_sync_cron" in source
@@ -1204,21 +1208,41 @@ def test_codegraph_repository_explore_api_uses_stdio_mcp(tmp_path: Path, wm_path
     ]
 
 
-def test_sync_config_api_round_trips_log_retention_days(wm_paths) -> None:
+def test_sync_config_api_round_trips_data_retention(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
 
     saved = client.post(
         "/api/v1/sync-config",
-        json={"code_sync_cron": "0 * * * *", "log_retention_days": 90},
+        json={
+            "code_sync_cron": "0 * * * *",
+            "retention_detail_days": 10,
+            "retention_history_days": 45,
+            "retention_cleanup_time": "23:30",
+        },
         headers={"X-Agent-Bridge-User": "root"},
     )
     loaded = client.get("/api/v1/sync-config", headers={"X-Agent-Bridge-User": "root"})
 
     assert saved.status_code == 200
-    assert saved.json()["log_retention_days"] == 90
+    assert saved.json()["retention_detail_days"] == 10
+    assert saved.json()["retention_history_days"] == 45
+    assert saved.json()["retention_cleanup_time"] == "23:30"
     assert loaded.status_code == 200
-    assert loaded.json()["log_retention_days"] == 90
+    assert loaded.json()["retention_detail_days"] == 10
+    assert loaded.json()["retention_history_days"] == 45
+    assert loaded.json()["retention_cleanup_time"] == "23:30"
+
+    rejected = client.post(
+        "/api/v1/sync-config",
+        json={
+            "code_sync_cron": "0 * * * *",
+            "retention_detail_days": 90,
+            "retention_history_days": 45,
+        },
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    assert rejected.status_code == 400
 
 
 def test_sync_config_api_round_trips_artifact_search_cache_ttl(wm_paths) -> None:

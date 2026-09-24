@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-import time
-from datetime import timedelta
 from typing import Any
-
-from agent_bridge.core.timeutil import utc_now
 
 
 class GovernanceFacadeMixin:
@@ -146,7 +142,6 @@ class GovernanceFacadeMixin:
         owner_group_key: str = "",
     ) -> dict[str, Any]:
         log = self.governance.create_tool_call_log(log_id=log_id, actor=actor, profile_key=profile_key, entrypoint=entrypoint, source_type=source_type, source_key=source_key, tool_name=tool_name, request=request, response=response, status=status, error_message=error_message, failure_stage=failure_stage, failure_owner=failure_owner, error_type=error_type, resource_type=resource_type, resource_key=resource_key, duration_ms=duration_ms, owner_group_key=owner_group_key)
-        self.maybe_prune_runtime_logs()
         return log
 
     def list_tool_call_logs(
@@ -188,29 +183,3 @@ class GovernanceFacadeMixin:
 
     def get_tool_call_log(self, log_id: str) -> dict[str, Any] | None:
         return self.governance.get_tool_call_log(log_id=log_id)
-
-    def set_runtime_log_retention_days(self, days: int) -> None:
-        self._runtime_log_retention_days = max(int(days), 0)
-
-    def maybe_prune_runtime_logs(self, force: bool = False) -> dict[str, int]:
-        if self._runtime_log_retention_days <= 0:
-            return {"tool_call_logs": 0, "agent_runs": 0}
-        now = time.monotonic()
-        if not force and self._last_runtime_log_prune_monotonic is not None:
-            if now - self._last_runtime_log_prune_monotonic < self._runtime_log_prune_interval_seconds:
-                return {"tool_call_logs": 0, "agent_runs": 0}
-        deleted = self.prune_runtime_logs(force=True)
-        self._last_runtime_log_prune_monotonic = now
-        return deleted
-
-    def prune_runtime_logs(self, force: bool = False) -> dict[str, int]:
-        if self._runtime_log_retention_days <= 0:
-            return {"tool_call_logs": 0, "agent_runs": 0}
-        cutoff = (utc_now() - timedelta(days=self._runtime_log_retention_days)).strftime("%Y-%m-%d %H:%M:%S")
-        deleted = {
-            "tool_call_logs": self.governance.purge_tool_call_logs_before(cutoff),
-            "agent_runs": self.agent_runs.purge_created_before(cutoff),
-        }
-        if force:
-            self._last_runtime_log_prune_monotonic = time.monotonic()
-        return deleted
