@@ -8,6 +8,7 @@ import os
 import threading
 import time
 import types
+from dataclasses import replace
 from pathlib import Path
 
 import httpx
@@ -216,22 +217,60 @@ def test_authorize_injects_mcp_overlay_and_switching_profile_restarts(
     assert state["profile_key"] == "safe"
     assert state["config_dir"] == str(config_dir)
 
-    # 同一平面重复授权：复用实例，仅刷新 capability
+    # 同一平面重复授权：复用实例与 capability，运行中的 MCP client 仍持有此 token。
     service.dsh.capabilities.require(token)
     again = service.dsh.authorize_workspace("user1", profile_key="safe")
     assert again["status"] == "running"
     assert len(launcher.starts) == 1
     refreshed = yaml.safe_load(overlay_path.read_text(encoding="utf-8"))
     refreshed_token = refreshed[0]["insert"][0]["config"]["headers"][DSH_CAPABILITY_HEADER]
-    assert refreshed_token != token
-    with pytest.raises(Exception):
-        service.dsh.capabilities.require(token)
+    assert refreshed_token == token
+    assert service.dsh.capabilities.require(token).profile_key == "safe"
 
     # 切换能力平面：回收重启
     switched = service.dsh.authorize_workspace("user1", profile_key="wide")
     assert switched["profile_key"] == "wide"
     assert len(launcher.starts) == 2
     assert service.dsh._read_state("personal", "user1")["profile_key"] == "wide"
+
+
+def test_reenter_restarts_when_personal_capability_is_missing_or_expired(
+    service, home, passwd_lookup, monkeypatch
+) -> None:
+    configure_group(service)
+    launcher = install_fakes(service, home, passwd_lookup, monkeypatch)
+    monkeypatch.setattr(service.dsh, "_terminate_pid", lambda *args, **kwargs: True)
+    overlay_path = mcp_overlay_path(home / "groupa" / ".config" / "dsh" / "user1")
+
+    service.dsh.authorize_workspace("user1", profile_key="safe")
+    original = yaml.safe_load(overlay_path.read_text(encoding="utf-8"))[0]["insert"][0]["config"]["headers"][DSH_CAPABILITY_HEADER]
+
+    # 模拟 Agent Bridge 重启：registry 丢失而 DSH 进程仍存活，重进必须冷启动。
+    service.dsh.capabilities.revoke_all()
+    service.dsh.authorize_workspace("user1", profile_key="safe")
+    assert len(launcher.starts) == 2
+    refreshed = yaml.safe_load(overlay_path.read_text(encoding="utf-8"))[0]["insert"][0]["config"]["headers"][DSH_CAPABILITY_HEADER]
+    assert refreshed != original
+    assert service.dsh.capabilities.require(refreshed).profile_key == "safe"
+
+    # TTL 到期也须重启；只重写 patch 会让进程继续使用已撤销的 token。
+    current = service.dsh.capabilities.require(refreshed)
+    service.dsh.capabilities._items[refreshed] = replace(
+        current, expires_at_monotonic=time.monotonic() - 1
+    )
+    service.dsh.authorize_workspace("user1", profile_key="safe")
+    assert len(launcher.starts) == 3
+
+    # 120 分钟空闲回收停止进程并撤销 token；再次进入必须重新启动。
+    active = yaml.safe_load(overlay_path.read_text(encoding="utf-8"))[0]["insert"][0]["config"]["headers"][DSH_CAPABILITY_HEADER]
+    state = service.dsh._read_state("personal", "user1")
+    state["last_access_at"] = time.time() - 121 * 60
+    service.dsh._write_state("personal", "user1", state)
+    assert service.dsh.stop_idle_expired() == ["user1"]
+    with pytest.raises(Exception):
+        service.dsh.capabilities.require(active)
+    service.dsh.authorize_workspace("user1", profile_key="safe")
+    assert len(launcher.starts) == 4
 
 
 def test_authorize_without_profile_enters_plain_workspace(service, home, passwd_lookup, monkeypatch) -> None:

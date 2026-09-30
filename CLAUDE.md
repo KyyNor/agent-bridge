@@ -296,8 +296,9 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
   校验后以业务用户身份 + `bind_actor_group` 进入既有权限体系，不与工作流
   capability 同时使用。MCP 注入是 DSH 的 loader patch 覆盖文件
   （`<DSH_HOME>/agent-bridge-mcp.patch.yml`，0600），经启动命令 `{patch}` →
-  `--patch` 生效；个人范围同平面重进只重写覆盖文件刷新 capability，切换平面回收
-  重启。共享 Runtime 使用 **runtime 级稳定 capability**：启动时按
+  `--patch` 生效；个人范围同平面重进复用仍有效的 capability，失效或服务重启后
+  重进需回收旧 DSH 进程并携新 patch 启动（运行中仅改文件不会更新 MCP client
+  的 token）；切换平面同样回收重启。共享 Runtime 使用 **runtime 级稳定 capability**：启动时按
   ``linux_user + active_profile`` 签发（registry 槽位 ``shared-runtime:<linux-user>``，
   ``capability.user_id`` = Linux 用户，MCP 调用以共享 runtime/Linux 用户身份
   审计），**不设独立过期**（绑定 runtime 生命周期，持续活跃的 runtime 不会

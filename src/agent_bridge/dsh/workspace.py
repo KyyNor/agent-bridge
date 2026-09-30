@@ -153,6 +153,24 @@ class DshWorkspaceCapabilityRegistry:
             raise AccessDenied("DSH Workspace capability 与请求的能力平面不匹配")
         return capability
 
+    def current_for_user(self, user_id: str) -> DshWorkspaceCapability | None:
+        """返回仍有效的个人 capability；过期时同步清理记账槽位。"""
+        with self._lock:
+            token = self._by_user.get(user_id)
+            if token is None:
+                return None
+            capability = self._items.get(token)
+            if capability is None:
+                self._by_user.pop(user_id, None)
+                return None
+            if (
+                capability.expires_at_monotonic is not None
+                and capability.expires_at_monotonic <= time.monotonic()
+            ):
+                self._drop(capability)
+                return None
+            return capability
+
     def revoke(self, token: str) -> None:
         with self._lock:
             capability = self._items.pop(token, None)

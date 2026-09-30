@@ -101,6 +101,8 @@ Linux 用户身份运行；同一小组的多个业务用户共享 Linux uid。�
   留空时回落为系统「公共模型配置」的 Base URL；`--no-open` 关闭 DSH 的浏览器
   自启（工作台经站内反向代理访问）。空闲回收严格按最后一次实际访问/操作时间
   （`last_access_at`）判断，进入工作台、反向代理访问与保活查询都会刷新。
+  个人工作台同一能力平面重复进入时复用有效的 MCP capability；capability
+  失效或 Agent Bridge 重启后重新进入，会重启 DSH 以加载新的 MCP patch。
 - **组级配置**：`linux_user`（小组映射的 Linux 用户，默认取小组标识）、
   `default_model`（必须取自全局可用模型列表）与敏感的 `api_key`（只写不回显）。
 

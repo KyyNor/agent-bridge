@@ -23,6 +23,7 @@ agent 会话）全部以 detached（独立进程组/会话）方式启动，主�
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -324,15 +325,38 @@ class DshRuntimeService:
             resource_type=ScopedResourceType.capability_profile,
             resource_key=cleaned_profile,
         )
-        capability = self.capabilities.issue(
-            user_id=normalized_user,
-            profile_key=cleaned_profile,
-            owner_group_key=group_key,
-        )
-        status = self.ensure_running(
-            normalized_user,
-            workspace=WorkspaceSelection(profile_key=cleaned_profile, capability=capability),
-        )
+        with self._lock:
+            state = self._read_state(WORKSPACE_SCOPE_PERSONAL, normalized_user)
+            capability = self.capabilities.current_for_user(normalized_user)
+            reusable = bool(
+                state
+                and capability
+                and self._pid_alive(int(state.get("pid") or 0))
+                and self._probe_port(int(state.get("port") or 0))
+                and state.get("profile_key") == cleaned_profile
+                and state.get("group_key") == group_key
+                and capability.profile_key == cleaned_profile
+                and capability.owner_group_key == group_key
+                and state.get("capability_digest")
+                == hashlib.sha256(capability.token.encode()).hexdigest()
+            )
+            if reusable:
+                # 活进程已加载该 token，不改 patch，避免触发 DSH 的配置重载。
+                status = self.ensure_running(normalized_user)
+            else:
+                # DSH 的 --patch 在启动时加载。旧进程即使看到磁盘上的新 token，
+                # MCP client 仍可能持有旧 token；重签前必须停止旧进程。
+                if state:
+                    self._stop_state(state, WORKSPACE_SCOPE_PERSONAL, normalized_user)
+                capability = self.capabilities.issue(
+                    user_id=normalized_user,
+                    profile_key=cleaned_profile,
+                    owner_group_key=group_key,
+                )
+                status = self.ensure_running(
+                    normalized_user,
+                    workspace=WorkspaceSelection(profile_key=cleaned_profile, capability=capability),
+                )
         logger.info(
             "DSH Workspace 授权完成 user=%s profile=%s group=%s runtime_status=%s",
             normalized_user,
@@ -696,6 +720,11 @@ class DshRuntimeService:
             "config_dir": str(config_dir),
             "log_path": str(log_path),
             "profile_key": workspace.profile_key if workspace is not None else None,
+            "capability_digest": (
+                hashlib.sha256(workspace.capability.token.encode()).hexdigest()
+                if workspace is not None and workspace.capability is not None
+                else None
+            ),
             "started_at": now,
             "last_access_at": now,
         }
@@ -746,6 +775,8 @@ class DshRuntimeService:
             grace_seconds=DSH_STOP_GRACE_SECONDS,
             mark=process_tree.runtime_mark_value(scope, runtime_key),
         )
+        if scope == WORKSPACE_SCOPE_PERSONAL:
+            self.capabilities.revoke_for_user(runtime_key)
         if scope == WORKSPACE_SCOPE_SHARED:
             # 共享 Runtime 的稳定 capability 随 runtime 生命周期撤销；patch 内
             # 的 token 同步失效，一并移除覆盖文件，避免下次按需启动带着死 token。
@@ -1320,7 +1351,8 @@ class DshRuntimeService:
         必然持有死 token（MCP 请求全部无效），且后续成员进入不会重签。
         因此对存活共享实例直接安全停止并清理 state/patch，让首位成员下次
         进入时重新按 active profile 启动并生成新 capability；个人实例维持
-        「存活保留」语义（个人 capability 本就随进程内存失效，重进会重签）。
+        「存活保留」语义；个人重进时发现进程内 capability 丢失，会回收旧实例
+        并带新 patch 启动，避免运行中的 MCP client 继续使用死 token。
         """
         kept = 0
         cleaned = 0
