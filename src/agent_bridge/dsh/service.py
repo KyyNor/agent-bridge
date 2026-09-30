@@ -15,7 +15,10 @@
   产生第二个进程；空闲回收/显式停止后下次进入重新允许选择 Profile。
 
 进程生命周期语义与 claude-mem worker 保持一致：state 文件记录 pid/port/
-访问时间，SIGTERM→SIGKILL 升级回收，按进程组发信号。
+访问时间，SIGTERM→SIGKILL 升级回收。DSH 自身的子进程（bash 工具、终端、
+agent 会话）全部以 detached（独立进程组/会话）方式启动，主进程组信号覆盖
+不到它们，因此回收按「主进程 + 全部后代进程树 + 环境标记孤儿」的完整集合
+发信号，见 :mod:`agent_bridge.dsh.process_tree`。
 """
 
 from __future__ import annotations
@@ -42,6 +45,7 @@ from agent_bridge.core.domain import ValidationError, require_admin_user
 from agent_bridge.core.timeutil import utc_iso
 from agent_bridge.dsh import injection
 from agent_bridge.dsh import plugins
+from agent_bridge.dsh import process_tree
 from agent_bridge.dsh.agent_runtime import dsh_binary_from_command
 from agent_bridge.dsh.launcher import (
     DshProcessLauncher,
@@ -629,7 +633,12 @@ class DshRuntimeService:
         command = self._build_command(
             str(runtime_config.get("web_command") or ""), port, patch_path=overlay_path
         )
-        env = self._build_env(identity, config_dir, model_binding)
+        env = self._build_env(
+            identity,
+            config_dir,
+            model_binding,
+            mark=process_tree.runtime_mark_value(scope, runtime_key),
+        )
         log_path = self._log_path(scope, runtime_key)
         # 插件必须先于 web 进程安装完毕：运行中的 DSH 不会热加载 profile 变更，
         # 后装插件只会在下次重启后出现（首访竞态）。名单内置于包内、随版本
@@ -696,7 +705,11 @@ class DshRuntimeService:
         if not self._wait_until_ready(port, process=process):
             exit_code = process.poll()
             tail = self._tail_log(log_path)
-            self._terminate_pid(int(process.pid), grace_seconds=DSH_STOP_GRACE_SECONDS)
+            self._terminate_pid(
+                int(process.pid),
+                grace_seconds=DSH_STOP_GRACE_SECONDS,
+                mark=process_tree.runtime_mark_value(scope, runtime_key),
+            )
             self._remove_state(scope, runtime_key)
             if exit_code is not None:
                 raise ValidationError(
@@ -728,7 +741,11 @@ class DshRuntimeService:
 
     def _stop_state(self, state: dict[str, Any], scope: str, runtime_key: str) -> bool:
         pid = int(state.get("pid") or 0)
-        stopped = self._terminate_pid(pid, grace_seconds=DSH_STOP_GRACE_SECONDS)
+        stopped = self._terminate_pid(
+            pid,
+            grace_seconds=DSH_STOP_GRACE_SECONDS,
+            mark=process_tree.runtime_mark_value(scope, runtime_key),
+        )
         if scope == WORKSPACE_SCOPE_SHARED:
             # 共享 Runtime 的稳定 capability 随 runtime 生命周期撤销；patch 内
             # 的 token 同步失效，一并移除覆盖文件，避免下次按需启动带着死 token。
@@ -1069,13 +1086,20 @@ class DshRuntimeService:
         identity: LinuxIdentity,
         config_dir: Path,
         binding: dict[str, Any],
+        *,
+        mark: str,
     ) -> dict[str, str]:
-        """构造 DSH 进程环境：DSH 只从 settings.yaml 读模型配置，密钥走环境变量。"""
+        """构造 DSH 进程环境：DSH 只从 settings.yaml 读模型配置，密钥走环境变量。
+
+        ``mark`` 是 runtime 进程标记：DSH 会把它原样继承给全部子进程，停止
+        时扫描进程环境即可定位已脱离父链的孤儿进程。
+        """
         env = os.environ.copy()
         env["HOME"] = str(identity.home)
         env["USER"] = identity.user
         env["LOGNAME"] = identity.user
         env["DSH_HOME"] = str(config_dir)
+        env[process_tree.RUNTIME_MARK_ENV] = mark
         env.update(injection.managed_api_key_env_value(str(binding.get("api_key") or "")))
         return env
 
@@ -1382,28 +1406,81 @@ class DshRuntimeService:
             sock.settimeout(0.2)
             return sock.connect_ex((DSH_HOST, port)) == 0
 
-    def _terminate_pid(self, pid: int, *, grace_seconds: float) -> bool:
-        if pid <= 0 or not self._pid_alive(pid):
+    def _terminate_pid(
+        self, pid: int, *, grace_seconds: float, mark: str | None = None
+    ) -> bool:
+        """终止一个 runtime：主进程、全部后代与带标记的孤儿一起回收。
+
+        DSH 的子进程（bash 工具、终端、agent 会话）以 detached 方式各自
+        落在独立进程组/会话，对主进程组发的信号覆盖不到。必须先完整收集
+        目标集合再统一发信号——中间父进程先退出、后代被 reparent 到 init
+        之后就只能靠环境标记定位。主进程已死时同样按标记清扫遗留子进程。
+        """
+        targets = self._collect_runtime_pids(pid, mark)
+        if not targets:
             return False
-        self._signal_process(pid, signal.SIGTERM)
-        self._wait_for_exit(pid, grace_seconds=grace_seconds)
-        if self._pid_alive(pid):
-            logger.warning("DSH Runtime 优雅退出超时，升级为 SIGKILL pid=%s", pid)
-            self._signal_process(pid, signal.SIGKILL)
-            self._wait_for_exit(pid, grace_seconds=grace_seconds)
+        for target in sorted(targets):
+            self._signal_process(target, signal.SIGTERM)
+        self._wait_targets_exit(targets, grace_seconds=grace_seconds)
+        alive = self._alive_targets(targets)
+        if alive:
+            # 优雅退出窗口内新出现的同类进程（如收尾中的 agent 又起了子命令）一并纳入
+            alive |= self._collect_runtime_pids(pid, mark)
+            logger.warning(
+                "DSH Runtime 优雅退出超时，升级为 SIGKILL pid=%s 存活=%d pids=%s",
+                pid,
+                len(alive),
+                sorted(alive),
+            )
+            for target in sorted(alive):
+                self._signal_process(target, signal.SIGKILL)
+            self._wait_targets_exit(alive, grace_seconds=grace_seconds)
+            remaining = self._alive_targets(alive)
+            if remaining:
+                logger.warning(
+                    "DSH Runtime SIGKILL 后仍有存活进程 pid=%s pids=%s（权限不足或不可杀进程，请人工排查）",
+                    pid,
+                    sorted(remaining),
+                )
         self._processes.pop(pid, None)
         return True
 
-    def _wait_for_exit(self, pid: int, *, grace_seconds: float) -> None:
-        process = self._processes.get(pid)
-        if process is not None:
+    def _collect_runtime_pids(self, pid: int, mark: str | None) -> set[int]:
+        """收集一个 runtime 的全部存活进程：主进程后代树 + 环境标记命中的孤儿。"""
+        targets: set[int] = set()
+        if pid > 0 and self._pid_alive(pid):
+            tree = process_tree.descendants(pid)
+            targets |= tree
+            if not tree:
+                # 进程表不可用（解析失败/平台限制）或快照竞态：至少回收主进程
+                targets.add(pid)
+        if mark:
+            targets |= process_tree.marked_pids(mark)
+        targets = process_tree.discard_own_process(targets)
+        return {target for target in targets if self._pid_alive(target)}
+
+    def _alive_targets(self, pids: set[int]) -> set[int]:
+        """仍在运行的目标；僵尸视为已退出，避免宽限期被僵尸进程拖满。"""
+        return {
+            pid
+            for pid in pids
+            if self._pid_alive(pid) and not process_tree.process_is_zombie(pid)
+        }
+
+    def _wait_targets_exit(self, pids: set[int], *, grace_seconds: float) -> None:
+        """等待目标集合退出：本进程启动的句柄先 wait() 收尸，其余轮询存活。"""
+        deadline = time.monotonic() + max(0.0, grace_seconds)
+        for pid in sorted(pids):
+            process = self._processes.get(pid)
+            if process is None:
+                continue
             try:
-                process.wait(timeout=max(0.0, grace_seconds))
+                process.wait(timeout=max(0.0, deadline - time.monotonic()))
             except Exception:
                 pass
-            return
-        deadline = time.monotonic() + max(0.0, grace_seconds)
-        while time.monotonic() < deadline and self._pid_alive(pid):
+        while time.monotonic() < deadline:
+            if not self._alive_targets(pids):
+                return
             time.sleep(0.1)
 
     @staticmethod

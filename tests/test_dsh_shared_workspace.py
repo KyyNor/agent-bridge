@@ -108,6 +108,12 @@ def install_fakes(service, home, passwd_lookup, monkeypatch) -> FakeLauncher:
         "_probe_port",
         staticmethod(lambda port: any(int(start["port"]) == port for start in launcher.starts)),
     )
+    # 假 pid 不存在于真实进程表：终止一并桩掉（与 patch_lifecycle 同一约定）
+    monkeypatch.setattr(
+        service.dsh,
+        "_terminate_pid",
+        lambda pid, *, grace_seconds, mark=None: True,
+    )
     return launcher
 
 
@@ -450,7 +456,7 @@ def test_recover_stops_alive_shared_runtime_and_clears_patch(
     monkeypatch.setattr(
         DshRuntimeService,
         "_terminate_pid",
-        lambda self, pid, *, grace_seconds: terminated.append(pid) or True,
+        lambda self, pid, *, grace_seconds, mark=None: terminated.append(pid) or True,
     )
     restarted = AgentBridgeService.create(service.paths, {"root"})
 

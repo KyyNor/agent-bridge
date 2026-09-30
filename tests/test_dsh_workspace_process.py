@@ -30,6 +30,16 @@ def client(wm_paths, tmp_path, monkeypatch):
     from agent_bridge.api.app import create_app
     from agent_bridge.app.service import AgentBridgeService
 
+    # 端口池是 check-then-bind 竞态：xdist 多 worker 并行时同抢 48400 会
+    # 互相干扰。按 worker 分配互不重叠的 50 端口段（与 test_dsh_runtime_process
+    # 的偏移公式一致，两个文件的进程测试也不互抢）。
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "gw0")
+    worker_index = int("".join(ch for ch in worker if ch.isdigit()) or 0)
+    monkeypatch.setattr(
+        "agent_bridge.dsh.service.DSH_PORT_BASE",
+        48400 + worker_index * 50,
+    )
+
     service = AgentBridgeService.create(wm_paths, {"root"})
     service.access.upsert_group(actor="root", group_key="groupa", name="A 组")
     service.access.create_user(actor="root", user_id="user1")

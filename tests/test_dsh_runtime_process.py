@@ -12,6 +12,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import types
 from pathlib import Path
 
@@ -23,6 +24,15 @@ pytestmark = pytest.mark.process
 @pytest.fixture
 def dsh_service(wm_paths, tmp_path, monkeypatch):
     from agent_bridge.app.service import AgentBridgeService
+
+    # 端口池是 check-then-bind 竞态：xdist 多 worker 并行时同抢 48400 会
+    # 互相干扰（探活命中对方进程）。按 worker 分配互不重叠的 50 端口段。
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "gw0")
+    worker_index = int("".join(ch for ch in worker if ch.isdigit()) or 0)
+    monkeypatch.setattr(
+        "agent_bridge.dsh.service.DSH_PORT_BASE",
+        48400 + worker_index * 50,
+    )
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.access.upsert_group(actor="root", group_key="groupa", name="A 组")
@@ -147,3 +157,102 @@ def test_real_process_failure_reports_log_tail(dsh_service) -> None:
         service.dsh.ensure_running("user1")
     assert "exit" in str(exc_info.value) or "未就绪" in str(exc_info.value)
     assert service.dsh._read_state("personal", "user1") is None
+
+
+# 替身 web 进程：模拟 DSH 的 dsh-subprocess-local 行为——启动若干
+# ``detached``（独立进程组/会话）的子进程后开始服务 HTTP。这些子进程
+# 不在主进程的进程组里，对主进程组发的信号不可达；父链保持完整。
+_DETACHED_CHILD_STANDIN = """
+import os
+import subprocess
+import sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+port = int([arg for arg in sys.argv[1:] if arg.isdigit()][-1])
+report_path = os.environ["DETACHED_CHILD_REPORT"]
+children = [
+    subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(300)"],
+        start_new_session=True,
+    )
+    for _ in range(3)
+]
+with open(report_path, "w", encoding="utf-8") as report:
+    report.write("\\n".join(str(child.pid) for child in children))
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"ok")
+
+    def log_message(self, *args):
+        pass
+
+
+ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
+"""
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _wait_until_gone(pids: list[int], timeout: float = 5.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not any(_pid_alive(pid) for pid in pids):
+            return True
+        time.sleep(0.1)
+    return not any(_pid_alive(pid) for pid in pids)
+
+
+def test_real_process_stop_reaps_detached_children(dsh_service, tmp_path, monkeypatch) -> None:
+    """停止 runtime 必须回收 detached 子进程（独立进程组，主进程组信号不可达）。
+
+    回归背景：DSH 的 dsh-subprocess-local 以 ``detached: true`` 启动全部
+    子进程，旧实现只对 ``dsh web`` 主进程组发 SIGTERM/SIGKILL，子进程
+    全部遗留。修复后按「主进程 + 后代进程树」完整集合回收。
+    """
+    service = dsh_service
+    standin = tmp_path / "detached_web_standin.py"
+    standin.write_text(_DETACHED_CHILD_STANDIN, encoding="utf-8")
+    report_path = tmp_path / "detached-children.txt"
+    monkeypatch.setenv("DETACHED_CHILD_REPORT", str(report_path))
+
+    service.dsh_configs.save_runtime_config(
+        "root",
+        web_command=f'"{sys.executable}" "{standin}" {{patch}} {{port}}',
+        idle_timeout_minutes=120,
+        base_url="http://model.internal/v1",
+        available_models=["gpt-x"],
+    )
+
+    service.dsh.ensure_running("user1")
+    state = service.dsh._read_state("personal", "user1")
+    assert state is not None
+    root_pid = int(state["pid"])
+    assert _pid_alive(root_pid)
+
+    # 替身进程已把 detached 子进程 pid 写入报告文件
+    for _ in range(50):
+        if report_path.exists():
+            break
+        time.sleep(0.1)
+    child_pids = [int(line) for line in report_path.read_text(encoding="utf-8").split() if line]
+    assert len(child_pids) == 3
+    assert all(_pid_alive(pid) for pid in child_pids)
+    # detached 子进程确实脱离主进程进程组（独立会话）
+    assert all(os.getpgid(pid) != os.getpgid(root_pid) for pid in child_pids)
+
+    stopped = service.dsh.stop_runtime("user1")
+    assert stopped["stopped"] is True
+
+    # 主进程与全部 detached 子进程都被回收
+    assert not _pid_alive(root_pid)
+    assert _wait_until_gone(child_pids), f"detached 子进程未被回收：{child_pids}"

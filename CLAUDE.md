@@ -194,8 +194,13 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
 
 - 进程语义与 claude-mem worker 一致：状态文件记录 pid/port/访问时间/鉴权入口
   （个人 `run/dsh-runtimes/<user>.json`，共享 `run/dsh-runtimes/shared/<linux-user>.json`），
-  SIGTERM→SIGKILL 升级回收并按进程组发信号；内存保留
-  Popen 句柄用于 wait 回收，避免僵尸进程被误判升级 SIGKILL。
+  SIGTERM→SIGKILL 升级回收；内存保留 Popen 句柄用于 wait 回收，避免僵尸进程被误判升级
+  SIGKILL。DSH 的全部子进程（bash 工具、终端、agent 会话）由 dsh-subprocess-local 以
+  `detached`（独立进程组/会话）方式启动，主进程组信号覆盖不到，因此停止时按
+  「主进程 + 后代进程树（`process_tree.py`，Linux 走 `/proc`、其余平台走 `ps`）+
+  环境标记 `AGENT_BRIDGE_DSH_RUNTIME=<scope>:<runtime_key>` 命中的孤儿」完整集合
+  发信号；标记会随 DSH 的环境继承传给全部子进程，用于定位父链已断的遗留进程
+  （macOS 等无 `/proc` 平台只有进程树兜底）。
 - 工作空间范围（scope）：`personal` 每个业务用户至多一个实例，`DSH_HOME` 指向
   `<linux home>/.config/dsh/<business-user>/`；`shared` 同一 Linux 用户对应一个
   共享实例（runtime key = `linux_user`），`DSH_HOME` 为

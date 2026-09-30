@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import time
 import types
 from pathlib import Path
 
 import pytest
 import yaml
+
+from agent_bridge.dsh import process_tree
 
 
 class FakeProcess:
@@ -134,7 +137,7 @@ def patch_lifecycle(service, monkeypatch, *, alive_pids: set[int] | None = None,
             return True
         return port in healthy
 
-    def fake_terminate(pid: int, *, grace_seconds: float) -> bool:
+    def fake_terminate(pid: int, *, grace_seconds: float, mark: str | None = None) -> bool:
         terminated.append(pid)
         alive.discard(pid)
         healthy.discard(pid)
@@ -1002,6 +1005,157 @@ def test_stop_runtime_keeps_config_dir(service, home, passwd_lookup, monkeypatch
     assert service.dsh._read_state("personal", "user1") is None
     # 停止 Runtime 不删除用户 DSH 配置和 session 数据
     assert (config_dir / "session.json").exists()
+
+
+# -- Runtime 子进程全量回收 --
+
+
+def _install_fake_process_world(service, monkeypatch, *, tree: dict[int, int], marked: set[int], stubborn: set[int]):
+    """替换 _terminate_pid 依赖的进程世界：父进程表 tree、标记命中 marked。
+
+    返回 (signals, alive)：signals 记录 (pid, 信号) 的发送序列；alive 是
+    当期存活 pid 集合。stubborn 中的 pid 模拟忽略 SIGTERM 的卡死进程，
+    只对 SIGKILL 退出。
+    """
+    import signal as signal_module
+
+    alive = {pid for pid in tree} | set(marked)
+    signals: list[tuple[int, int]] = []
+
+    def fake_pid_alive(pid: int) -> bool:
+        return pid in alive
+
+    def fake_signal(pid: int, sig: int) -> None:
+        signals.append((pid, sig))
+        if pid not in alive:
+            return
+        needed = {signal_module.SIGKILL} if pid in stubborn else {
+            signal_module.SIGTERM,
+            signal_module.SIGKILL,
+        }
+        if sig in needed:
+            alive.discard(pid)
+
+    def fake_descendants(root_pid: int, *, parent_map=None) -> set[int]:
+        children: dict[int, list[int]] = {}
+        for pid, ppid in tree.items():
+            children.setdefault(ppid, []).append(pid)
+        found = {root_pid} if root_pid in tree else set()
+        queue = [root_pid]
+        while queue:
+            for child in children.get(queue.pop(), ()):
+                if child not in found:
+                    found.add(child)
+                    queue.append(child)
+        return found
+
+    def fake_marked_pids(mark: str, *, proc_root=None) -> set[int]:
+        return set(marked) if mark == "personal:user1" else set()
+
+    monkeypatch.setattr(service.dsh, "_pid_alive", staticmethod(fake_pid_alive))
+    monkeypatch.setattr(service.dsh, "_signal_process", staticmethod(fake_signal))
+    monkeypatch.setattr("agent_bridge.dsh.process_tree.descendants", fake_descendants)
+    monkeypatch.setattr("agent_bridge.dsh.process_tree.marked_pids", fake_marked_pids)
+    return signals, alive
+
+
+def test_terminate_pid_sweeps_detached_children_and_orphans(service, monkeypatch) -> None:
+    # DSH 子进程各自 detached（独立进程组），主进程组信号覆盖不到：
+    # 100(root) → 101/102（detached 后代），200 是父链已断、只能靠环境
+    # 标记定位的孤儿；102 卡死、需升级 SIGKILL。
+    signals, alive = _install_fake_process_world(
+        service,
+        monkeypatch,
+        tree={100: 1, 101: 100, 102: 100},
+        marked={200},
+        stubborn={102},
+    )
+
+    stopped = service.dsh._terminate_pid(
+        100, grace_seconds=0.2, mark=process_tree.runtime_mark_value("personal", "user1")
+    )
+    assert stopped is True
+    assert not alive
+
+    import signal as signal_module
+
+    term_targets = {pid for pid, sig in signals if sig == signal_module.SIGTERM}
+    kill_targets = {pid for pid, sig in signals if sig == signal_module.SIGKILL}
+    # SIGTERM 覆盖主进程、detached 后代与环境标记孤儿
+    assert term_targets == {100, 101, 102, 200}
+    # 只有卡死的 102 升级 SIGKILL
+    assert kill_targets == {102}
+
+
+def test_terminate_pid_sweeps_marked_orphans_after_root_exit(service, monkeypatch) -> None:
+    # 主进程已死（崩溃后被发现）：环境标记命中的遗留子进程仍要回收
+    signals, alive = _install_fake_process_world(
+        service, monkeypatch, tree={}, marked={300}, stubborn=set()
+    )
+
+    stopped = service.dsh._terminate_pid(
+        100, grace_seconds=0.1, mark=process_tree.runtime_mark_value("personal", "user1")
+    )
+    assert stopped is True
+    assert not alive
+    assert (300, signal.SIGTERM) in signals
+
+    # 无标记且主进程不在：维持原语义，视为无可停止
+    signals.clear()
+    assert service.dsh._terminate_pid(100, grace_seconds=0.1) is False
+    assert not signals
+
+
+def test_terminate_pid_without_mark_only_reaches_process_tree(service, monkeypatch) -> None:
+    # 旧 state（未带标记的历史实例）启动的进程：只靠父进程树回收；
+    # 父链已断且无标记的孤儿（999）无法定位，这是历史实例的已知边界。
+    signals, alive = _install_fake_process_world(
+        service, monkeypatch, tree={100: 1, 101: 100}, marked={999}, stubborn=set()
+    )
+
+    stopped = service.dsh._terminate_pid(100, grace_seconds=0.1)
+    assert stopped is True
+    assert alive == {999}
+    assert {pid for pid, _ in signals} == {100, 101}
+
+
+def test_stop_runtime_passes_runtime_mark_to_termination(service, monkeypatch) -> None:
+    captured: list[dict] = []
+
+    def fake_terminate(pid: int, *, grace_seconds: float, mark: str | None = None) -> bool:
+        captured.append({"pid": pid, "mark": mark})
+        return True
+
+    monkeypatch.setattr(service.dsh, "_terminate_pid", fake_terminate)
+    service.dsh._write_state(
+        "personal",
+        "user1",
+        {
+            "user_id": "user1",
+            "group_key": "groupa",
+            "linux_user": "groupa",
+            "pid": 410400,
+            "port": 48400,
+            "config_dir": "",
+            "log_path": "",
+            "started_at": time.time(),
+            "last_access_at": time.time(),
+        },
+    )
+
+    service.dsh.stop_runtime("user1")
+    assert captured == [{"pid": 410400, "mark": "personal:user1"}]
+
+
+def test_runtime_mark_is_injected_into_web_process_env(
+    service, home, passwd_lookup, monkeypatch
+) -> None:
+    configure_runtime(service)
+    launcher = install_fake_launcher(service, home, passwd_lookup)
+    patch_lifecycle(service, monkeypatch, launcher=launcher)
+
+    service.dsh.ensure_running("user1")
+    assert launcher.starts[0]["env"][process_tree.RUNTIME_MARK_ENV] == "personal:user1"
 
 
 def test_idle_reaper_stops_expired_only(service, home, passwd_lookup, monkeypatch) -> None:
