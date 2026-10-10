@@ -437,7 +437,7 @@ def test_plugin_list_parsing_and_marker_roundtrip(tmp_path) -> None:
     # 包内名单随版本发布：文件必须存在且解析出非空 spec 列表
     assert plugins.plugin_list_path().name == "dsh-plugins.txt"
     packaged = plugins.read_plugin_list()
-    assert packaged and "@linxin666/dsh-client-ui-task-board@0.3.23" in packaged
+    assert packaged and "@linxin666/dsh-client-ui-task-board@0.4.5" in packaged
     plugins.write_installed_specs(tmp_path, ["a", "b"])
     assert plugins.read_installed_specs(tmp_path) == ["a", "b"]
     assert plugins.plugin_marker_path(tmp_path).name == "agent-bridge-plugins.txt"
