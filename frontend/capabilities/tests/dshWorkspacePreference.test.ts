@@ -29,33 +29,50 @@ function installStorageStub(initial: Record<string, string> = {}, options: { thr
   }
 }
 
-test('default selection is personal with empty profile', () => {
+test('default selection is dsh personal with empty profile', () => {
   const stub = installStorageStub()
   try {
-    assert.deepEqual(readPreferredSelection(), { scope: 'personal', profileKey: '' })
+    assert.deepEqual(readPreferredSelection(), { agent: 'dsh', scope: 'personal', profileKey: '' })
   } finally {
     stub.restore()
   }
 })
 
-test('write persists scope and profile selection; empty profile keeps scope', () => {
+test('write persists agent, scope and profile selection', () => {
   const stub = installStorageStub()
   try {
-    writePreferredSelection({ scope: 'shared', profileKey: 'profile-a' })
-    assert.deepEqual(readPreferredSelection(), { scope: 'shared', profileKey: 'profile-a' })
-    writePreferredSelection({ scope: 'shared', profileKey: '' })
-    assert.deepEqual(readPreferredSelection(), { scope: 'shared', profileKey: '' })
+    writePreferredSelection({ agent: 'pi', scope: 'shared', profileKey: 'profile-a' })
+    assert.deepEqual(readPreferredSelection(), { agent: 'pi', scope: 'shared', profileKey: 'profile-a' })
+    // 切换 Agent 时保留范围与能力平面。
+    writePreferredSelection({ agent: 'dsh', scope: 'shared', profileKey: '' })
+    assert.deepEqual(readPreferredSelection(), { agent: 'dsh', scope: 'shared', profileKey: '' })
   } finally {
     stub.restore()
   }
 })
 
-test('legacy profile-only memory migrates to personal selection', () => {
+test('legacy selection without agent migrates to the dsh agent', () => {
+  // 第二档迁移：DSH 专属记忆只有 {scope, profileKey}。
+  const stub = installStorageStub({
+    [SELECTION_KEY]: JSON.stringify({ scope: 'shared', profileKey: 'profile-a' }),
+  })
+  try {
+    assert.deepEqual(readPreferredSelection(), { agent: 'dsh', scope: 'shared', profileKey: 'profile-a' })
+    // 写回后记忆带上 agent 字段。
+    writePreferredSelection({ agent: 'dsh', scope: 'shared', profileKey: 'profile-a' })
+    assert.deepEqual(JSON.parse(stub.dump()[SELECTION_KEY]), { agent: 'dsh', scope: 'shared', profileKey: 'profile-a' })
+  } finally {
+    stub.restore()
+  }
+})
+
+test('legacy profile-only memory migrates to a dsh personal selection', () => {
+  // 第三档迁移：最早的格式只存 profileKey 字符串。
   const stub = installStorageStub({ [LEGACY_KEY]: 'profile-a' })
   try {
-    assert.deepEqual(readPreferredSelection(), { scope: 'personal', profileKey: 'profile-a' })
+    assert.deepEqual(readPreferredSelection(), { agent: 'dsh', scope: 'personal', profileKey: 'profile-a' })
     // 写入新格式后旧键被清理。
-    writePreferredSelection({ scope: 'personal', profileKey: 'profile-a' })
+    writePreferredSelection({ agent: 'dsh', scope: 'personal', profileKey: 'profile-a' })
     assert.equal(stub.dump()[LEGACY_KEY], undefined)
     assert.ok(stub.dump()[SELECTION_KEY])
   } finally {
@@ -63,25 +80,36 @@ test('legacy profile-only memory migrates to personal selection', () => {
   }
 })
 
-test('resolve returns the remembered profile when it is still active', () => {
+test('unrecognized agent in memory falls back to dsh', () => {
   const stub = installStorageStub({
-    [SELECTION_KEY]: JSON.stringify({ scope: 'personal', profileKey: 'profile-a' }),
+    [SELECTION_KEY]: JSON.stringify({ agent: 'codex', scope: 'personal', profileKey: '' }),
   })
   try {
-    assert.equal(resolvePreferredProfile(['profile-a', 'profile-b']), 'profile-a')
-    assert.equal(stub.dump()[SELECTION_KEY], JSON.stringify({ scope: 'personal', profileKey: 'profile-a' }))
+    assert.deepEqual(readPreferredSelection(), { agent: 'dsh', scope: 'personal', profileKey: '' })
   } finally {
     stub.restore()
   }
 })
 
-test('resolve clears a stale profile but keeps the remembered scope', () => {
+test('resolve returns the remembered profile when it is still active', () => {
   const stub = installStorageStub({
-    [SELECTION_KEY]: JSON.stringify({ scope: 'shared', profileKey: 'deleted-profile' }),
+    [SELECTION_KEY]: JSON.stringify({ agent: 'pi', scope: 'personal', profileKey: 'profile-a' }),
+  })
+  try {
+    assert.equal(resolvePreferredProfile(['profile-a', 'profile-b']), 'profile-a')
+    assert.equal(stub.dump()[SELECTION_KEY], JSON.stringify({ agent: 'pi', scope: 'personal', profileKey: 'profile-a' }))
+  } finally {
+    stub.restore()
+  }
+})
+
+test('resolve clears a stale profile but keeps agent and scope', () => {
+  const stub = installStorageStub({
+    [SELECTION_KEY]: JSON.stringify({ agent: 'pi', scope: 'shared', profileKey: 'deleted-profile' }),
   })
   try {
     assert.equal(resolvePreferredProfile(['profile-b']), '')
-    assert.deepEqual(readPreferredSelection(), { scope: 'shared', profileKey: '' })
+    assert.deepEqual(readPreferredSelection(), { agent: 'pi', scope: 'shared', profileKey: '' })
   } finally {
     stub.restore()
   }
@@ -90,7 +118,7 @@ test('resolve clears a stale profile but keeps the remembered scope', () => {
 test('corrupted storage degrades to defaults', () => {
   const stub = installStorageStub({ [SELECTION_KEY]: '{not json' })
   try {
-    assert.deepEqual(readPreferredSelection(), { scope: 'personal', profileKey: '' })
+    assert.deepEqual(readPreferredSelection(), { agent: 'dsh', scope: 'personal', profileKey: '' })
   } finally {
     stub.restore()
   }
@@ -100,8 +128,8 @@ test('storage failures degrade to no memory instead of throwing', () => {
   // localStorage 抛异常（隐私模式等）：读返回默认，写不抛。
   const stub = installStorageStub({}, { throws: true })
   try {
-    assert.deepEqual(readPreferredSelection(), { scope: 'personal', profileKey: '' })
-    assert.doesNotThrow(() => writePreferredSelection({ scope: 'shared', profileKey: 'profile-a' }))
+    assert.deepEqual(readPreferredSelection(), { agent: 'dsh', scope: 'personal', profileKey: '' })
+    assert.doesNotThrow(() => writePreferredSelection({ agent: 'pi', scope: 'shared', profileKey: 'profile-a' }))
     assert.equal(resolvePreferredProfile(['profile-a']), '')
   } finally {
     stub.restore()
@@ -112,8 +140,8 @@ test('no window (SSR/test env) degrades to no memory', () => {
   const previous = (globalThis as any).window
   delete (globalThis as any).window
   try {
-    assert.deepEqual(readPreferredSelection(), { scope: 'personal', profileKey: '' })
-    assert.doesNotThrow(() => writePreferredSelection({ scope: 'shared', profileKey: 'profile-a' }))
+    assert.deepEqual(readPreferredSelection(), { agent: 'dsh', scope: 'personal', profileKey: '' })
+    assert.doesNotThrow(() => writePreferredSelection({ agent: 'pi', scope: 'shared', profileKey: 'profile-a' }))
     assert.equal(resolvePreferredProfile(['profile-a']), '')
   } finally {
     if (previous !== undefined) (globalThis as any).window = previous

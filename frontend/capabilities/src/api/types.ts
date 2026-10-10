@@ -1455,6 +1455,8 @@ export interface DshGroupConfigUpdate {
 
 export interface DshRuntimeConfig {
   web_command: string
+  /** Pi 工作台启动命令模板（与 DSH 的 web_command 并列，组级配置共享）。 */
+  pi_web_command: string
   idle_timeout_minutes: number
   base_url: string
   resolved_base_url: string
@@ -1466,21 +1468,56 @@ export interface DshRuntimeConfig {
 
 export interface DshRuntimeConfigUpdate {
   web_command: string
+  pi_web_command?: string
   idle_timeout_minutes: number
   base_url: string
   available_models: string[]
   expected_edit_token?: string | null
 }
 
-export type DshWorkspaceScope = 'personal' | 'shared'
+/** 工作台可选的 Coding Agent 后端标识（`/agent-workspace/*` 的 `agent` 参数）。 */
+export type WorkspaceAgent = 'dsh' | 'pi'
+
+/** 工作空间范围：个人独立实例，或同组共享实例。 */
+export type WorkspaceScope = 'personal' | 'shared'
+
+/** 兼容既有引用：DSH 时代只区分 personal/shared，语义未变。 */
+export type DshWorkspaceScope = WorkspaceScope
+
+/** 进入页渲染 Agent 选择卡片用的目录项（后端 `/agent-workspace/agents`）。 */
+export interface WorkspaceAgentDescriptor {
+  agent: WorkspaceAgent
+  display_name: string
+  /** 个人范围的浏览器入口前缀（含尾斜杠）。 */
+  workspace_url: string
+  /** 共享范围的浏览器入口前缀（含尾斜杠）。 */
+  shared_workspace_url: string
+  supports_shared: boolean
+}
+
+/** 托管的 Pi 依赖版本清单（钉死精确版本，随 Agent Bridge 发布）。 */
+export interface PiVersions {
+  packages: string[]
+  default_web_command: string
+  node_engine: string
+}
+
+export type WorkspaceRuntimeStatusKind =
+  | 'running'
+  | 'starting'
+  | 'unhealthy'
+  | 'stopped'
+  | 'unassigned'
+  | 'unconfigured'
 
 export interface DshRuntimeStatus {
+  agent: WorkspaceAgent
   user_id: string
-  scope: DshWorkspaceScope
+  scope: WorkspaceScope
   group_key: string | null
   linux_user: string
   config_dir: string
-  status: 'running' | 'starting' | 'unhealthy' | 'stopped' | 'unassigned' | 'unconfigured'
+  status: WorkspaceRuntimeStatusKind
   profile_key: string | null
   started_at: string | null
   last_access_at: string | null
@@ -1488,17 +1525,26 @@ export interface DshRuntimeStatus {
 }
 
 export interface DshWorkspaceAuthorization {
+  agent: WorkspaceAgent
   user_id: string
-  scope: DshWorkspaceScope
+  scope: WorkspaceScope
   group_key: string | null
   linux_user: string
   config_dir: string
-  status: DshRuntimeStatus['status']
+  status: WorkspaceRuntimeStatusKind
   profile_key: string | null
   started_at: string | null
   last_access_at: string | null
   idle_minutes: number | null
   workspace_url: string
+}
+
+export interface WorkspaceRuntimeStopResult {
+  agent: WorkspaceAgent
+  user_id: string
+  scope: WorkspaceScope
+  runtime_key: string
+  stopped: boolean
 }
 
 export interface ModelEvaluationDataset {

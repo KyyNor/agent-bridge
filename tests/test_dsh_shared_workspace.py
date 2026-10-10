@@ -106,7 +106,7 @@ def install_fakes(service, home, passwd_lookup, monkeypatch) -> FakeLauncher:
     monkeypatch.setattr(
         service.dsh,
         "_probe_port",
-        staticmethod(lambda port: any(int(start["port"]) == port for start in launcher.starts)),
+        staticmethod(lambda port, state=None: any(int(start["port"]) == port for start in launcher.starts)),
     )
     # 假 pid 不存在于真实进程表：终止一并桩掉（与 patch_lifecycle 同一约定）
     monkeypatch.setattr(
@@ -551,7 +551,7 @@ def test_shared_unhealthy_restart_keeps_active_profile_and_mcp(
     monkeypatch.setattr(
         service.dsh,
         "_probe_port",
-        staticmethod(lambda port: not (port == first_port and len(launcher.starts) == 1)),
+        staticmethod(lambda port, state=None: not (port == first_port and len(launcher.starts) == 1)),
     )
 
     # 后续成员进入触发 ensure_running；重启后必须仍是 safe 平面且 MCP 可用。
@@ -581,10 +581,14 @@ def test_proxy_route_matching_and_location_rewrite() -> None:
         rewrite_workspace_location,
     )
 
-    assert match_workspace_route("/agent-workspace") == ("personal", "/")
-    assert match_workspace_route("/agent-workspace/ws") == ("personal", "/ws")
-    assert match_workspace_route("/agent-workspace-shared") == ("shared", "/")
-    assert match_workspace_route("/agent-workspace-shared/a/b") == ("shared", "/a/b")
+    assert match_workspace_route("/agent-workspace") == ("dsh", "personal", "/")
+    assert match_workspace_route("/agent-workspace/ws") == ("dsh", "personal", "/ws")
+    assert match_workspace_route("/agent-workspace-shared") == ("dsh", "shared", "/")
+    assert match_workspace_route("/agent-workspace-shared/a/b") == ("dsh", "shared", "/a/b")
+    # Pi 前缀独立成路由；共享前缀必须先于个人前缀命中。
+    assert match_workspace_route("/agent-workspace-pi") == ("pi", "personal", "/")
+    assert match_workspace_route("/agent-workspace-pi/api/home") == ("pi", "personal", "/api/home")
+    assert match_workspace_route("/agent-workspace-pi-shared") == ("pi", "shared", "/")
     assert match_workspace_route("/agent-workspace-other") is None
     assert match_workspace_route("/api/v1/dsh/runtime") is None
 
@@ -612,32 +616,34 @@ def test_proxy_escape_claims_by_referer_scope() -> None:
             raw_headers.append((b"referer", referer.encode("utf-8")))
         return {"type": "http", "path": path, "headers": raw_headers}
 
-    def resolve(path: str, referer: str | None, user: str = "user1") -> tuple[str, str] | None:
+    def resolve(
+        path: str, referer: str | None, user: str = "user1"
+    ) -> tuple[str, str, str] | None:
         return middleware._resolve_escape_route(http_scope(path, referer), user)
 
     # 个人前缀 Referer → personal
-    assert resolve("/api/chat", "http://example.internal/agent-workspace/") == ("personal", "/api/chat")
+    assert resolve("/api/chat", "http://example.internal/agent-workspace/") == ("dsh", "personal", "/api/chat")
     # 共享前缀 Referer → shared
-    assert resolve("/api/chat", "http://example.internal/agent-workspace-shared/x") == ("shared", "/api/chat")
+    assert resolve("/api/chat", "http://example.internal/agent-workspace-shared/x") == ("dsh", "shared", "/api/chat")
     # 嵌套文档（无前缀 Referer）：先由工作台页面首次进入（Referer 带前缀），
     # 其子资源再按“该用户最近认领该路径的 scope”继续归属 shared
-    assert resolve("/studio/", "http://example.internal/agent-workspace-shared/x") == ("shared", "/studio/")
-    assert resolve("/studio/page", "http://example.internal/studio/") == ("shared", "/studio/page")
-    assert resolve("/studio/page/asset.css", "http://example.internal/studio/page") == ("shared", "/studio/page/asset.css")
+    assert resolve("/studio/", "http://example.internal/agent-workspace-shared/x") == ("dsh", "shared", "/studio/")
+    assert resolve("/studio/page", "http://example.internal/studio/") == ("dsh", "shared", "/studio/page")
+    assert resolve("/studio/page/asset.css", "http://example.internal/studio/page") == ("dsh", "shared", "/studio/page/asset.css")
 
     # 不同用户相同路径互不串 scope：user2 没有 user1 的认领记忆，回落 personal。
-    assert resolve("/studio/page2", "http://example.internal/studio/", user="user2") == ("personal", "/studio/page2")
+    assert resolve("/studio/page2", "http://example.internal/studio/", user="user2") == ("dsh", "personal", "/studio/page2")
     # user2 随后用自己的个人工作台认领同路径，不影响 user1 的 shared 记忆。
-    assert resolve("/studio/", "http://example.internal/agent-workspace/", user="user2") == ("personal", "/studio/")
-    assert resolve("/studio/page", "http://example.internal/studio/") == ("shared", "/studio/page")
-    assert resolve("/studio/page", "http://example.internal/studio/", user="user2") == ("personal", "/studio/page")
+    assert resolve("/studio/", "http://example.internal/agent-workspace/", user="user2") == ("dsh", "personal", "/studio/")
+    assert resolve("/studio/page", "http://example.internal/studio/") == ("dsh", "shared", "/studio/page")
+    assert resolve("/studio/page", "http://example.internal/studio/", user="user2") == ("dsh", "personal", "/studio/page")
     # 同一用户重复认领按“最近认领”更新（文档化的多 tab 已知限制）。
-    assert resolve("/studio/", "http://example.internal/agent-workspace-shared/x") == ("shared", "/studio/")
-    assert resolve("/studio/page2", "http://example.internal/studio/") == ("shared", "/studio/page2")
+    assert resolve("/studio/", "http://example.internal/agent-workspace-shared/x") == ("dsh", "shared", "/studio/")
+    assert resolve("/studio/page2", "http://example.internal/studio/") == ("dsh", "shared", "/studio/page2")
 
     # 无前缀且无记忆的 Referer 回落 personal
     middleware._claimed_scopes.clear()
-    assert resolve("/assets/app.js", "http://example.internal/other-page/") == ("personal", "/assets/app.js")
+    assert resolve("/assets/app.js", "http://example.internal/other-page/") == ("dsh", "personal", "/assets/app.js")
     # 保留前缀永不认领
     assert resolve("/api/v1/users", "http://example.internal/agent-workspace/") is None
 
@@ -700,7 +706,7 @@ def test_shared_workspace_api_flow(service, home, passwd_lookup, monkeypatch) ->
     monkeypatch.setattr(
         app_service.dsh,
         "_probe_port",
-        staticmethod(lambda port: any(int(start["port"]) == port for start in app_launcher.starts)),
+        staticmethod(lambda port, state=None: any(int(start["port"]) == port for start in app_launcher.starts)),
     )
     headers_user1 = {"X-Agent-Bridge-User": "user1"}
     headers_user2 = {"X-Agent-Bridge-User": "user2"}

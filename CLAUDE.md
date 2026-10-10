@@ -184,14 +184,61 @@ server runtime 为单 uvicorn worker，进程内 hub 只适用于此模型；多
 
 Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没有实例级差异配置，不能提供真实价值；未来引入实例化配置后再扩展一对多模型。
 
-## DSH Web Runtime
+## Agent 工作台（Workspace Runtime）
 
-`dsh/` 是用户级 DSH Web（DeepSeek Harness）工作台的领域包：`DshConfigService`
-负责全局运行配置（启动命令模板、空闲阈值、公共 Base URL 与可用模型）与组级配置
-（`linux_user` / `default_model` / `api_key`）的校验、脱敏与 edit_token 并发保护；
-`DshRuntimeService` 负责进程生命周期；uid/gid 切换集中在 `launcher.py`
-（root 下用 `Popen(user=, group=)`，不用 `preexec_fn`）；`injection.py` 负责把模型
-接入写进 DSH 原生配置。
+「Agent 工作台」托管多个 Coding Agent 的交互式 Web 实例，当前支持
+**DeepSeek Harness（DSH）** 与 **Pi Agent**。架构分两层：
+
+- `agent_workspace/` 是**通用 runtime**：进程生命周期、状态文件、端口分配、就绪探测、
+  uid/gid 切换、进程树+环境标记回收、空闲回收、`recover`/`stop_all`、capability
+  记账与 personal/shared 的 runtime key 解析。
+- 每种 Agent 实现 `WorkspaceAgentAdapter`（`agent_workspace/adapters/`）并注册到
+  `ADAPTERS`：DSH 保留插件首装、`--patch` 模型/能力平面覆盖层、首访 token 捕获；
+  Pi 负责目录隔离、`models.json`/`settings.json`/`mcp.json` 合并、启动契约与鉴权。
+  服务、路由与代理按 `agent` 参数分发，**不写中心 `if/elif`**。
+
+配置分层（两种 Agent 共享，`dsh/config.py`）：`DshConfigService` 负责全局运行配置
+（DSH/Pi 各自的启动命令模板、空闲阈值、公共 Base URL 与可用模型）与组级配置
+（`linux_user` / `default_model` / `api_key`）的校验、脱敏与 edit_token 并发保护。
+组级 Linux 用户映射在两种 Agent 间共享，不重复配置。
+
+`dsh/` 是 DSH 专属包：`DshRuntimeService` 现在是通用 runtime + DSH adapter 的薄壳
+（并保留 DSH 首访 token 入口维护）；`injection.py` 负责把模型接入写进 DSH 原生配置。
+
+### Pi Agent 工作台
+
+Pi 官方没有 Web 服务模式，界面由社区实现 `@agegr/pi-web` 提供，只依赖其公开启动
+契约（CLI 参数 + 环境变量），不 fork、不打补丁；版本钉死在包内
+`agent_workspace/pi-versions.txt`（精确版本，随版本发布，成对升级）。部署依赖
+Node ≥ 22.19；其内置终端依赖 node-pty，0.11.0 自带 linux-x64/arm64 预编译二进制。
+
+- **配置目录**：`<linux home>/.config/agent-bridge/pi/<runtime-owner>/`，经
+  `PI_CODING_AGENT_DIR` 整体重定向（个人 = 业务用户，共享 = Linux 用户）。**刻意不放在
+  pi 自己的 `~/.pi/agent` 下**：该目录同时存放 pi 的 `sessions/`、`extensions/`、
+  `auth.json` 等真实条目，隔离键撞名会指向 pi 自己的会话目录。停止实例不删用户配置。
+- **模型与能力平面注入**：`models.json` / `settings.json` / `mcp.json` 只**合并**托管
+  条目（`providers.agent-bridge`、`mcpServers.agent-bridge`），保留用户自有条目。
+  API Key 与 capability 只经环境变量传递，**token 不落盘**——`mcp.json` 里写的是
+  `${AGENT_BRIDGE_PI_CAPABILITY}`，由 pi 的 `${ENV}` 展开。
+- **鉴权（关键约束，实测确认）**：pi-web 的 HTTP Basic **只覆盖 `/api/**`，页面请求
+  一律 307 到 `/login`**，因此**禁止**靠代理注入 `Authorization` 完成鉴权；且
+  pi-web 的失败限流是**单一全局计数器、成功也不重置**，一次错误尝试会把整实例
+  （共享时是全组）锁死最长 60 秒。正确做法与 DSH 首访一致：代理用状态文件里的
+  `PI_WEB_PASSWORD` 在服务端 `POST /api/web-auth` 换取 `pi_web_session` Cookie
+  再转发。换取结果按「实例 target + 密码摘要」在 adapter 内缓存复用（同实例并发只换取
+  一次，失败不缓存），不得逐请求换取。密码每次启动随机生成，只存 0600 状态文件。
+- **service worker 必须拦截**：pi-web 注册 `scope: "/"` 的 `/sw.js`，其
+  `clients.claim()` 会立刻接管整个源站（含本平台 dashboard 与 DSH 工作台）。同源只
+  允许一个根作用域 SW，代理层对 `/sw.js` 硬返 404（注册失败在其前端已被 catch）。
+- **就绪探测必须带凭据**：`PI_WEB_PASSWORD` 启用后 `/api/home` 需认证，无凭据探测恒
+  401，启动会一直等到超时。由 `adapter.probe_auth` 用状态文件里的密码构造 Basic 头
+  （用户名固定 `pi`）；该请求不触碰 `/api/web-auth`，因此不计入登录限流。
+- **组级默认模型必须成对写入** `defaultProvider` + `defaultModel`：pi 解析默认模型
+  需要两者配对，只写 `defaultModel` 会回落到用户上一次的 provider 而找不到该模型。
+- **无 WebSocket**：聊天流式全部走 SSE；**不支持 basePath**，只能走与 DSH 相同的
+  「剥前缀 + 根路径认领」形态。
+
+DSH 专属语义（`dsh/`）：
 
 - 进程语义与 claude-mem worker 一致：状态文件记录 pid/port/访问时间/鉴权入口
   （个人 `run/dsh-runtimes/<user>.json`，共享 `run/dsh-runtimes/shared/<linux-user>.json`），
@@ -258,10 +305,17 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
   安全停止并清理 state/patch**（共享 capability 只在 Agent Bridge 进程内存，
   patch 里的 token 跨进程必然失效），让首位成员下次进入时按 active profile
   重新启动；停止期 `stop_all()`。
+- Pi 前缀走独立的 Cookie 鉴权分支：先用状态文件里的密码换取 `pi_web_session`
+  再转发，请求头只保留 `pi_` 前缀 Cookie（平台 Cookie 不透传）。
 - 管理接口（组配置、全局配置、实例列表）仅 admins；用户态接口只暴露状态，不
   暴露动态端口与 pid。
-- Workspace 反向代理位于 `api/workspace_proxy.py`：`/agent-workspace/**`（个人）
-  与 `/agent-workspace-shared/**`（共享）复用 dashboard 代理的
+- 用户态 API 统一在 `/api/v1/agent-workspace/*` 并带 `agent` 参数（`dsh`/`pi`）；
+  `/api/v1/dsh/*` 作为 DSH 别名保留至少一个版本，语义等价于 `agent=dsh`。
+- Workspace 反向代理位于 `api/workspace_proxy.py`，路由键是 **(agent, scope)**：
+  `/agent-workspace/**`（DSH 个人）、`/agent-workspace-shared/**`（DSH 共享）、
+  `/agent-workspace-pi/**`（Pi 个人）、`/agent-workspace-pi-shared/**`（Pi 共享）。
+  共享前缀必须先于个人前缀匹配（`/agent-workspace-pi-shared` 否则会被
+  `/agent-workspace-pi` 抢先）。所有转发复用 dashboard 代理的
   `_proxy_stream_response` 骨架（`response_header_builder` /
   `query_override` / `request_header_overrides` / `extra_response_headers` hook
   承载 Location 改写、首访 token、Cookie 与 Origin 覆盖），WebSocket 用
@@ -278,8 +332,10 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
   scope”的短期记忆（TTL 6h）继续归属，同 authority 且指向非保留路径的 Referer
   兜底认领（外部站点因 authority 不同被排除）。
   `RESERVED_PATH_PREFIXES`（`/api/v1`、`/agent-bridge`、`/agent-workspace`、
-  `/agent-workspace-shared`、`/static/capabilities`、`/dashboard`、
-  `/memory-dashboard`、`/health`）永不参与逃逸路由。
+  `/agent-workspace-shared`、`/agent-workspace-pi`、`/agent-workspace-pi-shared`、
+  `/static/capabilities`、`/dashboard`、`/memory-dashboard`、`/health`）永不参与
+  逃逸路由。记忆键升级为「路径 → 最近认领的 (agent, scope)」，不同 Agent 的同
+  名嵌套路径互不串扰。
 - 上游 `Origin` 必须改写为目标 origin（DSH 的 `/api/**` 浏览器信任栅栏要求 Host
   为回环且 Origin 与之匹配）；会话 Cookie 原样透传（`Path=/`），不得收窄到
   `/agent-workspace`，否则根绝对路径请求与 WS 握手都拿不到会话。部分 DSH 插件

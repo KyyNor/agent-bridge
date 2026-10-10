@@ -88,13 +88,15 @@ class DshConfigRepository:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT web_command, idle_timeout_minutes, base_url, available_models_json, updated_at
+                SELECT web_command, pi_web_command, idle_timeout_minutes, base_url,
+                       available_models_json, updated_at
                 FROM dsh_runtime_config WHERE id = 1
                 """
             ).fetchone()
         if row is None:
             return {
                 "web_command": "",
+                "pi_web_command": "",
                 "idle_timeout_minutes": 0,
                 "base_url": "",
                 "available_models": [],
@@ -111,17 +113,20 @@ class DshConfigRepository:
         idle_timeout_minutes: int,
         base_url: str,
         available_models: list[str],
+        pi_web_command: str | None = None,
     ) -> dict[str, Any]:
         updated_at = utc_iso()
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO dsh_runtime_config (
-                  id, web_command, idle_timeout_minutes, base_url, available_models_json, updated_at
+                  id, web_command, pi_web_command, idle_timeout_minutes, base_url,
+                  available_models_json, updated_at
                 )
-                VALUES (1, ?, ?, ?, ?, ?)
+                VALUES (1, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                   web_command = excluded.web_command,
+                  pi_web_command = excluded.pi_web_command,
                   idle_timeout_minutes = excluded.idle_timeout_minutes,
                   base_url = excluded.base_url,
                   available_models_json = excluded.available_models_json,
@@ -129,6 +134,7 @@ class DshConfigRepository:
                 """,
                 (
                     web_command,
+                    pi_web_command or "",
                     idle_timeout_minutes,
                     base_url,
                     json.dumps(available_models, ensure_ascii=False),

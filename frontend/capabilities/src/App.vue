@@ -27,7 +27,7 @@ const navigationGroups: NavGroup[] = [
     items: [
       { key: 'dashboard', label: '平台概览', description: '查看平台运行状态和关键指标' },
       { key: 'profiles', label: '知识平面', description: '管理能力访问策略和权限' },
-      { key: 'workspace', label: 'DSH 工作台', description: '进入个人交互式 Coding Agent 工作台' },
+      { key: 'workspace', label: 'Agent 工作台', description: '选择 Coding Agent、范围与能力平面后进入工作台' },
     ],
   },
   {

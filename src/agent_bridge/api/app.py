@@ -100,10 +100,11 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
         service.doc_sync_scheduler.start()
         service.workflow_scheduler.start()
         # data_retention_scheduler 已在首次升级迁移完成后启动（见上）。
-        service.dsh.start()
+        for _slug, _runtime in service.workspace_agents.items():
+            _runtime.start()
         asyncio.create_task(service.business_ledgers.load_all_async())
         logger.info(
-            "调度器已启动 codegraph/understand/plugin_update/doc_sync/workflow/dsh"
+            "调度器已启动 codegraph/understand/plugin_update/doc_sync/workflow/工作台"
             "（data_retention 随首次迁移完成已启动）"
         )
         yield
@@ -116,11 +117,12 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
         except Exception:
             logger.warning("停止 claude-mem worker 失败", exc_info=True)
         service.model_evaluations.stop_all()
-        try:
-            service.dsh.stop_all()
-        except Exception:
-            logger.warning("停止 DSH Runtime 失败", exc_info=True)
-        service.dsh.stop()
+        for _slug, _runtime in service.workspace_agents.items():
+            try:
+                _runtime.stop_all()
+            except Exception:
+                logger.warning("停止工作台 Runtime 失败 agent=%s", _slug, exc_info=True)
+            _runtime.stop()
         service.codegraph_scheduler.stop()
         service.understand_scheduler.stop()
         service.plugin_update_scheduler.stop()
@@ -378,7 +380,15 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
     from agent_bridge.api.routes.onboarding import create_onboarding_routes
     app.include_router(create_onboarding_routes(service, actor), prefix="/api/v1")
 
-    from agent_bridge.api.routes.dsh import create_dsh_routes
+    from agent_bridge.api.routes.agent_workspace import (
+        create_agent_workspace_routes,
+        create_dsh_routes,
+    )
+
+    app.include_router(
+        create_agent_workspace_routes(service, actor), prefix="/api/v1"
+    )
+    # 旧路径保留至少一个版本，语义等价于 agent=dsh。
     app.include_router(create_dsh_routes(service, actor), prefix="/api/v1")
 
     # MCP streamable HTTP endpoint
