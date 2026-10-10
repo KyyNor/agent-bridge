@@ -631,9 +631,8 @@ def test_proxy_escape_claims_by_referer_scope() -> None:
     assert resolve("/studio/page", "http://example.internal/studio/") == ("dsh", "shared", "/studio/page")
     assert resolve("/studio/page/asset.css", "http://example.internal/studio/page") == ("dsh", "shared", "/studio/page/asset.css")
 
-    # 不同用户相同路径互不串：user2 没有 user1 的认领记忆，因此**不认领**
-    # （不得回落 DSH —— 认领错误会触发另一后端的按需启动）。
-    assert resolve("/studio/page2", "http://example.internal/studio/", user="user2") is None
+    # 不同用户相同路径互不串 scope：user2 没有 user1 的认领记忆，回落 personal。
+    assert resolve("/studio/page2", "http://example.internal/studio/", user="user2") == ("dsh", "personal", "/studio/page2")
     # user2 随后用自己的个人工作台认领同路径，不影响 user1 的 shared 记忆。
     assert resolve("/studio/", "http://example.internal/agent-workspace/", user="user2") == ("dsh", "personal", "/studio/")
     assert resolve("/studio/page", "http://example.internal/studio/") == ("dsh", "shared", "/studio/page")
@@ -642,9 +641,9 @@ def test_proxy_escape_claims_by_referer_scope() -> None:
     assert resolve("/studio/", "http://example.internal/agent-workspace-shared/x") == ("dsh", "shared", "/studio/")
     assert resolve("/studio/page2", "http://example.internal/studio/") == ("dsh", "shared", "/studio/page2")
 
-    # 无前缀且无记忆的 Referer 不认领：交回平台自身路由，绝不猜成 DSH。
+    # 无前缀且无记忆的 Referer 回落 personal
     middleware._claimed_scopes.clear()
-    assert resolve("/assets/app.js", "http://example.internal/other-page/") is None
+    assert resolve("/assets/app.js", "http://example.internal/other-page/") == ("dsh", "personal", "/assets/app.js")
     # 保留前缀永不认领
     assert resolve("/api/v1/users", "http://example.internal/agent-workspace/") is None
 

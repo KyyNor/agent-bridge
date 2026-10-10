@@ -225,7 +225,8 @@ Node ≥ 22.19；其内置终端依赖 node-pty，0.11.0 自带 linux-x64/arm64 
   pi-web 的失败限流是**单一全局计数器、成功也不重置**，一次错误尝试会把整实例
   （共享时是全组）锁死最长 60 秒。正确做法与 DSH 首访一致：代理用状态文件里的
   `PI_WEB_PASSWORD` 在服务端 `POST /api/web-auth` 换取 `pi_web_session` Cookie
-  再转发。密码每次启动随机生成，只存 0600 状态文件。
+  再转发。换取结果按「实例 target + 密码摘要」在 adapter 内缓存复用（同实例并发只换取
+  一次，失败不缓存），不得逐请求换取。密码每次启动随机生成，只存 0600 状态文件。
 - **service worker 必须拦截**：pi-web 注册 `scope: "/"` 的 `/sw.js`，其
   `clients.claim()` 会立刻接管整个源站（含本平台 dashboard 与 DSH 工作台）。同源只
   允许一个根作用域 SW，代理层对 `/sw.js` 硬返 404（注册失败在其前端已被 catch）。

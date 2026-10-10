@@ -179,6 +179,112 @@ def test_exchange_session_cookie_never_sends_basic_auth(monkeypatch) -> None:
     assert "headers" not in captured or "Authorization" not in captured.get("headers", {})
 
 
+# -- 上游鉴权解析（代理 → adapter）--
+
+
+class _FakePiRuntime:
+    def __init__(self, password: str | None = "pw") -> None:
+        self.password = password
+        self.calls: list[tuple[str, str]] = []
+
+    def workspace_password(self, user_id: str, *, scope: str) -> str | None:
+        self.calls.append((user_id, scope))
+        return self.password
+
+
+class _FakeBridgeService:
+    """代理传给 adapter 的是装配根（AgentBridgeService），不是 runtime。"""
+
+    def __init__(self, runtime: _FakePiRuntime) -> None:
+        self.runtime = runtime
+
+    def workspace_runtime(self, agent: str):
+        assert agent == "pi"
+        return self.runtime
+
+
+def _resolve(adapter, service, *, target="http://127.0.0.1:48500", browser_cookie=None):
+    import asyncio
+
+    return asyncio.run(
+        adapter.resolve_upstream_auth(
+            service,
+            user_id="alice",
+            target=target,
+            workspace_scope="personal",
+            browser_cookie=browser_cookie,
+        )
+    )
+
+
+def test_resolve_upstream_auth_uses_bridge_service_runtime(monkeypatch) -> None:
+    """回归：代理传入装配根时必须经 ``workspace_runtime('pi')`` 取密码并完成换取。"""
+    from agent_bridge.agent_workspace.adapters import pi as pi_module
+
+    exchanged: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        pi_module,
+        "exchange_session_cookie",
+        lambda target, password: exchanged.append((target, password)) or "sess",
+    )
+    runtime = _FakePiRuntime()
+    cookie = _resolve(_pi_adapter(), _FakeBridgeService(runtime), browser_cookie="pi_other=keep")
+
+    assert cookie is not None
+    assert f"{PI_SESSION_COOKIE}=sess" in cookie
+    assert "pi_other=keep" in cookie
+    assert runtime.calls == [("alice", "personal")]
+    assert exchanged == [("http://127.0.0.1:48500", "pw")]
+
+
+def test_resolve_upstream_auth_caches_session_per_runtime(monkeypatch) -> None:
+    """同一实例只换取一次：逐请求换取会给每个资源请求叠加一次上游登录。"""
+    from agent_bridge.agent_workspace.adapters import pi as pi_module
+
+    exchanged: list[str] = []
+    monkeypatch.setattr(
+        pi_module,
+        "exchange_session_cookie",
+        lambda target, password: exchanged.append(password) or f"sess-{password}",
+    )
+    adapter = _pi_adapter()
+    runtime = _FakePiRuntime()
+    service = _FakeBridgeService(runtime)
+
+    for _ in range(5):
+        assert f"{PI_SESSION_COOKIE}=sess-pw" in _resolve(adapter, service)
+    assert exchanged == ["pw"]
+
+    # 实例重启（同端口、新密码）：缓存键变化，重新换取并丢弃旧条目。
+    runtime.password = "pw2"
+    assert f"{PI_SESSION_COOKIE}=sess-pw2" in _resolve(adapter, service)
+    assert exchanged == ["pw", "pw2"]
+    assert len(adapter._session_cache) == 1
+
+
+def test_resolve_upstream_auth_does_not_cache_failures(monkeypatch) -> None:
+    from agent_bridge.agent_workspace.adapters import pi as pi_module
+
+    results = iter([None, "sess"])
+    monkeypatch.setattr(pi_module, "exchange_session_cookie", lambda target, password: next(results))
+    adapter = _pi_adapter()
+    service = _FakeBridgeService(_FakePiRuntime())
+
+    assert _resolve(adapter, service) is None
+    assert f"{PI_SESSION_COOKIE}=sess" in _resolve(adapter, service)
+
+
+def test_resolve_upstream_auth_without_password_skips_exchange(monkeypatch) -> None:
+    from agent_bridge.agent_workspace.adapters import pi as pi_module
+
+    monkeypatch.setattr(
+        pi_module,
+        "exchange_session_cookie",
+        lambda *a, **k: pytest.fail("未运行实例不应发起换取"),
+    )
+    assert _resolve(_pi_adapter(), _FakeBridgeService(_FakePiRuntime(password=None))) is None
+
+
 def httpx_headers(pairs: list[str]):
     import httpx
 

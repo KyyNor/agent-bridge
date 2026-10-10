@@ -26,9 +26,12 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import logging
 import os
 import shlex
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +57,10 @@ PI_STARTUP_TIMEOUT_SECONDS = 90.0
 PI_STOP_GRACE_SECONDS = 5.0
 # 代理→上游首访换取 Cookie 的超时。
 PI_AUTH_EXCHANGE_TIMEOUT_SECONDS = 15.0
+# 换取到的会话 Cookie 在代理侧的复用时长。pi-web 的 Cookie 有效期约 30 天且
+# HMAC 绑定 PI_WEB_PASSWORD；密码每次启动重新生成并参与缓存键，进程重启后旧
+# 缓存自然失效，这里的 TTL 只是兜底。
+PI_SESSION_CACHE_TTL_SECONDS = 12 * 60 * 60
 
 PI_PERSONAL_PROXY_PREFIX = "/agent-workspace-pi"
 PI_SHARED_PROXY_PREFIX = "/agent-workspace-pi-shared"
@@ -75,6 +82,8 @@ def _merge_pi_session_cookie(cookie_header: str | None, *, pair: str) -> str | N
     ]
     kept.append(pair)
     return "; ".join(kept)
+
+
 # 代理换取 Cookie 的上游端点。
 PI_WEB_AUTH_PATH = "/api/web-auth"
 
@@ -99,6 +108,13 @@ class PiWorkspaceAdapter:
         self._configs = configs
         self._launcher = launcher
         self.mcp_url = mcp_url
+        # (上游 target, 密码摘要) → (会话 Cookie 值, 换取时刻)。代理对每个请求都
+        # 需要上游会话；逐请求 POST /api/web-auth 会给每个静态资源、API、SSE
+        # 请求叠加一次阻塞登录，并让 pi-web 不断新建会话。
+        self._session_cache: dict[tuple[str, str], tuple[str, float]] = {}
+        self._session_cache_lock = threading.Lock()
+        # 按 target 串行化换取：首屏并发请求只触发一次换取，且不同实例互不阻塞。
+        self._exchange_locks: dict[str, threading.Lock] = {}
 
     def supports_scope(self, scope: str) -> bool:
         # 小组共享与 DSH 同款：一个 Linux 用户一个目录、一个进程，成员经代理
@@ -240,9 +256,10 @@ class PiWorkspaceAdapter:
         锁死最长 60 秒。正确做法是在服务端换取 Cookie 再转发，且换取请求
         不携带 ``Authorization``。
         """
+        runtime = _pi_runtime(service, self.slug)
         try:
             password = await asyncio.to_thread(
-                service.workspace_password(user_id, scope=workspace_scope)
+                runtime.workspace_password, user_id, scope=workspace_scope
             )
         except Exception:
             logger.warning(
@@ -254,13 +271,47 @@ class PiWorkspaceAdapter:
             return None
         if not password:
             return None
-        value = await asyncio.to_thread(exchange_session_cookie, target, password)
+        value = await asyncio.to_thread(self._session_cookie_value, target, password)
         if value is None:
             # 换取失败时不伪造凭据：调用方回落到浏览器自带 Cookie。
             return None
         return _merge_pi_session_cookie(
             browser_cookie, pair=f"{PI_SESSION_COOKIE}={value}"
         )
+
+    def _session_cookie_value(self, target: str, password: str) -> str | None:
+        """取（必要时换取）该实例的会话 Cookie 值；命中缓存则不访问上游。"""
+        key = (target, hashlib.sha256(password.encode("utf-8")).hexdigest())
+        cached = self._cached_session(key)
+        if cached is not None:
+            return cached
+        with self._session_cache_lock:
+            exchange_lock = self._exchange_locks.setdefault(target, threading.Lock())
+        with exchange_lock:
+            # 等锁期间可能已有并发请求完成换取。
+            cached = self._cached_session(key)
+            if cached is not None:
+                return cached
+            value = exchange_session_cookie(target, password)
+            if value is None:
+                return None
+            with self._session_cache_lock:
+                # 同一 target 换了密码（实例重启复用端口）时，旧条目一并清掉。
+                for stale in [item for item in self._session_cache if item[0] == target]:
+                    self._session_cache.pop(stale, None)
+                self._session_cache[key] = (value, time.monotonic())
+            return value
+
+    def _cached_session(self, key: tuple[str, str]) -> str | None:
+        with self._session_cache_lock:
+            entry = self._session_cache.get(key)
+            if entry is None:
+                return None
+            value, obtained_at = entry
+            if time.monotonic() - obtained_at >= PI_SESSION_CACHE_TTL_SECONDS:
+                self._session_cache.pop(key, None)
+                return None
+            return value
 
     def probe_auth(self, state: dict[str, Any]) -> dict[str, str]:
         """就绪探测带上 Basic Auth。
@@ -352,6 +403,14 @@ class PiWorkspaceAdapter:
         else:
             env.pop(pi_injection.PI_CAPABILITY_ENV, None)
         return env, password
+
+
+def _pi_runtime(service, slug: str):
+    """从代理传入的装配根取 Pi runtime；直接传入 runtime 时原样使用。"""
+    resolver = getattr(service, "workspace_runtime", None)
+    if callable(resolver):
+        return resolver(slug)
+    return service
 
 
 def generate_password() -> str:

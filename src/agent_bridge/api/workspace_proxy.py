@@ -614,15 +614,12 @@ class AgentWorkspaceProxyMiddleware:
     def _resolve_escape_route(
         self, scope: Scope, user_id: str = ""
     ) -> tuple[str, str, str] | None:
-        """前缀外请求的归属解析：返回 ``(scope, 上游路径)``。
+        """前缀外请求的归属解析：返回 ``(agent, scope, 上游路径)``。
 
         HTTP 按 Referer 认领：Referer 指向任一工作台前缀时，(agent, scope) 即
         该前缀；嵌套文档等非前缀 Referer 先查该用户的短期记忆（该用户最近把哪
-        条路径认领给了哪个 agent/scope）。仍无法判定时返回 None，**不猜归属**——
-        认领错误会触发另一后端的按需启动。
-
-        WebSocket 无 Referer，按同源 Origin 认领；Agent Bridge 自身没有 WS 端点，
-        故同源 WS 归工作台（默认 DSH 个人范围，与既有行为一致）。
+        条路径认领给了哪个 agent/scope），再走同 authority 非保留路径兜底（默认
+        DSH 个人）。WebSocket 无 Referer，按同源 Origin 认领，默认 DSH 个人范围。
         """
         upstream_path = workspace_escape_path(scope)
         if upstream_path is None:
@@ -641,25 +638,14 @@ class AgentWorkspaceProxyMiddleware:
             if remembered is not None:
                 self._remember_claim(user_id, upstream_path, remembered)
                 return remembered[0], remembered[1], upstream_path
-        # 兜底：Referer 未命中任何工作台前缀时，**不猜**归属。
-        #
-        # 旧实现默认归到 (dsh, personal)，但认领错误的后果不只是 404：代理会
-        # 触发 DSH 按需启动，在用户根本没打开 DSH 工作台时拉起一个进程；共享
-        # 范围下还可能命中他人已运行的共享 runtime。
-        #
-        # pi-web 0.11.0 实测不使用 pushState 把地址改成无前缀路径（其路由与
-        # 资源请求都带 ``/api/**``、``/_next/**``，且 Referer 指向带前缀的页面），
-        # 因此真实工作台请求总能通过前缀 Referer 或认领记忆命中。仍无法判定时
-        # 不认领，交回平台自身路由处理。
-        if referer is not None:
-            same_authority = _same_authority_referer(scope, urlsplit(referer).netloc)
-            if same_authority and not is_reserved_path(referer_path or "/"):
-                logger.warning(
-                    "工作台逃逸请求无法确定归属（Referer=%s），已按平台路由处理 path=%s",
-                    referer_path,
-                    upstream_path,
-                )
-        return None
+        # 兜底保持 DSH 既有语义：归到 (dsh, personal)。DSH 插件的嵌套文档（如
+        # ``/ipollowork-design/studio/``）在认领记忆过期或服务重启后只能靠它继续
+        # 工作。Pi 不依赖这条兜底——pi-web 0.11.0 实测不会 pushState 到无前缀
+        # 路径，其请求总能经前缀 Referer 或认领记忆归属；若将来实测发现会，应为
+        # Pi 单独设计归属规则，而不是改动 DSH 的兜底。
+        default = (WORKSPACE_AGENT_DSH, WORKSPACE_SCOPE_PERSONAL)
+        self._remember_claim(user_id, upstream_path, default)
+        return default[0], default[1], upstream_path
 
     def _remember_claim(
         self, user_id: str, path: str, route: tuple[str, str]
