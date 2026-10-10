@@ -2,7 +2,15 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from '../../api/client'
-import type { DshWorkspaceScope } from '../../api/types'
+import type { WorkspaceAgent } from '../../api/types'
+import {
+  isWorkspaceAlive,
+  normalizeWorkspaceAgent,
+  normalizeWorkspaceScope,
+  workspaceAgentLabel,
+  workspaceEntryUrl,
+  workspaceTitle,
+} from '../../lib/workspaceAgents'
 import { Button } from '../../components/ui/button'
 import { LoadingState } from '../../components/ui/feedback'
 import ErrorState from '../../components/ui/feedback/ErrorState.vue'
@@ -17,13 +25,13 @@ const iframeKey = ref(0)
 const keepAliveTimer: { id: number | null } = { id: null }
 
 const requestedProfile = typeof route.query.profile === 'string' ? route.query.profile : ''
-const scope = computed<DshWorkspaceScope>(() =>
-  route.query.scope === 'shared' ? 'shared' : 'personal',
-)
-// scope 决定 iframe 指向的代理前缀：个人与共享是两个独立的工作台入口。
-const iframeSrc = computed(() =>
-  scope.value === 'shared' ? '/agent-workspace-shared/' : '/agent-workspace/',
-)
+const agent = computed<WorkspaceAgent>(() => normalizeWorkspaceAgent(route.query.agent))
+const scope = computed(() => normalizeWorkspaceScope(route.query.scope))
+const agentLabel = computed(() => workspaceAgentLabel(agent.value))
+const title = computed(() => workspaceTitle(agent.value, scope.value))
+// scope 与 agent 决定 iframe 指向的代理前缀：个人与共享是两个独立的工作台入口；
+// 授权成功后改用后端返回的 workspace_url（权威值）。
+const iframeSrc = ref(workspaceEntryUrl(agent.value, scope.value))
 
 onMounted(enterWorkspace)
 onUnmounted(stopKeepAlive)
@@ -33,8 +41,9 @@ async function enterWorkspace() {
   errorMessage.value = ''
   stopKeepAlive()
   try {
-    const result = await api.authorizeDshWorkspace(requestedProfile || null, scope.value)
+    const result = await api.authorizeDshWorkspace(requestedProfile || null, scope.value, agent.value)
     activeProfile.value = result.profile_key
+    iframeSrc.value = result.workspace_url || workspaceEntryUrl(agent.value, scope.value)
     phase.value = 'active'
     iframeKey.value += 1
     startKeepAlive()
@@ -58,10 +67,10 @@ function startKeepAlive() {
   // 定期查询自身 runtime：既能展示空闲状态，也能发现进程异常退出
   keepAliveTimer.id = window.setInterval(async () => {
     try {
-      const status = await api.getDshRuntimeStatus(scope.value)
-      if (status.status !== 'running' && status.status !== 'starting') {
+      const status = await api.getDshRuntimeStatus(scope.value, agent.value)
+      if (!isWorkspaceAlive(status.status)) {
         stopKeepAlive()
-        errorMessage.value = 'DSH 工作台进程已停止或异常退出，请重新进入。'
+        errorMessage.value = `${title.value}进程已停止或异常退出，请重新进入。`
         phase.value = 'error'
       }
     } catch {
@@ -83,9 +92,7 @@ function stopKeepAlive() {
   <div class="fixed inset-0 z-[60] flex flex-col bg-background">
     <div class="flex h-11 shrink-0 items-center justify-between border-b border-border bg-card px-4">
       <div class="flex items-center gap-3">
-        <span class="text-sm font-medium">
-          {{ scope === 'shared' ? '小组共享 DSH 工作台' : 'DSH 工作台' }}
-        </span>
+        <span class="text-sm font-medium">{{ title }}</span>
         <span v-if="activeProfile" class="rounded-full bg-primary/10 px-2 py-px text-xs text-primary">
           能力平面：{{ activeProfile }}
         </span>
@@ -100,7 +107,7 @@ function stopKeepAlive() {
     </div>
 
     <div v-if="phase === 'starting'" class="flex flex-1 flex-col items-center justify-center gap-3">
-      <LoadingState label="正在启动 DSH 工作台，首次启动可能需要约一分钟..." />
+      <LoadingState :label="`正在启动 ${title}，首次启动可能需要约一分钟...`" />
     </div>
 
     <iframe
@@ -108,12 +115,12 @@ function stopKeepAlive() {
       :key="iframeKey"
       :src="iframeSrc"
       class="h-full w-full flex-1 border-0 bg-background"
-      title="DSH 工作台"
+      :title="title"
       allow="clipboard-read; clipboard-write"
     />
 
     <div v-else class="flex flex-1 flex-col items-center justify-center gap-3 p-6">
-      <ErrorState title="无法进入 DSH 工作台" :description="errorMessage || '请稍后重试。'" compact>
+      <ErrorState :title="`无法进入${title}`" :description="errorMessage || '请稍后重试。'" compact>
         <Button size="sm" @click="enterWorkspace()">重试</Button>
       </ErrorState>
     </div>

@@ -22,7 +22,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from agent_bridge.core.domain import ValidationError
 from agent_bridge.dsh import injection
-from agent_bridge.dsh.launcher import LinuxIdentity, resolve_linux_identity
+from agent_bridge.agent_workspace.launcher import LinuxIdentity, resolve_linux_identity
 
 logger = logging.getLogger(__name__)
 

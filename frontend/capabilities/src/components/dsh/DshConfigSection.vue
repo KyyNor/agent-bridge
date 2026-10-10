@@ -2,19 +2,21 @@
 import { computed, onMounted, ref } from 'vue'
 import { Plus, Trash2 } from '@lucide/vue'
 import { api } from '../../api/client'
-import type { AccessGroup, DshGroupConfig, DshRuntimeConfig } from '../../api/types'
+import type { AccessGroup, DshGroupConfig, DshRuntimeConfig, PiVersions } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
 import { Card, CardContent } from '../ui/card'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../ui/dialog'
 import StatusBadge from '../StatusBadge.vue'
+import PiVersionsList from './PiVersionsList.vue'
 
 const runtimeConfig = ref<DshRuntimeConfig | null>(null)
-const runtimeForm = ref({ web_command: '', idle_timeout_minutes: 120, base_url: '', models: [''] })
+const runtimeForm = ref({ web_command: '', pi_web_command: '', idle_timeout_minutes: 120, base_url: '', models: [''] })
 const runtimeSaving = ref(false)
 const runtimeError = ref('')
 const runtimeMessage = ref('')
+const piVersions = ref<PiVersions | null>(null)
 
 const groupConfigs = ref<DshGroupConfig[]>([])
 const groups = ref<AccessGroup[]>([])
@@ -48,7 +50,7 @@ const defaultModelValid = computed(
 )
 
 onMounted(async () => {
-  await Promise.all([loadRuntimeConfig(), loadGroupConfigs(), loadGroups()])
+  await Promise.all([loadRuntimeConfig(), loadGroupConfigs(), loadGroups(), loadPiVersions()])
 })
 
 async function loadRuntimeConfig() {
@@ -57,6 +59,7 @@ async function loadRuntimeConfig() {
     runtimeConfig.value = config
     runtimeForm.value = {
       web_command: config.web_command,
+      pi_web_command: config.pi_web_command,
       idle_timeout_minutes: config.idle_timeout_minutes,
       base_url: config.base_url,
       models: config.available_models.length ? [...config.available_models] : [''],
@@ -64,7 +67,15 @@ async function loadRuntimeConfig() {
     runtimeError.value = ''
   } catch (e: any) {
     runtimeConfig.value = null
-    runtimeError.value = e.message || '无法加载 DSH 运行配置'
+    runtimeError.value = e.message || '无法加载工作台运行配置'
+  }
+}
+
+async function loadPiVersions() {
+  try {
+    piVersions.value = await api.getPiVersions()
+  } catch {
+    piVersions.value = null
   }
 }
 
@@ -74,7 +85,7 @@ async function loadGroupConfigs() {
     groupError.value = ''
   } catch (e: any) {
     groupConfigs.value = []
-    groupError.value = e.message || '无法加载 DSH 组配置'
+    groupError.value = e.message || '无法加载工作台组配置'
   }
 }
 
@@ -103,6 +114,7 @@ async function saveRuntimeConfig() {
   try {
     const saved = await api.saveDshRuntimeConfig({
       web_command: runtimeForm.value.web_command,
+      pi_web_command: runtimeForm.value.pi_web_command,
       idle_timeout_minutes: runtimeForm.value.idle_timeout_minutes,
       base_url: runtimeForm.value.base_url.trim(),
       available_models: runtimeForm.value.models.map(item => item.trim()).filter(Boolean),
@@ -111,11 +123,12 @@ async function saveRuntimeConfig() {
     runtimeConfig.value = saved
     runtimeForm.value = {
       web_command: saved.web_command,
+      pi_web_command: saved.pi_web_command,
       idle_timeout_minutes: saved.idle_timeout_minutes,
       base_url: saved.base_url,
       models: saved.available_models.length ? [...saved.available_models] : [''],
     }
-    runtimeMessage.value = '运行配置已保存，下次启动 DSH 时生效'
+    runtimeMessage.value = '运行配置已保存，下次启动工作台时生效'
   } catch (e: any) {
     runtimeError.value = e.message || '保存失败'
   } finally {
@@ -180,24 +193,40 @@ async function saveGroupConfig() {
 </script>
 
 <template>
-  <!-- DSH Web Runtime 运行配置 -->
+  <!-- 工作台 Runtime 运行配置：DSH 与 Pi Agent 共用全局与组级配置 -->
   <Card>
     <CardContent class="space-y-4 p-5">
       <div class="flex items-center justify-between gap-4">
         <div>
-          <div class="text-sm font-medium">DSH Web Runtime</div>
-          <div class="mt-1 text-xs text-muted-foreground">用户级 DSH 工作台的进程托管：动态端口、空闲回收与按组注入模型配置</div>
+          <div class="text-sm font-medium">Agent 工作台 Runtime</div>
+          <div class="mt-1 text-xs text-muted-foreground">
+            用户级 Coding Agent 工作台的进程托管：动态端口、空闲回收与按组注入模型配置；组级配置由 DeepSeek Harness 与 Pi Agent 共享
+          </div>
         </div>
-        <Button variant="outline" size="sm" @click="loadRuntimeConfig(); loadGroupConfigs()">刷新</Button>
+        <Button variant="outline" size="sm" @click="loadRuntimeConfig(); loadGroupConfigs(); loadPiVersions()">刷新</Button>
       </div>
 
       <div v-if="runtimeConfig" class="space-y-4">
         <div class="grid grid-cols-[12rem_1fr] items-center gap-4">
-          <div class="text-sm">启动命令模板</div>
+          <div class="text-sm">DSH 启动命令模板</div>
           <div class="space-y-1">
             <Input v-model="runtimeForm.web_command" placeholder="dsh web {patch} --host 127.0.0.1 --port {port} --no-open" class="font-mono text-xs" />
             <div class="text-xs text-muted-foreground">
               占位符 <code class="font-mono">{port}</code>（动态端口）与 <code class="font-mono">{patch}</code>（进入工作台时注入能力平面配置）；命令含 <code class="font-mono">--no-open</code> 可避免 DSH 自启浏览器
+            </div>
+          </div>
+        </div>
+        <div class="grid grid-cols-[12rem_1fr] items-center gap-4">
+          <div class="text-sm">Pi 启动命令模板</div>
+          <div class="space-y-1">
+            <Input
+              v-model="runtimeForm.pi_web_command"
+              :placeholder="piVersions?.default_web_command || 'pi-web --no-open --port {port} --hostname 127.0.0.1'"
+              class="font-mono text-xs"
+            />
+            <div class="text-xs text-muted-foreground">
+              Pi Agent 工作台的启动命令，只支持 <code class="font-mono">{port}</code> 占位符（动态端口）；默认
+              <code class="font-mono">{{ piVersions?.default_web_command || 'pi-web --no-open --port {port} --hostname 127.0.0.1' }}</code>
             </div>
           </div>
         </div>
@@ -251,20 +280,25 @@ async function saveGroupConfig() {
           <span v-else-if="runtimeConfig.updated_at" class="text-xs text-muted-foreground">更新于 {{ formatLocalDatetime(runtimeConfig.updated_at) }}</span>
         </div>
         <div class="text-xs text-muted-foreground">
-          上述公共接入配置会写入每个业务用户 DSH 配置目录的 settings.yaml；API Key 只经进程环境变量传递，不落盘。
+          公共模型接入与 API Key 对两种工作台同时生效；API Key 只经进程环境变量传递，不落盘。
+        </div>
+
+        <div class="border-t border-border pt-4">
+          <div class="mb-2 text-xs font-medium text-muted-foreground">Pi 依赖版本（托管）</div>
+          <PiVersionsList :versions="piVersions" />
         </div>
       </div>
-      <div v-else class="py-4 text-center text-sm text-muted-foreground">{{ runtimeError || '无法获取 DSH 运行配置' }}</div>
+      <div v-else class="py-4 text-center text-sm text-muted-foreground">{{ runtimeError || '无法获取工作台运行配置' }}</div>
 
       <!-- 组级配置 -->
       <div class="border-t border-border pt-4">
         <div class="mb-3 flex items-center justify-between">
-          <div class="text-xs font-medium text-muted-foreground">组级配置（Linux 用户 / 默认模型 / API Key）</div>
+          <div class="text-xs font-medium text-muted-foreground">组级配置（Linux 用户 / 默认模型 / API Key，DeepSeek Harness 与 Pi Agent 共用）</div>
           <Button size="sm" variant="outline" :disabled="availableGroupOptions.length === 0" @click="openCreateDialog()">新增组配置</Button>
         </div>
         <div v-if="groupError" class="py-2 text-xs text-destructive">{{ groupError }}</div>
         <div v-if="groupConfigs.length === 0" class="py-4 text-center text-xs text-muted-foreground">
-          尚无组级 DSH 配置；配置后该组成员即可启动自己的 DSH 工作台
+          尚无组级工作台配置；配置后该组成员即可启动自己的工作台
         </div>
         <div v-else class="rounded-md border border-border">
           <table class="w-full">
@@ -300,7 +334,7 @@ async function saveGroupConfig() {
       <Dialog v-model:open="showGroupDialog">
         <DialogContent class="max-w-3xl">
           <DialogHeader>
-            <DialogTitle>{{ editingGroupKey ? '编辑组级 DSH 配置' : '新增组级 DSH 配置' }}</DialogTitle>
+            <DialogTitle>{{ editingGroupKey ? '编辑组级工作台配置' : '新增组级工作台配置' }}</DialogTitle>
           </DialogHeader>
           <div class="space-y-4">
             <div v-if="!editingGroupKey" class="grid grid-cols-[8rem_1fr] items-center gap-3">
@@ -315,7 +349,7 @@ async function saveGroupConfig() {
               <div class="text-sm">Linux 用户</div>
               <div class="flex items-center gap-2">
                 <Input v-model="groupForm.linux_user" :placeholder="groupForm.group_key" class="font-mono text-xs" />
-                <span class="text-xs text-muted-foreground">留空使用小组标识；DSH 进程以该用户身份运行</span>
+                <span class="text-xs text-muted-foreground">留空使用小组标识；工作台进程以该用户身份运行</span>
               </div>
             </div>
             <div class="grid grid-cols-[8rem_1fr] items-center gap-3">

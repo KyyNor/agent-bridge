@@ -3,60 +3,128 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ExternalLink } from '@lucide/vue'
 import { api } from '../../api/client'
-import type { DshRuntimeStatus, DshWorkspaceScope, ProjectProfile } from '../../api/types'
+import type { DshRuntimeStatus, ProjectProfile, WorkspaceAgent, WorkspaceAgentDescriptor, WorkspaceScope } from '../../api/types'
 import {
   readPreferredSelection,
   resolvePreferredProfile,
   writePreferredSelection,
 } from '../../lib/dshWorkspacePreference'
 import { formatLocalDatetime } from '../../lib/time'
+import {
+  DEFAULT_WORKSPACE_AGENT,
+  WORKSPACE_AGENTS,
+  WORKSPACE_STATUS_LABELS,
+  isWorkspaceAlive,
+  workspaceAgentLabel,
+  workspaceEntryUrl,
+  workspaceTitle,
+} from '../../lib/workspaceAgents'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
 import StatusBadge from '../../components/StatusBadge.vue'
 import ErrorState from '../../components/ui/feedback/ErrorState.vue'
+import WorkspaceOptionGrid from '../../components/dsh/WorkspaceOptionGrid.vue'
+
+/** 选择卡片的数据形状：与 WorkspaceOptionGrid 的泛型 props 对应。 */
+type Option<T extends string> = {
+  value: T
+  label: string
+  sublabel?: string
+  description?: string
+}
 
 const router = useRouter()
 const loading = ref(true)
 const profiles = ref<ProjectProfile[]>([])
 const profilesError = ref('')
 const selectedProfile = ref('')
-const scope = ref<'personal' | 'shared'>('personal')
+const agent = ref<WorkspaceAgent>(DEFAULT_WORKSPACE_AGENT)
+const scope = ref<WorkspaceScope>('personal')
 const runtime = ref<DshRuntimeStatus | null>(null)
 const actionError = ref('')
 const stopping = ref(false)
 
 const activeProfiles = computed(() => profiles.value.filter(profile => profile.status === 'active'))
-const running = computed(() => runtime.value?.status === 'running' || runtime.value?.status === 'starting')
+const running = computed(() => isWorkspaceAlive(runtime.value?.status))
 // 共享 runtime 运行期间能力平面锁定为其 active profile，不允许修改。
-const profileLocked = computed(() =>
-  scope.value === 'shared' && (running.value || runtime.value?.status === 'unhealthy'),
-)
+const profileLocked = computed(() => scope.value === 'shared' && (running.value || runtime.value?.status === 'unhealthy'))
 
-const runtimeStatusLabel: Record<string, string> = {
-  running: '运行中',
-  starting: '启动中',
-  unhealthy: '异常',
-  stopped: '未运行',
-  unassigned: '未分配小组',
-  unconfigured: '未配置',
-}
+/** 后端目录不可用时的兜底目录：两种 Agent 的能力平面入口固定存在。 */
+const agents = ref<WorkspaceAgentDescriptor[]>([])
+const descriptor = computed(() => agents.value.find(item => item.agent === agent.value) || null)
+// 展示名优先取后端目录，取不到时用前端兜底文案。
+const agentLabel = computed(() => descriptor.value?.display_name || workspaceAgentLabel(agent.value))
+const sharedSupported = computed(() => descriptor.value ? descriptor.value.supports_shared : true)
 
-const scopeOptions: { value: DshWorkspaceScope; label: string; description: string }[] = [
-  { value: 'personal', label: '个人', description: '独立工作台，只保留你自己的 session 与记忆' },
-  { value: 'shared', label: '小组', description: '同组成员共享同一个工作台、session 与记忆' },
-]
+const agentOptions = computed<Option<WorkspaceAgent>[]>(() => agents.value.map(item => ({
+  value: item.agent,
+  label: item.display_name || workspaceAgentLabel(item.agent),
+  sublabel: item.agent,
+  description: item.agent === DEFAULT_WORKSPACE_AGENT
+    ? 'DeepSeek Harness Web 工作台，内置终端与插件生态'
+    : 'Pi Agent 编码工作台，按托管版本清单启动',
+})))
+const scopeOptions = computed<Option<WorkspaceScope>[]>(() => {
+  const options: Option<WorkspaceScope>[] = [
+    { value: 'personal', label: '个人', description: '独立工作台，只保留你自己的 session 与记忆' },
+    { value: 'shared', label: '小组', description: '同组成员共享同一个工作台、session 与记忆' },
+  ]
+  return sharedSupported.value ? options : options.filter(option => option.value === 'personal')
+})
+const profileOptions = computed<Option<string>[]>(() => [
+  {
+    value: '',
+    label: '不使用能力平面',
+    description: `不向 ${agentLabel.value} 注入任何 MCP 能力，仅使用工作台自身的模型与工具`,
+  },
+  ...activeProfiles.value.map(profile => ({
+    value: profile.profile_key,
+    label: profile.name,
+    sublabel: profile.profile_key,
+    description: profile.description || '',
+  })),
+])
 
 watch(scope, () => {
   actionError.value = ''
   void loadRuntime()
 })
+watch(agent, () => {
+  actionError.value = ''
+  // Agent 不支持小组共享时回落到个人范围，避免进入必然失败的组合。
+  if (scope.value === 'shared' && !sharedSupported.value) scope.value = 'personal'
+  else void loadRuntime()
+})
 
 onMounted(async () => {
   const preferred = readPreferredSelection()
+  agent.value = preferred.agent
   scope.value = preferred.scope
-  await Promise.all([loadProfiles(), loadRuntime()])
+  await Promise.all([loadAgents(), loadProfiles(), loadRuntime()])
   loading.value = false
 })
+
+async function loadAgents() {
+  try {
+    const list = await api.listWorkspaceAgents()
+    agents.value = list.length ? list : fallbackAgents()
+  } catch {
+    agents.value = fallbackAgents()
+  }
+  // 记忆中的 Agent 不在当前部署目录内时回落到默认 Agent。
+  if (!agents.value.some(item => item.agent === agent.value)) agent.value = DEFAULT_WORKSPACE_AGENT
+  if (scope.value === 'shared' && !sharedSupported.value) scope.value = 'personal'
+}
+
+function fallbackAgents(): WorkspaceAgentDescriptor[] {
+  return WORKSPACE_AGENTS.map(item => ({
+    agent: item,
+    display_name: workspaceAgentLabel(item),
+    workspace_url: workspaceEntryUrl(item, 'personal'),
+    shared_workspace_url: workspaceEntryUrl(item, 'shared'),
+    supports_shared: true,
+  }))
+}
 
 async function loadProfiles() {
   profilesError.value = ''
@@ -73,8 +141,13 @@ async function loadProfiles() {
 }
 
 async function loadRuntime() {
+  const requestedAgent = agent.value
+  const requestedScope = scope.value
   try {
-    runtime.value = await api.getDshRuntimeStatus(scope.value)
+    const status = await api.getDshRuntimeStatus(requestedScope, requestedAgent)
+    // 快速切换 Agent/范围时丢弃过期响应，避免状态卡展示上一个实例。
+    if (requestedAgent !== agent.value || requestedScope !== scope.value) return
+    runtime.value = status
   } catch {
     runtime.value = null
     return
@@ -85,13 +158,14 @@ async function loadRuntime() {
   }
 }
 
-/** 在新标签页打开伪全屏工作台；范围与能力平面经查询串传递，授权在目标页完成。
+/** 在新标签页打开伪全屏工作台；Agent、范围与能力平面经查询串传递，授权在目标页完成。
  *  当前选择记入浏览器 localStorage，下次进入默认选中同一组合。 */
 function openWorkspace() {
-  writePreferredSelection({ scope: scope.value, profileKey: selectedProfile.value })
+  writePreferredSelection({ agent: agent.value, scope: scope.value, profileKey: selectedProfile.value })
   const target = router.resolve({
     name: 'workspace-live',
     query: {
+      agent: agent.value,
       scope: scope.value,
       ...(selectedProfile.value ? { profile: selectedProfile.value } : {}),
     },
@@ -101,13 +175,13 @@ function openWorkspace() {
 
 async function stopRuntime() {
   if (scope.value === 'shared'
-    && !window.confirm('停止小组共享工作台会影响同组的其他成员，确定停止吗？')) {
+    && !window.confirm(`停止小组共享 ${agentLabel.value} 会影响同组的其他成员，确定停止吗？`)) {
     return
   }
   stopping.value = true
   actionError.value = ''
   try {
-    await api.stopDshRuntime(scope.value)
+    await api.stopDshRuntime(scope.value, agent.value)
     await loadRuntime()
   } catch (e: any) {
     actionError.value = e.message || '停止工作台失败'
@@ -125,9 +199,7 @@ async function stopRuntime() {
       <CardContent class="space-y-4 p-5">
         <div class="flex items-center justify-between gap-4">
           <div>
-            <div class="text-sm font-medium">
-              {{ scope === 'shared' ? '小组共享 DSH 工作台' : '我的 DSH 工作台' }}
-            </div>
+            <div class="text-sm font-medium">{{ workspaceTitle(agent, scope) }}</div>
             <div class="mt-1 text-xs text-muted-foreground">
               工作台在服务器上以你所属小组的 Linux 用户身份运行，经站内反向代理访问，浏览器地址始终是 Agent Bridge。
             </div>
@@ -137,7 +209,7 @@ async function stopRuntime() {
         <div class="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
           <StatusBadge
             :status="running ? 'running' : 'disabled'"
-            :label="runtime ? runtimeStatusLabel[runtime.status] || runtime.status : '未知'"
+            :label="runtime ? WORKSPACE_STATUS_LABELS[runtime.status] || runtime.status : '未知'"
           />
           <span v-if="runtime?.linux_user">Linux 用户：<span class="font-mono">{{ runtime.linux_user }}</span></span>
           <span v-if="scope === 'shared' && runtime?.linux_user">
@@ -149,7 +221,7 @@ async function stopRuntime() {
         </div>
         <div class="flex items-center gap-3">
           <Button v-if="running" variant="outline" size="sm" :disabled="stopping" @click="stopRuntime()">
-            {{ stopping ? '停止中...' : '停止工作台' }}
+            {{ stopping ? '停止中...' : `停止 ${agentLabel} 工作台` }}
           </Button>
           <span v-if="scope === 'shared'" class="text-xs text-muted-foreground">
             停止共享工作台会影响同组其他成员
@@ -159,30 +231,24 @@ async function stopRuntime() {
       </CardContent>
     </Card>
 
-    <!-- 范围与能力平面选择 -->
+    <!-- Agent、范围与能力平面选择 -->
     <Card>
       <CardContent class="space-y-4 p-5">
         <div>
-          <div class="text-sm font-medium">工作空间范围</div>
+          <div class="text-sm font-medium">Coding Agent</div>
           <div class="mt-1 text-xs text-muted-foreground">
-            个人使用独立工作台；小组与同组成员共享同一个 DSH Runtime、session 与记忆（按所属小组映射的 Linux 用户确定）。
+            选择工作台由哪个 Coding Agent 承载；两种 Agent 都支持个人与小组范围，能力平面注入方式一致。
           </div>
         </div>
-        <div class="grid gap-2 sm:grid-cols-2">
-          <button
-            v-for="option in scopeOptions"
-            :key="option.value"
-            type="button"
-            :class="[
-              'rounded-lg border px-4 py-3 text-left transition-colors',
-              scope === option.value ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted',
-            ]"
-            @click="scope = option.value"
-          >
-            <div class="text-sm font-medium">{{ option.label }}</div>
-            <div class="mt-1 text-xs text-muted-foreground">{{ option.description }}</div>
-          </button>
+        <WorkspaceOptionGrid v-model="agent" :options="agentOptions" />
+
+        <div class="border-t border-border pt-4">
+          <div class="text-sm font-medium">工作空间范围</div>
+          <div class="mt-1 text-xs text-muted-foreground">
+            个人使用独立工作台；小组与同组成员共享同一个 Runtime、session 与记忆（按所属小组映射的 Linux 用户确定）。
+          </div>
         </div>
+        <WorkspaceOptionGrid v-model="scope" :options="scopeOptions" />
 
         <div class="border-t border-border pt-4">
           <div class="flex items-center justify-between">
@@ -201,35 +267,11 @@ async function stopRuntime() {
           </ErrorState>
         </div>
         <div v-else class="space-y-2" :class="{ 'pointer-events-none opacity-60': profileLocked }">
-          <button
-            type="button"
-            :class="[
-              'w-full rounded-lg border px-4 py-3 text-left transition-colors',
-              selectedProfile === '' ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted',
-            ]"
-            @click="selectedProfile = ''"
-          >
-            <div class="text-sm font-medium">不使用能力平面</div>
-            <div class="mt-1 text-xs text-muted-foreground">不向 DSH 注入任何 MCP 能力，仅使用工作台自身的模型与工具</div>
-          </button>
-          <button
-            v-for="profile in activeProfiles"
-            :key="profile.profile_key"
-            type="button"
-            :class="[
-              'w-full rounded-lg border px-4 py-3 text-left transition-colors',
-              selectedProfile === profile.profile_key ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted',
-            ]"
-            @click="selectedProfile = profile.profile_key"
-          >
-            <div class="text-sm font-medium">{{ profile.name }}</div>
-            <div class="mt-0.5 font-mono text-xs text-muted-foreground">{{ profile.profile_key }}</div>
-            <div v-if="profile.description" class="mt-1 text-xs text-muted-foreground">{{ profile.description }}</div>
-          </button>
+          <WorkspaceOptionGrid v-model="selectedProfile" :options="profileOptions" stacked />
         </div>
         <div class="flex items-center gap-3">
           <Button size="sm" @click="openWorkspace()">
-            <ExternalLink :size="14" class="mr-1" />进入 DSH
+            <ExternalLink :size="14" class="mr-1" />进入 {{ agentLabel }}
           </Button>
           <span class="text-xs text-muted-foreground">将在新标签页打开全屏工作台；工作台未运行时启动约需十秒</span>
         </div>

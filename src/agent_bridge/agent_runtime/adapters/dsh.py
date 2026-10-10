@@ -749,7 +749,7 @@ class _DshRun:
     async def _spawn(
         self, binding: Any, patch_path: Path, mcp_declarations: list[dict[str, Any]]
     ) -> _AcpJsonRpc:
-        from agent_bridge.dsh.launcher import demotion_kwargs
+        from agent_bridge.agent_workspace.launcher import demotion_kwargs
 
         env = {**os.environ, **binding.process_env()}
         process = await asyncio.create_subprocess_exec(

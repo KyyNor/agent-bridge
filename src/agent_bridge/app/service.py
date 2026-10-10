@@ -279,6 +279,8 @@ class AgentBridgeService:
         from agent_bridge.dsh.config import DshConfigService
 
         self.dsh_configs = DshConfigService(store=store, admins=admins, access=self.access)
+        # 工作台 Agent 运行时分发表：slug → runtime 服务（装配完成后填充）。
+        self._workspace_by_slug: dict[str, Any] = {}
         self.dsh_agent_runtime = DshAgentRuntimeResolver(
             configs=self.dsh_configs, access=self.access
         )
@@ -387,6 +389,19 @@ class AgentBridgeService:
             access=self.access,
             admins=admins,
         )
+        from agent_bridge.agent_workspace.pi_service import PiRuntimeService
+
+        self.pi = PiRuntimeService(
+            paths=paths,
+            configs=self.dsh_configs,
+            access=self.access,
+            admins=admins,
+        )
+        self.workspace_agents = {
+            self.dsh.adapter.slug: self.dsh,
+            self.pi.adapter.slug: self.pi,
+        }
+        self._register_workspace_agents()
         self.plugin_update_scheduler = PluginUpdateScheduler(service=self, store=store, admins=admins)
         self.data_retention = DataRetentionService(
             store=store,
@@ -452,14 +467,20 @@ class AgentBridgeService:
                 recovered,
             )
         service.model_evaluations.recover_interrupted_runs()
-        recovered_dsh = service.dsh.recover()
-        if recovered_dsh["kept"] or recovered_dsh["cleaned"] or recovered_dsh["stopped_shared"]:
-            logger.info(
-                "DSH Runtime 遗留实例识别完成 kept=%d cleaned=%d stopped_shared=%d",
-                recovered_dsh["kept"],
-                recovered_dsh["cleaned"],
-                recovered_dsh["stopped_shared"],
-            )
+        for slug, runtime in service.workspace_agents.items():
+            recovered_runtime = runtime.recover()
+            if (
+                recovered_runtime["kept"]
+                or recovered_runtime["cleaned"]
+                or recovered_runtime["stopped_shared"]
+            ):
+                logger.info(
+                    "工作台 Runtime 遗留实例识别完成 agent=%s kept=%d cleaned=%d stopped_shared=%d",
+                    slug,
+                    recovered_runtime["kept"],
+                    recovered_runtime["cleaned"],
+                    recovered_runtime["stopped_shared"],
+                )
         migrate_toml_backends_to_db(paths, service.store)
         service.registry = create_registry_from_db(paths, service.store)
         logger.info(
@@ -2111,6 +2132,38 @@ class AgentBridgeService:
             ),
         )
         return doc
+
+    # -- 工作台（Agent Bridge 兼容门面）--
+
+    def _register_workspace_agents(self) -> None:
+        """登记工作台 Agent 生命周期钩子与 capability 解析表。
+
+        新增 Agent 只需在 ``workspace_agents`` 里注册其 runtime 服务，路由、
+        MetaMCP 与空闲回收都按该表分发，不在这里写中心 if/elif。
+        """
+        for slug, runtime in self.workspace_agents.items():
+            self._workspace_by_slug[slug] = runtime
+
+    def workspace_runtime(self, agent: str) -> Any:
+        """按 agent slug 取工作台 runtime 服务。"""
+        from agent_bridge.agent_workspace.scopes import normalize_workspace_agent
+
+        slug = normalize_workspace_agent(agent)
+        runtime = self._workspace_by_slug.get(slug)
+        if runtime is None:
+            raise NotFound(f"未知的工作台 Agent：{agent}")
+        return runtime
+
+    def require_workspace_capability(self, token: str, *, profile_key: str | None = None) -> Any:
+        """校验工作台 capability（DSH 与 Pi 各自签发，未命中即拒绝）。"""
+        from agent_bridge.core.domain import AccessDenied
+
+        for runtime in self._workspace_by_slug.values():
+            try:
+                return runtime.require_workspace_capability(token, profile_key=profile_key)
+            except AccessDenied:
+                continue
+        raise AccessDenied("工作台 capability 无效或已过期")
 
     def _require_doc_visible(self, actor: str, doc_slug: str) -> dict[str, Any]:
         doc = self.store.get_document_by_slug(doc_slug)

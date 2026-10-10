@@ -558,12 +558,16 @@ def setup_mcp_route(
             else None
         )
         capability_token = request.headers.get(WORKFLOW_CAPABILITY_HEADER, "").strip()
-        dsh_capability_token = request.headers.get(DSH_CAPABILITY_HEADER, "").strip()
-        if dsh_capability_token:
+        workspace_capability_token = request.headers.get(
+            DSH_CAPABILITY_HEADER, ""
+        ).strip()
+        if workspace_capability_token:
             if capability_token:
-                raise AccessDenied("不能同时携带工作流与 DSH Workspace capability")
-            workspace_capability = service.dsh.require_workspace_capability(
-                dsh_capability_token,
+                raise AccessDenied("不能同时携带工作流与工作台 capability")
+            # 工作台 capability 按各自 runtime 的 registry 校验（DSH 与 Pi
+            # 各自签发、互不失效），未命中即拒绝。
+            workspace_capability = service.require_workspace_capability(
+                workspace_capability_token,
                 profile_key=profile,
             )
             profile = workspace_capability.profile_key

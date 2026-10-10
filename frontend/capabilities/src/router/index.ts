@@ -79,8 +79,8 @@ const routes: RouteRecordRaw[] = [
   { path: '/model-evaluations/:routeKey(.*)*', name: 'model-evaluations', component: ModelEvaluationView, props: route => ({ routeKey: subRoute(route) }), meta: { navKey: 'model-evaluations', title: '模型评估', hideHeaderOnSubRoute: true } },
   { path: '/skills', name: 'skills', component: SkillManagementView, meta: { navKey: 'skills', title: 'Skill 管理' } },
   { path: '/scripts/:routeKey(.*)*', name: 'scripts', component: ScriptsView, props: route => ({ routeKey: subRoute(route) }), meta: { navKey: 'scripts', title: '脚本管理', hideHeaderOnSubRoute: true } },
-  { path: '/workspace', name: 'workspace', component: WorkspaceView, meta: { navKey: 'workspace', title: 'DSH 工作台' } },
-  { path: '/workspace/live', name: 'workspace-live', component: WorkspaceLiveView, meta: { navKey: 'workspace', title: 'DSH 工作台' } },
+  { path: '/workspace', name: 'workspace', component: WorkspaceView, meta: { navKey: 'workspace', title: 'Agent 工作台' } },
+  { path: '/workspace/live', name: 'workspace-live', component: WorkspaceLiveView, meta: { navKey: 'workspace', title: 'Agent 工作台' } },
   { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFoundView, meta: { title: '页面不存在' } },
 ]
 

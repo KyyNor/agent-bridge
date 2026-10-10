@@ -17,6 +17,10 @@ import re
 from typing import Any
 from urllib.parse import urlparse
 
+from agent_bridge.agent_workspace.pi_versions import (
+    DEFAULT_PI_WEB_COMMAND,
+    normalize_pi_web_command,
+)
 from agent_bridge.core.domain import ValidationError, require_admin_user
 from agent_bridge.core.editing import attach_edit_token, require_edit_token
 from agent_bridge.core.timeutil import utc_iso
@@ -192,6 +196,7 @@ class DshConfigService:
         idle_timeout_minutes: int,
         base_url: str = "",
         available_models: list[str] | None = None,
+        pi_web_command: str = "",
         expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
@@ -205,8 +210,10 @@ class DshConfigService:
         )
         cleaned_command = normalize_web_command(web_command)
         cleaned_timeout = normalize_idle_timeout_minutes(idle_timeout_minutes)
+        cleaned_pi_command = normalize_pi_web_command(pi_web_command)
         saved = self._repo.save_runtime_config(
             web_command=cleaned_command,
+            pi_web_command=cleaned_pi_command,
             idle_timeout_minutes=cleaned_timeout,
             base_url=normalize_base_url(base_url),
             available_models=normalize_models(available_models),
@@ -264,8 +271,10 @@ class DshConfigService:
         if not base_url:
             resolved_base_url = self._public_config_base_url()
             source = "public_model_config" if resolved_base_url else ""
+        pi_command = str(raw.get("pi_web_command") or "").strip() or DEFAULT_PI_WEB_COMMAND
         return {
             "web_command": command,
+            "pi_web_command": pi_command,
             "idle_timeout_minutes": timeout,
             "saved_base_url": base_url,
             "base_url": resolved_base_url,
@@ -278,6 +287,7 @@ class DshConfigService:
     def _public_runtime_config(config: dict[str, Any]) -> dict[str, Any]:
         return {
             "web_command": str(config.get("web_command") or ""),
+            "pi_web_command": str(config.get("pi_web_command") or ""),
             "idle_timeout_minutes": int(config.get("idle_timeout_minutes") or 0),
             "base_url": str(config.get("saved_base_url") or ""),
             "resolved_base_url": str(config.get("base_url") or ""),
@@ -291,6 +301,7 @@ class DshConfigService:
         """并发快照只含全局配置自身字段；Base URL 回落值不参与，避免公共模型配置变更误报冲突。"""
         return {
             "web_command": str(config.get("web_command") or ""),
+            "pi_web_command": str(config.get("pi_web_command") or ""),
             "idle_timeout_minutes": int(config.get("idle_timeout_minutes") or 0),
             "base_url": str(config.get("saved_base_url") or ""),
             "available_models": list(config.get("available_models") or []),

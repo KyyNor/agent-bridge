@@ -34,7 +34,7 @@ from typing import Any
 
 import yaml
 
-from agent_bridge.dsh.launcher import LinuxIdentity, demotion_kwargs
+from agent_bridge.agent_workspace.launcher import LinuxIdentity, demotion_kwargs
 
 logger = logging.getLogger(__name__)
 

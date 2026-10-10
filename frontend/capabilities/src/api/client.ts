@@ -127,6 +127,10 @@ import type {
   DshRuntimeStatus,
   DshWorkspaceAuthorization,
   DshWorkspaceScope,
+  PiVersions,
+  WorkspaceAgent,
+  WorkspaceAgentDescriptor,
+  WorkspaceRuntimeStopResult,
 } from './types'
 import { reportAuthenticationRequired } from '../lib/accessFeedback'
 import { scriptResetPath } from '../lib/scriptManagement.ts'
@@ -523,21 +527,35 @@ export const api = {
   getRetrievalProbeLlmConfig: () => get<RetrievalProbeLlmConfig>('/retrieval-probe/llm-config'),
   saveRetrievalProbeLlmConfig: (config: RetrievalProbeLlmConfigUpdate) =>
     put<RetrievalProbeLlmConfig>('/retrieval-probe/llm-config', config),
-  getDshRuntimeConfig: () => get<DshRuntimeConfig>('/dsh/runtime-config'),
+  // Agent 工作台：用户态按 `agent` 泛化到 `/agent-workspace/*`；管理态的全局与
+  // 组级配置两种 Agent 共享，不复制一套。函数名沿用 DSH 时代的命名以兼容既有引用。
+  listWorkspaceAgents: () =>
+    get<{ agents: WorkspaceAgentDescriptor[] }>('/agent-workspace/agents')
+      .then(payload => payload.agents),
+  getPiVersions: () => get<PiVersions>('/agent-workspace/pi-versions'),
+  getDshRuntimeConfig: () => get<DshRuntimeConfig>('/agent-workspace/runtime-config'),
   saveDshRuntimeConfig: (config: DshRuntimeConfigUpdate) =>
-    put<DshRuntimeConfig>('/dsh/runtime-config', config),
+    put<DshRuntimeConfig>('/agent-workspace/runtime-config', config),
   listDshGroupConfigs: () =>
-    get<{ configs: DshGroupConfig[] }>('/dsh/group-configs').then(payload => payload.configs),
+    get<{ configs: DshGroupConfig[] }>('/agent-workspace/group-configs').then(payload => payload.configs),
   saveDshGroupConfig: (groupKey: string, config: DshGroupConfigUpdate) =>
-    put<DshGroupConfig>(`/dsh/group-configs/${encodeURIComponent(groupKey)}`, config),
-  getDshRuntimeStatus: (scope: DshWorkspaceScope = 'personal') =>
-    get<DshRuntimeStatus>(`/dsh/runtime?scope=${scope}`),
-  stopDshRuntime: (scope: DshWorkspaceScope = 'personal') =>
-    post<{ user_id: string; scope: string; runtime_key: string; stopped: boolean }>(
-      `/dsh/runtime/stop?scope=${scope}`, {},
+    put<DshGroupConfig>(`/agent-workspace/group-configs/${encodeURIComponent(groupKey)}`, config),
+  getDshRuntimeStatus: (scope: DshWorkspaceScope = 'personal', agent: WorkspaceAgent = 'dsh') =>
+    get<DshRuntimeStatus>(`/agent-workspace/runtime?agent=${agent}&scope=${scope}`),
+  stopDshRuntime: (scope: DshWorkspaceScope = 'personal', agent: WorkspaceAgent = 'dsh') =>
+    post<WorkspaceRuntimeStopResult>(
+      `/agent-workspace/runtime/stop?agent=${agent}&scope=${scope}`, {},
     ),
-  authorizeDshWorkspace: (profileKey: string | null, scope: DshWorkspaceScope = 'personal') =>
-    post<DshWorkspaceAuthorization>('/dsh/workspace/authorize', {
+  // 管理端实例列表；`agent` 传空串表示两种 Agent 一起返回。
+  listWorkspaceRuntimes: (agent: WorkspaceAgent | '' = '') =>
+    get<{ runtimes: DshRuntimeStatus[] }>(`/agent-workspace/runtimes?agent=${agent}`)
+      .then(payload => payload.runtimes),
+  authorizeDshWorkspace: (
+    profileKey: string | null,
+    scope: DshWorkspaceScope = 'personal',
+    agent: WorkspaceAgent = 'dsh',
+  ) =>
+    post<DshWorkspaceAuthorization>(`/agent-workspace/workspace/authorize?agent=${agent}`, {
       profile_key: profileKey || null,
       scope,
     }),

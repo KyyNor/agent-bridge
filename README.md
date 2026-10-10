@@ -23,13 +23,14 @@ Agent Bridge 是面向内部可信环境的 Agent 能力与知识管理平台。
   生命周期分开，便于未来替换 V2 client；运行时间轴会合并工具调用/结果和文本增量，同时保留
   原始事件用于诊断。
 - 通过结构化 DAG 编排 Agent、脚本、任务领取和 Markdown/HTML 产物。
-- 托管用户级 DSH Web Runtime：按业务用户隔离的交互式工作台进程，动态监听
-  `127.0.0.1` 端口、以所属小组映射的 Linux 用户身份运行、长期空闲自动回收；
-  公共 Base URL/模型与组级默认模型、API Key 在每次启动时注入 DSH 原生配置。
-- 「DSH 工作台」页面按需在新标签页打开站内伪全屏工作台：`/agent-workspace/**`
-  由后端反代到当前登录用户自己的 runtime（HTTP/WebSocket/SSE，服务端完成 DSH
-  首次鉴权，浏览器不接触动态端口与 token），进入前可选择能力平面（也可以不选），
-  所选 Profile 以短期 capability + DSH 原生 `--patch` 覆盖层注入 MCP。
+- 托管用户级「Agent 工作台」：支持 **DeepSeek Harness** 与 **Pi Agent** 两种
+  Coding Agent 的交互式工作台进程，按业务用户隔离、动态监听 `127.0.0.1` 端口、
+  以所属小组映射的 Linux 用户身份运行、长期空闲自动回收；公共 Base URL/模型与
+  组级默认模型、API Key 在每次启动时注入对应后端的原生配置。
+- 「Agent 工作台」页面按需在新标签页打开站内伪全屏工作台，由后端反代到当前
+  登录用户自己的 runtime（HTTP/WebSocket/SSE，服务端完成首次鉴权，浏览器不接触
+  动态端口与凭据），进入前可选择 Coding Agent、工作空间范围（个人/小组）与能力
+  平面（也可以不选），所选 Profile 以短期 capability 注入 MCP。
 - 工作流产物的标题、摘要、路径和正文使用 jieba 预分词与 SQLite FTS5 检索；长度至少 3 的 ASCII 标识符支持前缀匹配，结构化权限与版本过滤仍由 SQLite 普通条件处理。
 - `artifacts_search` 使用 DiskCache 缓存检索结果，默认保留 8 小时；缓存时长可在「系统管理」页面修改，保存后立即按新配置生效。当前版本不主动因新产物写入而清理缓存。
 - 「平台概览」使用 DiskCache 缓存聚合结果，默认保留 4 小时；缓存按用户、所属小组、可见资源范围和日期区间隔离，页面上的“刷新”会强制重建当前缓存。
@@ -75,18 +76,38 @@ uv run agent-bridge server stop
 
 短命令 `agb` 与 `agent-bridge` 等价。当前 CLI 根命令只有 `server`、`profile`、`memory`；知识库、工作流、Agent 和系统管理通过管理后台或 HTTP API 管理。
 
-## DSH Web Runtime
+## Agent 工作台（Workspace Runtime）
 
-Agent Bridge 可为每个业务用户托管 DSH Web 实例（DeepSeek Harness 浏览器
-工作台，试用/评估阶段），并提供**个人**与**小组共享**两种工作空间范围。
-实例按需启动、只在 `127.0.0.1` 上监听动态端口、以业务用户所属小组映射出的
-Linux 用户身份运行；同一小组的多个业务用户共享 Linux uid。两种范围的
-`DSH_HOME` 互相独立：
+「Agent 工作台」可为每个业务用户托管交互式 Web 实例，当前支持
+**DeepSeek Harness（DSH）** 与 **Pi Agent** 两种 Coding Agent，并提供**个人**与
+**小组共享**两种工作空间范围。实例按需启动、只在 `127.0.0.1` 上监听动态端口、
+以业务用户所属小组映射出的 Linux 用户身份运行；同一小组的多个业务用户共享
+Linux uid。两种范围的配置目录互相独立：
 
 ```text
-个人：/home/<linux-user>/.config/dsh/<business-user>/
-小组：/home/<linux-user>/.config/dsh/<linux-user>/   # 同组业务用户共享
+DSH 个人：/home/<linux-user>/.config/dsh/<business-user>/
+DSH 小组：/home/<linux-user>/.config/dsh/<linux-user>/   # 同组业务用户共享
+Pi  个人：/home/<linux-user>/.pi/agent/<business-user>/
+Pi  小组：/home/<linux-user>/.pi/agent/<linux-user>/     # 同组业务用户共享
 ```
+
+浏览器入口前缀（地址栏始终是 Agent Bridge 域名）：
+
+```text
+DSH 个人：/agent-workspace/          DSH 小组：/agent-workspace-shared/
+Pi  个人：/agent-workspace-pi/        Pi  小组：/agent-workspace-pi-shared/
+```
+
+### Pi Agent
+
+Pi 官方没有 Web 服务模式，工作台界面由社区实现 `@agegr/pi-web` 提供，Agent Bridge
+只依赖其公开启动契约，不 fork、不打补丁；版本钉死在包内 `pi-versions.txt`。
+
+部署依赖 **Node ≥ 22.19**。其内置终端依赖 node-pty，当前版本自带
+linux-x64/arm64 预编译二进制，无需在服务器上准备编译工具链。
+
+模型接入与能力平面分别写入 `models.json` / `settings.json` / `mcp.json`，只合并
+托管条目并保留用户自有配置；API Key 与 capability 只经环境变量传递，不落盘。
 
 该目录同时是 DSH 的 `DSH_HOME`：DSH 自身在其中创建 `profiles/`、`storages/`
 与 `.credentials.yaml`。目录由 Agent Bridge 在首次启动时创建并归属该 Linux
