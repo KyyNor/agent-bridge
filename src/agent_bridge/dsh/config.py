@@ -24,7 +24,7 @@ from agent_bridge.core.timeutil import utc_iso
 logger = logging.getLogger(__name__)
 
 # 默认启动命令模板；{port} 由 runtime 服务替换为动态分配的 127.0.0.1 端口，
-# {patch} 在注入 Workspace 能力平面时替换为 ``--patch <配置文件>``，否则为空。
+# {patch} 展开为模型接入与 Workspace 能力平面的 ``--patch <配置文件>``（按序可多个），无覆盖文件时为空。
 # ``--no-open`` 关闭 DSH 的浏览器自启（工作台经站内反向代理访问）。
 DEFAULT_DSH_WEB_COMMAND = "dsh web {patch} --host 127.0.0.1 --port {port} --no-open"
 COMMAND_PLACEHOLDERS = ("port", "patch")

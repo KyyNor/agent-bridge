@@ -25,6 +25,7 @@ from agent_bridge.api.workspace_proxy import (
     rewrite_workspace_location,
     workspace_escape_path,
 )
+from agent_bridge.dsh.injection import model_overlay_path
 from agent_bridge.dsh.workspace import (
     DSH_CAPABILITY_HEADER,
     DshWorkspaceCapabilityRegistry,
@@ -33,6 +34,12 @@ from agent_bridge.dsh.workspace import (
 
 
 # -- capability registry --
+
+
+def _patch_args(command: list[str]) -> list[str]:
+    """启动命令中按序叠加的 ``--patch`` 文件（模型覆盖在前、MCP 覆盖在后）。"""
+    return [command[index + 1] for index, token in enumerate(command) if token == "--patch"]
+
 
 
 def test_workspace_capability_issue_require_and_user_exclusivity() -> None:
@@ -211,8 +218,7 @@ def test_authorize_injects_mcp_overlay_and_switching_profile_restarts(
 
     # 启动命令带上该覆盖文件
     command = launcher.starts[0]["command"]
-    assert "--patch" in command
-    assert command[command.index("--patch") + 1] == str(overlay_path)
+    assert _patch_args(command) == [str(model_overlay_path(config_dir)), str(overlay_path)]
     state = service.dsh._read_state("personal", "user1")
     assert state["profile_key"] == "safe"
     assert state["config_dir"] == str(config_dir)
@@ -283,12 +289,12 @@ def test_authorize_without_profile_enters_plain_workspace(service, home, passwd_
     overlay_path = mcp_overlay_path(config_dir)
     assert overlay_path.exists()
 
-    # 不带平面进入：清除注入并重启（不再携带 --patch）
+    # 不带平面进入：清除 MCP 注入并重启（只保留模型覆盖）
     plain = service.dsh.authorize_workspace("user1", profile_key=None)
     assert plain["status"] == "running"
     assert plain["profile_key"] is None
     assert len(launcher.starts) == 2
-    assert "--patch" not in launcher.starts[1]["command"]
+    assert _patch_args(launcher.starts[1]["command"]) == [str(model_overlay_path(config_dir))]
     assert not overlay_path.exists()
     assert service.dsh._read_state("personal", "user1")["profile_key"] is None
 

@@ -6,8 +6,9 @@ Agent Bridge 的 Coding Agent ``dsh`` 后端按 run 启动独立、短生命周�
 一份执行绑定，供 adapter 构造进程环境与模型路由 patch。
 
 模型接入复用 DSH Web Runtime 的同一套配置与用户级目录
-（``<linux home>/.config/dsh/<business-user>/``）：settings.yaml 中的托管
-供应商条目由本模块幂等注入，后台 run 因此不依赖 Web Runtime 是否已启动。
+（``<linux home>/.config/dsh/<business-user>/``）：本模块读取 acp profile
+当前生效的 ``llm-pi-ai`` 配置并合并托管供应商，生成的覆盖条目由 adapter
+写入 run 目录的 ``--patch``，后台 run 因此不依赖 Web Runtime 是否已启动。
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from __future__ import annotations
 import logging
 import os
 import shlex
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -25,8 +26,11 @@ from agent_bridge.dsh.launcher import LinuxIdentity, resolve_linux_identity
 
 logger = logging.getLogger(__name__)
 
+# Coding Agent 后端启动的 DSH profile（ACP JSON-RPC over stdio）。
+ACP_PROFILE = "acp"
+
 # DSH 期望 HOME 已完成一次基础初始化：这些标准子目录缺失时 acp profile
-# 的部分插件初始化失败，settings.yaml 的托管供应商不会注册（prompt 报
+# 的部分插件初始化失败，托管供应商不会注册（prompt 报
 # ``no adapter registered for provider``）。预创建幂等，不与 Web Runtime 冲突。
 _DSH_HOME_DIRECTORIES = ("sessions", "storages", "change-ledger", "task-board")
 
@@ -42,6 +46,9 @@ class DshAgentExecutionBinding:
     identity: LinuxIdentity
     api_key_env: dict[str, str]
     base_url: str
+    # 模型接入的 ``--patch`` 条目（llm-pi-ai 供应商 + 默认模型），由 adapter
+    # 与 acp 路由行一并写入 run 目录的覆盖文件。
+    model_overlay: tuple[dict[str, Any], ...] = ()
 
     def process_env(self) -> dict[str, str]:
         """构造 ACP 进程的环境变量覆盖（不含 os.environ 基底）。"""
@@ -67,10 +74,14 @@ class DshAgentRuntimeDependency(Protocol):
 class DshAgentRuntimeResolver:
     """按业务用户解析 group 级 DSH 配置并准备用户级配置目录。"""
 
-    def __init__(self, *, configs: Any, access: Any, passwd_lookup: Any = None) -> None:
+    def __init__(
+        self, *, configs: Any, access: Any, passwd_lookup: Any = None, config_reader: Any = None
+    ) -> None:
         self._configs = configs
         self._access = access
         self._passwd_lookup = passwd_lookup
+        # 读取 DSH 生效配置的入口（默认 ``dsh --dump-config``），测试可替换。
+        self._config_reader = config_reader
 
     def resolve_execution(
         self, actor: str | None, owner_group_key: str | None, *, model: str | None = None
@@ -106,7 +117,6 @@ class DshAgentRuntimeResolver:
         linux_user = str(config.get("linux_user") or group_key)
         identity = resolve_linux_identity(linux_user, self._passwd_lookup)
         dsh_home = self._ensure_config_dir(identity, actor)
-        self._inject_settings(dsh_home, identity, binding, resolved_model)
 
         command = dsh_binary_from_command(
             str(self._configs.runtime_config_for_runtime().get("web_command") or "")
@@ -120,6 +130,19 @@ class DshAgentRuntimeResolver:
             api_key_env=injection.managed_api_key_env_value(str(binding.get("api_key") or "")),
             base_url=base_url,
         )
+        overlay = injection.resolve_model_overlay(
+            dsh_home=dsh_home,
+            dsh_binary=command,
+            profile=ACP_PROFILE,
+            base_url=base_url,
+            models=available_models,
+            default_model=resolved_model,
+            env={**os.environ, **resolved.process_env()},
+            cwd=identity.home if identity.home.is_dir() else dsh_home,
+            identity=identity,
+            config_reader=self._config_reader,
+        )
+        resolved = replace(resolved, model_overlay=tuple(overlay or ()))
         logger.info(
             "DSH agent 执行绑定已解析 actor=%s group=%s linux_user=%s model=%s dsh_home=%s",
             actor,
@@ -179,21 +202,6 @@ class DshAgentRuntimeResolver:
         except OSError as exc:
             logger.warning("DSH 配置目录 chmod 失败 path=%s 原因=%s", user_dir, exc)
         return user_dir
-
-    @staticmethod
-    def _inject_settings(
-        dsh_home: Path, identity: LinuxIdentity, binding: dict[str, Any], model: str
-    ) -> None:
-        """把托管供应商与默认模型幂等写入 settings.yaml（与 Web Runtime 同源）。"""
-        injection.write_settings(
-            dsh_home,
-            base_url=str(binding.get("base_url") or ""),
-            models=[str(item) for item in binding.get("available_models") or []],
-            default_model=model,
-        )
-        settings_file = injection.settings_path(dsh_home)
-        if settings_file.exists():
-            injection.ensure_owner(settings_file, uid=identity.uid, gid=identity.gid)
 
 
 def dsh_binary_from_command(web_command: str) -> str:

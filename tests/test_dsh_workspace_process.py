@@ -18,6 +18,7 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
+from agent_bridge.dsh.injection import model_overlay_path
 from agent_bridge.dsh.workspace import mcp_overlay_path
 
 pytestmark = pytest.mark.process
@@ -94,13 +95,15 @@ def test_workspace_full_flow_with_real_process(client) -> None:
     assert payload["status"] == "running"
     assert payload["profile_key"] == "safe"
 
-    # DSH 原生 settings.yaml 与 MCP 覆盖文件都落在用户 DSH_HOME 内
-    settings = yaml.safe_load((config_dir / "settings.yaml").read_text(encoding="utf-8"))
-    provider = settings["llm-pi-ai"]["providers"]["agent-bridge"]
+    # 模型覆盖文件与 MCP 覆盖文件都落在用户 DSH_HOME 内（不再写 settings.yaml）
+    model_path = model_overlay_path(config_dir)
+    entries = {entry["id"]: entry["config"] for entry in yaml.safe_load(model_path.read_text(encoding="utf-8"))}
+    provider = entries["llm-pi-ai"]["providers"]["agent-bridge"]
     assert provider["baseURL"] == "http://model.internal/v1"
     assert provider["apiKeyEnv"] == "AGENT_BRIDGE_DSH_API_KEY"
     assert [model["id"] for model in provider["models"]] == ["gpt-x", "gpt-y"]
-    assert settings["agent-default-model"]["model"] == "gpt-x"
+    assert entries["agent-default-model"]["model"] == "gpt-x"
+    assert not (config_dir / "settings.yaml").exists()
 
     overlay_path = mcp_overlay_path(config_dir)
     overlay = yaml.safe_load(overlay_path.read_text(encoding="utf-8"))
@@ -143,12 +146,12 @@ def test_workspace_full_flow_with_real_process(client) -> None:
     assert escaped.status_code == 200
     assert escaped.text == "dsh-standin"
 
-    # 子进程确实收到 --patch 覆盖文件（能力平面注入生效）
+    # 子进程按序收到模型与 MCP 两份 --patch 覆盖文件（能力平面注入生效）
     patched = client.get(
         "/agent-workspace/patch", headers={**headers_user, "Cookie": session_cookie}
     )
     assert patched.status_code == 200
-    assert patched.text == str(overlay_path)
+    assert patched.text.splitlines() == [str(model_path), str(overlay_path)]
 
     # Location 改写；Set-Cookie 保持上游 Path（不再收窄到前缀）
     redirected = client.get(

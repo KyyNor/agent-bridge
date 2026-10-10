@@ -97,6 +97,13 @@ def test_build_model_patch_overrides_acp_route(tmp_path: Path) -> None:
     assert build_model_patch(provider="p", model="m") == [
         {"id": "acp", "config": {"provider": "p", "model": "m"}}
     ]
+    # 模型接入条目排在 acp 路由行之前，写入同一份 patch
+    overlay = [{"id": "llm-pi-ai", "config": {"providers": {"p": {"baseURL": "http://x/v1"}}}}]
+    path = write_model_patch(tmp_path / MODEL_PATCH_FILENAME, provider="p", model="m", model_overlay=overlay)
+    assert yaml.safe_load(path.read_text(encoding="utf-8")) == [
+        *overlay,
+        {"id": "acp", "config": {"provider": "p", "model": "m"}},
+    ]
 
 
 def test_acp_mcp_servers_converts_http_and_stdio(tmp_path: Path) -> None:
@@ -385,6 +392,9 @@ class _FakeRuntime:
             identity=identity,
             api_key_env={"AGENT_BRIDGE_DSH_API_KEY": "secret"},
             base_url="https://gateway.example/v1",
+            model_overlay=(
+                {"id": "llm-pi-ai", "config": {"providers": {"agent-bridge": {"baseURL": "https://gateway.example/v1"}}}},
+            ),
             process_env=lambda: {
                 "DSH_HOME": "/tmp/.config/dsh/tester",
                 "AGENT_BRIDGE_DSH_API_KEY": "secret",
@@ -511,10 +521,11 @@ def test_dsh_run_streams_updates_and_final(monkeypatch: pytest.MonkeyPatch, tmp_
     prompt = next(item for item in process.requests if item.get("method") == "session/prompt")
     assert prompt["params"]["sessionId"] == "sess-1"
 
-    # run 目录中生成模型路由 patch。
+    # run 目录中生成模型接入 + 路由 patch。
     patch = yaml.safe_load((tmp_path / MODEL_PATCH_FILENAME).read_text(encoding="utf-8"))
     assert patch == [
-        {"id": "acp", "config": {"provider": "agent-bridge", "model": "deepseek-flash"}}
+        {"id": "llm-pi-ai", "config": {"providers": {"agent-bridge": {"baseURL": "https://gateway.example/v1"}}}},
+        {"id": "acp", "config": {"provider": "agent-bridge", "model": "deepseek-flash"}},
     ]
 
     kinds = [record["kind"] for update in updates for record in update.events]
@@ -713,14 +724,25 @@ def _default_binding() -> dict[str, Any]:
     }
 
 
-def test_resolver_builds_binding_and_writes_settings(tmp_path: Path) -> None:
+def test_resolver_builds_binding_and_model_overlay(tmp_path: Path) -> None:
     binding_data = _default_binding()
     binding_data["default_model"] = "deepseek-pro"
     configs = _StubConfigs(
         {"linux_user": "kyynor", "default_model": "deepseek-pro", "api_key": "secret"},
         binding_data,
     )
-    resolver = DshAgentRuntimeResolver(configs=configs, access=_StubAccess(), passwd_lookup=_stub_passwd(tmp_path))
+    reads: list[dict[str, Any]] = []
+
+    def reader(**kwargs: Any) -> Any:
+        reads.append(kwargs)
+        return {"providers": {"user-own": {"baseURL": "http://user/v1"}}}
+
+    resolver = DshAgentRuntimeResolver(
+        configs=configs,
+        access=_StubAccess(),
+        passwd_lookup=_stub_passwd(tmp_path),
+        config_reader=reader,
+    )
 
     binding = resolver.resolve_execution("kyynor", "system-maintainers")
 
@@ -731,9 +753,16 @@ def test_resolver_builds_binding_and_writes_settings(tmp_path: Path) -> None:
     assert binding.api_key_env == {"AGENT_BRIDGE_DSH_API_KEY": "secret"}
     # 用户级 DSH 目录位于 linux home 下的业务用户子目录。
     assert str(binding.dsh_home) == str(tmp_path / ".config" / "dsh" / "kyynor")
-    settings = yaml.safe_load((binding.dsh_home / "settings.yaml").read_text(encoding="utf-8"))
-    assert settings["llm-pi-ai"]["providers"]["agent-bridge"]["baseURL"] == "https://gateway.example/v1"
-    assert settings["agent-default-model"]["model"] == "deepseek-pro"
+    # 模型接入不再写 settings.yaml（DSH 0.2 已移除），而是读取 acp profile 的
+    # 生效配置合并托管供应商，交给 adapter 写入 run 的 --patch。
+    assert not (binding.dsh_home / "settings.yaml").exists()
+    assert reads[0]["profile"] == "acp" and reads[0]["entry_id"] == "llm-pi-ai"
+    assert reads[0]["env"]["DSH_HOME"] == str(binding.dsh_home)
+    entries = {entry["id"]: entry["config"] for entry in binding.model_overlay}
+    providers = entries["llm-pi-ai"]["providers"]
+    assert providers["user-own"] == {"baseURL": "http://user/v1"}
+    assert providers["agent-bridge"]["baseURL"] == "https://gateway.example/v1"
+    assert entries["agent-default-model"] == {"provider": "agent-bridge", "model": "deepseek-pro"}
 
 
 def test_resolver_chowns_new_dirs_when_root_demotes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

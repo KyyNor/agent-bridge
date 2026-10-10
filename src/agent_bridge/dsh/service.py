@@ -652,11 +652,7 @@ class DshRuntimeService:
         port = self._available_port()
         runtime_config = self._configs.runtime_config_for_runtime()
         model_binding = self._configs.model_binding_for(group_key)
-        self._inject_settings(config_dir, identity, model_binding)
         overlay_path = self._write_workspace_overlay(config_dir, identity, user_id, workspace)
-        command = self._build_command(
-            str(runtime_config.get("web_command") or ""), port, patch_path=overlay_path
-        )
         env = self._build_env(
             identity,
             config_dir,
@@ -677,6 +673,19 @@ class DshRuntimeService:
             specs=plugins.read_plugin_list(),
         )
         plugin_elapsed = time.monotonic() - plugin_started
+        # 模型覆盖必须在插件安装之后读取生效配置：首装会初始化 web profile。
+        model_overlay_path = self._write_model_overlay(
+            config_dir,
+            identity,
+            model_binding,
+            env=env,
+            dsh_binary=self._dsh_binary(str(runtime_config.get("web_command") or "")),
+        )
+        command = self._build_command(
+            str(runtime_config.get("web_command") or ""),
+            port,
+            patch_paths=[path for path in (model_overlay_path, overlay_path) if path is not None],
+        )
         logger.info(
             "DSH Runtime 开始启动 scope=%s runtime=%s user=%s group=%s linux_user=%s"
             " port=%s config_dir=%s 插件阶段耗时=%.1fs",
@@ -1065,9 +1074,11 @@ class DshRuntimeService:
         identity = resolve_linux_identity(linux_user, self._passwd_lookup)
         self._write_workspace_overlay(config_dir, identity, user_id, workspace)
 
-    def _build_command(self, template: str, port: int, *, patch_path: Path | None = None) -> list[str]:
-        """渲染启动命令；``{patch}`` 在注入配置文件时展开为 ``--patch <路径>``。"""
-        patch_arg = f'--patch "{patch_path}"' if patch_path is not None else ""
+    def _build_command(
+        self, template: str, port: int, *, patch_paths: list[Path] | None = None
+    ) -> list[str]:
+        """渲染启动命令；``{patch}`` 展开为按序叠加的 ``--patch <路径>``（无覆盖文件时为空）。"""
+        patch_arg = " ".join(f'--patch {shlex.quote(str(path))}' for path in patch_paths or [])
         try:
             rendered = template.format(port=port, patch=patch_arg)
         except (KeyError, IndexError, ValueError) as exc:
@@ -1079,38 +1090,55 @@ class DshRuntimeService:
             raise ValidationError(f"DSH 启动命令模板不合法：{template!r}")
         return command
 
-    def _inject_settings(
+    def _write_model_overlay(
         self,
         config_dir: Path,
         identity: LinuxIdentity,
         binding: dict[str, Any],
+        *,
+        env: dict[str, str],
+        dsh_binary: str,
     ) -> Path | None:
-        """把公共接入（Base URL / 模型）与组级默认模型写入 DSH settings.yaml。"""
-        written = injection.write_settings(
-            config_dir,
+        """把公共接入（Base URL / 模型）与组级默认模型写成 web profile 的 ``--patch`` 覆盖文件。"""
+        path = injection.model_overlay_path(config_dir)
+        entries = injection.resolve_model_overlay(
+            dsh_home=config_dir,
+            dsh_binary=dsh_binary,
+            profile=plugins.PLUGIN_PROFILE,
             base_url=str(binding.get("base_url") or ""),
-            models=list(binding.get("available_models") or []),
+            models=[str(item) for item in binding.get("available_models") or []],
             default_model=str(binding.get("default_model") or ""),
+            env=env,
+            cwd=identity.home if identity.home.is_dir() else config_dir,
+            identity=identity,
         )
-        # DSH 会热写该文件保存用户偏好，必须归属目标 Linux 用户（root 运行时）。
-        settings_file = injection.settings_path(config_dir)
-        if settings_file.exists():
-            injection.ensure_owner(settings_file, uid=identity.uid, gid=identity.gid)
-        if written is None and not binding.get("base_url"):
-            logger.warning(
-                "DSH 模型接入未配置 Base URL（全局与公共模型配置均为空）config_dir=%s，DSH 将使用自身默认供应商",
-                config_dir,
-            )
-        elif written is None and not binding.get("available_models"):
-            # Base URL 已解析（含公共模型配置回落）但全局可用模型为空：供应商
-            # 条目与 apiKeyEnv 均不落盘，组级 API Key 不会生效，必须留痕。
-            logger.warning(
-                "DSH 模型接入已解析 Base URL（source=%s）但全局可用模型列表为空，"
-                "跳过供应商注入，组级 API Key 不会生效 config_dir=%s，请在 DSH 运行配置中补充可用模型",
-                str(binding.get("base_url_source") or "-"),
-                config_dir,
-            )
-        return written
+        if entries is None:
+            injection.remove_overlay(path)
+            if not binding.get("base_url"):
+                logger.warning(
+                    "DSH 模型接入未配置 Base URL（全局与公共模型配置均为空）config_dir=%s，DSH 将使用自身默认供应商",
+                    config_dir,
+                )
+            else:
+                # Base URL 已解析（含公共模型配置回落）但全局可用模型为空：供应商
+                # 条目与 apiKeyEnv 均不注入，组级 API Key 不会生效，必须留痕。
+                logger.warning(
+                    "DSH 模型接入已解析 Base URL（source=%s）但全局可用模型列表为空，"
+                    "跳过供应商注入，组级 API Key 不会生效 config_dir=%s，请在 DSH 运行配置中补充可用模型",
+                    str(binding.get("base_url_source") or "-"),
+                    config_dir,
+                )
+            return None
+        injection.write_overlay(path, entries)
+        injection.ensure_owner(path, uid=identity.uid, gid=identity.gid)
+        logger.info(
+            "DSH 模型覆盖文件已写入 path=%s provider=%s models=%d default_model=%s",
+            path,
+            injection.MANAGED_PROVIDER_KEY,
+            len(binding.get("available_models") or []),
+            binding.get("default_model") or "-",
+        )
+        return path
 
     def _build_env(
         self,
@@ -1120,7 +1148,7 @@ class DshRuntimeService:
         *,
         mark: str,
     ) -> dict[str, str]:
-        """构造 DSH 进程环境：DSH 只从 settings.yaml 读模型配置，密钥走环境变量。
+        """构造 DSH 进程环境：模型配置走 ``--patch`` 覆盖文件，密钥走环境变量。
 
         ``mark`` 是 runtime 进程标记：DSH 会把它原样继承给全部子进程，停止
         时扫描进程环境即可定位已脱离父链的孤儿进程。

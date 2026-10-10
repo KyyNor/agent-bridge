@@ -20,11 +20,13 @@ DSH 0.1.5-rc.2 提供四种程序化面：
 
 ## 模型路由的关键事实
 
-- acp profile 的 `dsh-acp` 行把 provider/model 钉死为 `deepseek-official`；用户
-  `settings.yaml` 的 `agent-default-model` **不会**覆盖它，必须以后到 `--patch`
+- acp profile 的 `dsh-acp` 行把 provider/model 钉死为 `deepseek-official`；
+  `agent-default-model` **不会**覆盖它，必须以后到 `--patch`
   显式改写该行（`{"id": "acp", "config": {"provider": "agent-bridge", "model": ...}}`）。
-- `llm-pi-ai.providers.agent-bridge`（Base URL/模型目录/`apiKeyEnv`）来自用户级
-  `settings.yaml`，API Key 只经 `AGENT_BRIDGE_DSH_API_KEY` 环境变量注入，不落盘。
+- `llm-pi-ai.providers.agent-bridge`（Base URL/模型目录/`apiKeyEnv`）与 acp 路由行
+  写入同一份 run patch（DSH 0.2 起不再读取 `settings.yaml`）；由于 patch 整体替换
+  行 config，resolver 先经 `dsh --profile acp --dump-config` 读取生效配置再合并托管
+  供应商。API Key 只经 `AGENT_BRIDGE_DSH_API_KEY` 环境变量注入，不落盘。
 - agent-bridge 路由下 session 只广告 `model` 配置项，无 `reasoning_effort`——因此
   DSH 后端 `supported_efforts` 为空集合，配置 effort 在 registry 即被拒绝。
 

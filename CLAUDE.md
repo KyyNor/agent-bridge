@@ -156,7 +156,8 @@ initialize → session/new → session/prompt（流式 `session/update`）→ se
 stdin EOF 即进程优雅退出。模型路由经 run 目录中的 `--patch` 覆盖 `dsh-acp` 行
 （acp profile 的 shipped 行钉死 deepseek-official，必须以后到 patch 显式指定托管供应商）；
 组级模型接入与 Linux 身份由 `dsh/agent_runtime.py` 的 resolver 从 DSH group 配置解析，
-并幂等注入用户级 `settings.yaml`（后台 run 不依赖 Web Runtime 是否启动）。
+生成的模型接入条目（见下文 DSH Web Runtime 的模型接入）与 acp 路由行写入同一份 run
+patch（后台 run 不依赖 Web Runtime 是否启动）。
 `.mcp.json` 转换为 `session/new` 的 stdio/HTTP MCP 声明，Profile 能力平面照常经
 MetaMCP 网关生效；权限请求按无人值守语义自动放行（沙箱仍由 DSH 执行）。协议差异：
 无原生 JSON Schema（经 system prompt 回落）、无 USD 成本与 turn 计数、无子代理生命周期
@@ -209,16 +210,26 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
   不重启不并行起第二个进程；无 active profile 权限的成员拒绝进入），停止/空闲
   回收后重选。`_authorize_shared_workspace` 全程持服务锁（RLock 重入），并发
   进入原子化。均不进入 `AGENT_BRIDGE_ROOT/data`；停止实例不删除用户配置。
-- **模型接入走 DSH 原生 settings.yaml**：公共 `base_url`（留空回落系统「公共模型配置」
-  的 Base URL）与 `available_models`、组级 `default_model` 合并写入该用户
-  `DSH_HOME/settings.yaml` 的 `llm-pi-ai.providers.agent-bridge` 与
-  `agent-default-model`；API Key 只经 `AGENT_BRIDGE_DSH_API_KEY` 环境变量传递，
-  不落盘。合并写入保留用户其他 settings，内容未变化时不触盘。
+- **模型接入走 `--patch` 覆盖层**（`dsh/injection.py`）：DSH 0.2 已移除
+  `settings.yaml`（只做一次性迁移并改名 `.imported`），不得再依赖它。公共
+  `base_url`（留空回落系统「公共模型配置」的 Base URL）与 `available_models`、
+  组级 `default_model` 生成 `llm-pi-ai`（`providers.agent-bridge`）与
+  `agent-default-model` 两行 patch：Web 写入 `DSH_HOME/agent-bridge-model.patch.yml`
+  （0600），`{patch}` 按「模型在前、MCP 在后」展开为多个 `--patch`；ACP 与
+  `acp` 路由行写入 run patch。DSH 的 patch **整体替换**行 config，且 `llm-pi-ai`
+  只允许单实例（插入第二个实例会因内置供应商重复声明而激活失败），因此注入前
+  必须以目标 Linux 用户执行 `dsh --profile <web|acp> --dump-config` 读取该行生效
+  配置，只合并 `agent-bridge` 供应商并保留 `!!js` 标签；遗留 `settings.yaml`
+  或 `.imported` 中的用户供应商同样合并。读取失败只注入托管供应商并告警（覆盖层
+  不改写 profile 文件）。代价：DSH 配置编辑器拒绝修改被命令行覆盖层接管的行，
+  注入期间这两行在 DSH 设置界面中只读。API Key 只经 `AGENT_BRIDGE_DSH_API_KEY`
+  环境变量传递，不落盘。
 - `dsh_group_configs`/`dsh_runtime_config` 分层迁移必须先回填再删列：早期版本的
   组级 `base_url`/`available_models_json` 由 `_backfill_dsh_public_llm_config`
   合并进全局行（只填全局为空的字段），否则升级会静默丢失已保存的模型接入。
-- 启动命令模板支持 `{port}` 与 `{patch}` 两个占位符（后者由 Workspace 能力平面注入
-  `--patch <配置文件>`），默认模板带 `--no-open` 关闭 DSH 自启浏览器。
+- 启动命令模板支持 `{port}` 与 `{patch}` 两个占位符（后者展开为模型覆盖与 Workspace
+  能力平面 MCP 覆盖两份 `--patch <配置文件>`，无覆盖文件时为空），默认模板带
+  `--no-open` 关闭 DSH 自启浏览器；自定义模板必须保留 `{patch}`，否则模型接入失效。
 - 启动就绪后从日志横幅 `dsh web: http://…/?token=…` 捕获鉴权入口（`auth_path`/
   `auth_query`）到状态文件：DSH 首次访问必须携带该 token 换取会话 Cookie，代理层
   用它完成首次导航（见 Workspace 代理）。

@@ -128,6 +128,12 @@ def shared_state_path(service, linux_user: str = "groupa") -> Path:
 # -- 目录与 runtime 身份 --
 
 
+def _patch_args(command: list[str]) -> list[str]:
+    """启动命令中按序叠加的 ``--patch`` 文件（模型覆盖在前、MCP 覆盖在后）。"""
+    return [command[index + 1] for index, token in enumerate(command) if token == "--patch"]
+
+
+
 def test_shared_scope_uses_linux_user_dsh_home_and_state(service, home, passwd_lookup, monkeypatch) -> None:
     configure_group(service)
     launcher = install_fakes(service, home, passwd_lookup, monkeypatch)
@@ -282,7 +288,10 @@ def test_shared_without_profile_runs_plain_and_members_enter_without_injection(
     plain = service.dsh.authorize_workspace("user1", profile_key=None, scope="shared")
     assert plain["profile_key"] is None
     assert len(launcher.starts) == 1
-    assert "--patch" not in launcher.starts[0]["command"]
+    # 无能力平面：只叠加模型覆盖，不注入 MCP
+    assert [Path(item).name for item in _patch_args(launcher.starts[0]["command"])] == [
+        "agent-bridge-model.patch.yml"
+    ]
 
     # 运行中（active profile 为空）：成员即便请求平面也按无注入进入
     again = service.dsh.authorize_workspace("user2", profile_key="safe", scope="shared")

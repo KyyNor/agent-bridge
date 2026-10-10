@@ -34,6 +34,9 @@ pytestmark = pytest.mark.process
 _BASE_URL = os.environ.get("AGENT_BRIDGE_DSH_TEST_BASE_URL", "")
 _API_KEY = os.environ.get("AGENT_BRIDGE_DSH_TEST_API_KEY", "")
 _MODEL = os.environ.get("AGENT_BRIDGE_DSH_TEST_MODEL", "deepseek-flash")
+# conftest 会把 ``read_entry_config`` 替换为空桩；真实进程测试在导入时保留原实现，
+# 以真实 ``dsh --dump-config`` 读取 acp profile 的生效配置。
+_REAL_CONFIG_READER = injection.read_entry_config
 
 requires_real_dsh = pytest.mark.skipif(
     not shutil.which("dsh") or not _BASE_URL or not _API_KEY,
@@ -49,32 +52,43 @@ class _TempDshRuntime:
         self.model = model
 
     def resolve_execution(self, actor, group_key, *, model=None):
+        identity = SimpleNamespace(
+            user=os.environ.get("USER") or "tester",
+            uid=os.geteuid(),
+            gid=os.getegid(),
+            home=Path.home(),
+        )
+        process_env = {"DSH_HOME": str(self.dsh_home), injection.MANAGED_API_KEY_ENV: _API_KEY}
+        resolved_model = model or self.model
+        # 与 DshAgentRuntimeResolver 同一路径：读取生效配置并合并托管供应商。
+        overlay = injection.resolve_model_overlay(
+            dsh_home=self.dsh_home,
+            dsh_binary="dsh",
+            profile="acp",
+            base_url=_BASE_URL,
+            models=[resolved_model],
+            default_model=resolved_model,
+            env={**os.environ, **process_env},
+            cwd=self.dsh_home,
+            identity=identity,
+            config_reader=_REAL_CONFIG_READER,
+        )
         return SimpleNamespace(
             command="dsh",
             dsh_home=self.dsh_home,
             provider=injection.MANAGED_PROVIDER_KEY,
-            model=model or self.model,
-            identity=SimpleNamespace(
-                user=os.environ.get("USER") or "tester",
-                uid=os.geteuid(),
-                gid=os.getegid(),
-                home=Path.home(),
-            ),
+            model=resolved_model,
+            identity=identity,
             api_key_env={injection.MANAGED_API_KEY_ENV: _API_KEY},
             base_url=_BASE_URL,
-            process_env=lambda: {
-                "DSH_HOME": str(self.dsh_home),
-                injection.MANAGED_API_KEY_ENV: _API_KEY,
-            },
+            model_overlay=tuple(overlay or ()),
+            process_env=lambda: dict(process_env),
         )
 
 
 @pytest.fixture
 def dsh_home(tmp_path: Path) -> Path:
     home = tmp_path / "dsh-home"
-    injection.write_settings(
-        home, base_url=_BASE_URL, models=[_MODEL], default_model=_MODEL
-    )
     # DSH 期望 HOME 完成过基础初始化；真实链路由 DshAgentRuntimeResolver
     # 预创建（见 _DSH_HOME_DIRECTORIES），此处按同一约定准备。
     for name in ("sessions", "storages", "change-ledger", "task-board"):

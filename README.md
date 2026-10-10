@@ -109,14 +109,18 @@ Linux 用户身份运行；同一小组的多个业务用户共享 Linux uid。�
 从按组保存 Base URL/模型的早期版本升级时，迁移会把各组已保存的值回填到全局
 公共接入（只填全局为空的字段，不覆盖新值）再删除旧列，避免升级静默丢配置。
 
-启动时 Agent Bridge 把公共接入与组级默认模型合并写入该用户 DSH 配置目录的
-`settings.yaml`（`llm-pi-ai.providers.agent-bridge` 声明 Base URL、模型目录与
-承载密钥的环境变量名，`agent-default-model` 指定默认模型），API Key 只经
-`AGENT_BRIDGE_DSH_API_KEY` 环境变量传给 DSH 进程，不写入文件；用户自身的其他
-settings（主题、onboarding 等）原样保留。
+启动时 Agent Bridge 把公共接入与组级默认模型生成为 DSH 的 `--patch` 覆盖文件
+`<DSH_HOME>/agent-bridge-model.patch.yml`（`llm-pi-ai.providers.agent-bridge` 声明
+Base URL、模型目录与承载密钥的环境变量名，`agent-default-model` 指定默认模型），
+随启动命令的 `{patch}` 叠加生效；API Key 只经 `AGENT_BRIDGE_DSH_API_KEY` 环境变量
+传给 DSH 进程，不写入文件。DSH 0.2 起不再读取 `settings.yaml`，Agent Bridge 也不再
+写它；注入前会读取 DSH 当前生效的供应商配置并只合并 `agent-bridge` 一项，用户在
+DSH 中自配的其他供应商与遗留 `settings.yaml` 中的供应商都会保留。由于 DSH 不允许
+在界面中修改被命令行覆盖层接管的配置，注入期间 DSH 设置页中的供应商与默认模型
+为只读，需在 Agent Bridge 的 DSH 运行配置中调整。
 
 插件首装：插件名单内置于包内（`src/agent_bridge/dsh/dsh-plugins.txt`，随版本
-发布；每行一个 spec，如 `@scope/name@0.3.23`，支持 `#` 注释；全部钉住精确
+发布；每行一个 spec，如 `@scope/name@0.4.5`，支持 `#` 注释；全部钉住精确
 版本以保证同一版本各部署插件集一致，升级插件即改版本号随版本部署）。插件在 **web 进程启动之前**
 以目标 Linux 用户身份逐个执行 `dsh plugin --profile web add <spec>` 安装完毕
 （运行中的 DSH 不会热加载 profile 变更，先启动后安装会出现首访无插件的竞态），

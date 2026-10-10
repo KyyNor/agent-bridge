@@ -6,8 +6,8 @@ Agent Client Protocol（ACP v1，JSON-RPC over stdio）完成一次任务：
 - ``initialize`` → ``session/new``（绝对 cwd + MCP 声明）→ ``session/prompt``
   （流式 ``session/update`` 通知）→ ``session/close`` → stdin EOF 进程退出；
 - 模型路由经 ``--patch`` 覆盖 ``dsh-acp`` 行的 provider/model（acp profile
-  的 shipped 行钉死 deepseek-official，用户 settings.yaml 的默认模型不会
-  覆盖它，必须以后到 patch 显式指定）；
+  的 shipped 行钉死 deepseek-official，默认模型配置不会覆盖它，必须以后到
+  patch 显式指定）；托管供应商（``llm-pi-ai``）条目写入同一份 patch；
 - 模型接入（Base URL / 模型目录 / API Key / Linux 身份）复用 DSH Web
   Runtime 的 group 级配置与用户级目录，由
   :class:`agent_bridge.dsh.agent_runtime.DshAgentRuntimeResolver` 解析；
@@ -29,15 +29,15 @@ import contextlib
 import json
 import logging
 import os
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import yaml
 
 from agent_bridge.agent_runtime.adapters.jsonl_cli import effective_prompt as _effective_prompt
 from agent_bridge.agent_runtime.events import event_record
+from agent_bridge.dsh import injection
 from agent_bridge.agent_runtime.types import (
     CodingAgentCapabilities,
     CodingAgentFinal,
@@ -59,8 +59,8 @@ _CLIENT_INFO = {"name": "agent-bridge", "version": "1"}
 _PROMPT_RPC_TIMEOUT_SECONDS = 86400.0
 _STARTUP_TIMEOUT_SECONDS = 60.0
 _CLOSE_TIMEOUT_SECONDS = 15.0
-# dsh 的 LLM provider 注册可能在 ACP 服务开始应答之后才完成（settings.yaml
-# 的托管供应商异步注册）；此窗口内的 ``no adapter registered`` 属于启动竞态，
+# dsh 的 LLM provider 注册可能在 ACP 服务开始应答之后才完成（托管供应商
+# 异步注册）；此窗口内的 ``no adapter registered`` 属于启动竞态，
 # 在同一进程上退避重试。
 _ADAPTER_WARMUP_RETRIES = 30
 _ADAPTER_WARMUP_INTERVAL_SECONDS = 1.0
@@ -97,20 +97,27 @@ class AcpProcessExitedError(RuntimeError):
     """DSH ACP 进程退出（stdout EOF/读取异常），在途 RPC 永远等不到响应。"""
 
 
-def build_model_patch(*, provider: str, model: str) -> list[dict[str, Any]]:
-    """构造覆盖 ``dsh-acp`` 行 provider/model 的 ``--patch`` 文档。"""
+def build_model_patch(
+    *, provider: str, model: str, model_overlay: Iterable[dict[str, Any]] = ()
+) -> list[dict[str, Any]]:
+    """构造 run 的 ``--patch`` 文档：模型接入条目 + 覆盖 ``dsh-acp`` 行 provider/model。"""
     return [
+        *model_overlay,
         {
             "id": ACP_ROUTE_ENTRY_ID,
             "config": {"provider": provider, "model": model},
-        }
+        },
     ]
 
 
-def write_model_patch(path: Path, *, provider: str, model: str) -> Path:
+def write_model_patch(
+    path: Path, *, provider: str, model: str, model_overlay: Iterable[dict[str, Any]] = ()
+) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        yaml.safe_dump(build_model_patch(provider=provider, model=model), allow_unicode=True),
+        injection.dump_entry_list(
+            build_model_patch(provider=provider, model=model, model_overlay=model_overlay)
+        ),
         encoding="utf-8",
     )
     return path
@@ -578,6 +585,7 @@ class _DshRun:
             self.request.cwd / MODEL_PATCH_FILENAME,
             provider=binding.provider,
             model=binding.model,
+            model_overlay=getattr(binding, "model_overlay", ()),
         )
         client = await self._spawn(binding, patch_path, mcp_declarations)
         self._client = client

@@ -31,9 +31,12 @@ def session_cookie_name(authority: str) -> str:
 
 
 def parse_args(argv: list[str]) -> tuple[int, str | None]:
-    """解析与 DSH 相同的启动参数：``--patch <file> --host <h> --port <n>``。"""
+    """解析与 DSH 相同的启动参数：``--patch <file>``（可重复）``--host <h> --port <n>``。
+
+    多个 ``--patch`` 按出现顺序以换行拼接返回。
+    """
     port: int | None = None
-    patch: str | None = None
+    patches: list[str] = []
     index = 0
     while index < len(argv):
         token = argv[index]
@@ -41,7 +44,7 @@ def parse_args(argv: list[str]) -> tuple[int, str | None]:
             port = int(argv[index + 1])
             index += 2
         elif token == "--patch" and index + 1 < len(argv):
-            patch = argv[index + 1]
+            patches.append(argv[index + 1])
             index += 2
         elif token == "--host" and index + 1 < len(argv):
             index += 2
@@ -49,7 +52,7 @@ def parse_args(argv: list[str]) -> tuple[int, str | None]:
             index += 1
     if port is None:
         raise SystemExit("standin: --port is required")
-    return port, patch
+    return port, "\n".join(patches) or None
 
 
 def _cookie_value(header: str | None, name: str) -> str | None:

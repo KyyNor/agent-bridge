@@ -323,7 +323,7 @@ def test_ensure_running_starts_reuses_and_injects_settings(service, home, passwd
     config_dir = home / "groupa" / ".config" / "dsh" / "user1"
     assert start["env"]["DSH_HOME"] == str(config_dir)
     assert start["env"]["HOME"] == str(home / "groupa")
-    # API Key 只通过环境变量传递；Base URL/模型走 DSH 原生 settings.yaml
+    # API Key 只通过环境变量传递；Base URL/模型走 --patch 模型覆盖文件
     assert start["env"]["AGENT_BRIDGE_DSH_API_KEY"] == "sk-secret"
     for legacy_key in ("DSH_BASE_URL", "DSH_API_KEY", "DSH_DEFAULT_MODEL", "DSH_AVAILABLE_MODELS"):
         assert legacy_key not in start["env"]
@@ -335,14 +335,19 @@ def test_ensure_running_starts_reuses_and_injects_settings(service, home, passwd
     assert config_dir.is_dir()
     assert not (service.paths.data_dir / "dsh").exists()
 
-    # DSH 原生 settings.yaml 收到公共 Base URL、模型目录与组级默认模型
-    settings = yaml.safe_load((config_dir / "settings.yaml").read_text(encoding="utf-8"))
-    provider = settings["llm-pi-ai"]["providers"]["agent-bridge"]
+    # 模型覆盖文件收到公共 Base URL、模型目录与组级默认模型，并经 --patch 注入；
+    # DSH 0.2 已移除 settings.yaml，不再写该文件。
+    overlay_path = config_dir / "agent-bridge-model.patch.yml"
+    assert start["command"][start["command"].index("--patch") + 1] == str(overlay_path)
+    assert overlay_path.stat().st_mode & 0o777 == 0o600
+    assert not (config_dir / "settings.yaml").exists()
+    entries = {entry["id"]: entry["config"] for entry in yaml.safe_load(overlay_path.read_text(encoding="utf-8"))}
+    provider = entries["llm-pi-ai"]["providers"]["agent-bridge"]
     assert provider["baseURL"] == "http://model.internal/v1"
     assert provider["api"] == "openai-completions"
     assert provider["apiKeyEnv"] == "AGENT_BRIDGE_DSH_API_KEY"
     assert [model["id"] for model in provider["models"]] == ["gpt-x", "gpt-y"]
-    assert settings["agent-default-model"] == {"provider": "agent-bridge", "model": "gpt-x"}
+    assert entries["agent-default-model"] == {"provider": "agent-bridge", "model": "gpt-x"}
 
     # 第二次进入复用同一个实例
     second = service.dsh.ensure_running("user1")
@@ -356,30 +361,98 @@ def test_ensure_running_starts_reuses_and_injects_settings(service, home, passwd
     assert launcher.starts[1]["env"]["DSH_HOME"] == str(home / "groupa" / ".config" / "dsh" / "user2")
 
 
-def test_injected_settings_preserve_unmanaged_user_configuration(service, home) -> None:
+def test_model_overlay_preserves_user_providers_and_js_expressions(service, home, monkeypatch) -> None:
+    """DSH patch 整体替换 config：必须把当前生效的用户供应商与 ``!!js`` 表达式原样合并。"""
+    from agent_bridge.dsh import injection
+
     configure_runtime(service)
     config_dir = home / "groupa" / ".config" / "dsh" / "user1"
     config_dir.mkdir(parents=True)
-    (config_dir / "settings.yaml").write_text(
-        "ui-theme:\n  preference: dark\ndsh-desktop:\n  openBrowser: false\n",
-        encoding="utf-8",
+    # 尚未被 DSH 0.2 迁移的遗留 settings.yaml 中的用户供应商同样保留，且文件不被改写
+    legacy = "llm-pi-ai:\n  providers:\n    legacy-own:\n      baseURL: http://legacy/v1\n"
+    (config_dir / "settings.yaml").write_text(legacy, encoding="utf-8")
+    calls: list[dict] = []
+
+    def fake_reader(**kwargs):
+        calls.append(kwargs)
+        return injection.load_entry_list(
+            "providers:\n"
+            "  user-own:\n"
+            "    baseURL: http://user/v1\n"
+            "  agent-bridge:\n"
+            "    baseURL: http://stale/v1\n"
+            "cacheDir: !!js dshHomePath('llm-cache')\n"
+        )
+
+    monkeypatch.setattr(injection, "read_entry_config", fake_reader)
+    path = service.dsh._write_model_overlay(
+        config_dir,
+        types.SimpleNamespace(uid=os.getuid(), gid=os.getgid(), home=home / "groupa"),
+        service.dsh_configs.model_binding_for("groupa"),
+        env={"DSH_HOME": str(config_dir)},
+        dsh_binary="dsh",
     )
 
-    service.dsh._inject_settings(
+    assert calls and calls[0]["profile"] == "web" and calls[0]["entry_id"] == "llm-pi-ai"
+    entries = {
+        entry["id"]: entry["config"]
+        for entry in injection.load_entry_list(path.read_text(encoding="utf-8"))
+    }
+    cache_dir = entries["llm-pi-ai"]["cacheDir"]
+    assert (cache_dir.tag, cache_dir.value) == ("tag:yaml.org,2002:js", "dshHomePath('llm-cache')")
+    providers = entries["llm-pi-ai"]["providers"]
+    assert providers["user-own"] == {"baseURL": "http://user/v1"}
+    assert providers["legacy-own"] == {"baseURL": "http://legacy/v1"}
+    assert providers["agent-bridge"]["baseURL"] == "http://model.internal/v1"
+    assert (config_dir / "settings.yaml").read_text(encoding="utf-8") == legacy
+
+    # DSH 迁移后原文件改名为 .imported（覆盖层接管的 llm-pi-ai 段被拒绝迁移，
+    # 只留在改名文件里）：遗留供应商仍需保留
+    (config_dir / "settings.yaml").rename(config_dir / "settings.yaml.imported")
+    path = service.dsh._write_model_overlay(
         config_dir,
-        types.SimpleNamespace(uid=os.getuid(), gid=os.getgid()),
+        types.SimpleNamespace(uid=os.getuid(), gid=os.getgid(), home=home / "groupa"),
         service.dsh_configs.model_binding_for("groupa"),
+        env={"DSH_HOME": str(config_dir)},
+        dsh_binary="dsh",
     )
-    settings = yaml.safe_load((config_dir / "settings.yaml").read_text(encoding="utf-8"))
-    assert settings["ui-theme"] == {"preference": "dark"}
-    assert settings["dsh-desktop"] == {"openBrowser": False}
-    assert settings["llm-pi-ai"]["providers"]["agent-bridge"]["baseURL"] == "http://model.internal/v1"
+    entries = {
+        entry["id"]: entry["config"]
+        for entry in injection.load_entry_list(path.read_text(encoding="utf-8"))
+    }
+    assert set(entries["llm-pi-ai"]["providers"]) == {"legacy-own", "user-own", "agent-bridge"}
+
+
+def test_model_overlay_falls_back_to_managed_provider_when_dump_fails(service, home, monkeypatch, caplog) -> None:
+    import logging
+
+    from agent_bridge.dsh import injection
+
+    configure_runtime(service)
+    config_dir = home / "groupa" / ".config" / "dsh" / "user1"
+    config_dir.mkdir(parents=True)
+
+    def broken_reader(**_kwargs):
+        raise RuntimeError("dsh --dump-config 退出码 1")
+
+    monkeypatch.setattr(injection, "read_entry_config", broken_reader)
+    with caplog.at_level(logging.WARNING, logger="agent_bridge.dsh.injection"):
+        path = service.dsh._write_model_overlay(
+            config_dir,
+            types.SimpleNamespace(uid=os.getuid(), gid=os.getgid(), home=home / "groupa"),
+            service.dsh_configs.model_binding_for("groupa"),
+            env={},
+            dsh_binary="dsh",
+        )
+    entries = {entry["id"]: entry["config"] for entry in yaml.safe_load(path.read_text(encoding="utf-8"))}
+    assert list(entries["llm-pi-ai"]["providers"]) == ["agent-bridge"]
+    assert any("仅注入托管供应商" in record.message for record in caplog.records)
 
 
 def test_inject_settings_warns_when_models_catalog_empty(service, home, caplog) -> None:
     """Base URL 已解析但全局可用模型为空：跳过供应商注入必须留下告警。
 
-    此时 settings.yaml 不写 agent-bridge 供应商条目，apiKeyEnv 无处挂靠，
+    此时不生成模型覆盖文件（并清理旧文件），apiKeyEnv 无处挂靠，
     组级 API Key 即使注入进程环境也不会生效——静默跳过会让“密钥没进去”
     无法从日志定位。
     """
@@ -397,15 +470,20 @@ def test_inject_settings_warns_when_models_catalog_empty(service, home, caplog) 
     )
     config_dir = home / "groupa" / ".config" / "dsh" / "user1"
     config_dir.mkdir(parents=True)
+    stale = config_dir / "agent-bridge-model.patch.yml"
+    stale.write_text("[]\n", encoding="utf-8")
 
     with caplog.at_level(logging.WARNING, logger="agent_bridge.dsh.service"):
-        written = service.dsh._inject_settings(
+        written = service.dsh._write_model_overlay(
             config_dir,
-            types.SimpleNamespace(uid=os.getuid(), gid=os.getgid()),
+            types.SimpleNamespace(uid=os.getuid(), gid=os.getgid(), home=home / "groupa"),
             service.dsh_configs.model_binding_for("groupa"),
+            env={},
+            dsh_binary="dsh",
         )
 
     assert written is None
+    assert not stale.exists()
     assert not (config_dir / "settings.yaml").exists()
     assert any(
         "全局可用模型列表为空" in record.message and "API Key 不会生效" in record.message
@@ -827,11 +905,22 @@ def test_command_template_renders_patch_placeholder(service) -> None:
     with_patch = service.dsh._build_command(
         "dsh web {patch} --port {port}",
         48500,
-        patch_path=Path("/run/agent-bridge/dsh-workspaces/user1.patch.yml"),
+        patch_paths=[
+            Path("/home/u/.config/dsh/user1/agent-bridge-model.patch.yml"),
+            Path("/home/u/my dir/agent-bridge-mcp.patch.yml"),
+        ],
     )
-    assert with_patch[:3] == ["dsh", "web", "--patch"]
-    assert with_patch[3] == "/run/agent-bridge/dsh-workspaces/user1.patch.yml"
-    assert with_patch[-1] == "48500"
+    # 多份覆盖文件按序叠加（模型在前、MCP 在后），路径含空格时正确转义
+    assert with_patch == [
+        "dsh",
+        "web",
+        "--patch",
+        "/home/u/.config/dsh/user1/agent-bridge-model.patch.yml",
+        "--patch",
+        "/home/u/my dir/agent-bridge-mcp.patch.yml",
+        "--port",
+        "48500",
+    ]
 
 
 def test_auth_entry_is_captured_from_start_log(service, home, passwd_lookup, monkeypatch) -> None:

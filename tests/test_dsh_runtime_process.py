@@ -53,7 +53,8 @@ def dsh_service(wm_paths, tmp_path, monkeypatch):
 
     svc.dsh_configs.save_runtime_config(
         "root",
-        web_command=f'"{sys.executable}" -m http.server {{patch}} {{port}} --bind 127.0.0.1',
+        # http.server 替身不接受 --patch：模板不带 {patch}，覆盖文件只校验落盘
+        web_command=f'"{sys.executable}" -m http.server {{port}} --bind 127.0.0.1',
         idle_timeout_minutes=120,
         base_url="http://model.internal/v1",
         available_models=["gpt-x", "gpt-y"],
@@ -99,8 +100,8 @@ def test_real_process_lifecycle(dsh_service, tmp_path) -> None:
     assert config_dir.is_dir()
     assert not (service.paths.data_dir / "dsh").exists()
 
-    # DSH 原生 settings.yaml 已按公共接入 + 组级默认模型写入
-    settings_text = (config_dir / "settings.yaml").read_text(encoding="utf-8")
+    # 模型覆盖文件已按公共接入 + 组级默认模型写入
+    settings_text = (config_dir / "agent-bridge-model.patch.yml").read_text(encoding="utf-8")
     assert "agent-bridge" in settings_text
     assert "http://model.internal/v1" in settings_text
     assert "AGENT_BRIDGE_DSH_API_KEY" in settings_text
