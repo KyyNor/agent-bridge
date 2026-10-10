@@ -72,7 +72,7 @@ class PiRuntimeService(WorkspaceRuntimeService):
 
     def workspace_password(
         self, user_id: str, *, scope: str = "personal"
-    ) -> str | None:
+    ) -> str | None:  # noqa: D401 — 供 adapter 的 resolve_upstream_auth 调用
         """返回目标 runtime 的 pi-web 会话密码（代理据此换取 Cookie）。
 
         密码每次启动随机生成，只保存在 0600 的 runtime 状态文件中；未运行时

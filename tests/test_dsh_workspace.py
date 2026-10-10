@@ -167,7 +167,7 @@ def install_fakes(service, home, passwd_lookup, monkeypatch) -> FakeLauncher:
     monkeypatch.setattr(
         service.dsh,
         "_probe_port",
-        staticmethod(lambda port: any(int(start["port"]) == port for start in launcher.starts)),
+        staticmethod(lambda port, state=None: any(int(start["port"]) == port for start in launcher.starts)),
     )
     return launcher
 
@@ -1048,7 +1048,7 @@ def test_workspace_proxy_relays_websocket(service, home, passwd_lookup, monkeypa
         fake_pid = 424242
         monkeypatch.setattr(app_service.dsh, "_pid_alive", staticmethod(lambda pid: pid == fake_pid))
         monkeypatch.setattr(
-            app_service.dsh, "_probe_port", staticmethod(lambda port: port == server.port)
+            app_service.dsh, "_probe_port", staticmethod(lambda port, state=None: port == server.port)
         )
         app_service.dsh._write_state(
             "personal", "user1", {

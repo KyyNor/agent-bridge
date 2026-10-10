@@ -24,6 +24,8 @@ pi 官方没有 Web 服务模式，这里用 pi-web 提供浏览器界面。集�
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import logging
 import os
 import shlex
@@ -58,6 +60,21 @@ PI_SHARED_PROXY_PREFIX = "/agent-workspace-pi-shared"
 
 # pi-web 的会话 Cookie 名（30 天，HMAC 绑定 PI_WEB_PASSWORD）。
 PI_SESSION_COOKIE = "pi_web_session"
+# pi-web 以 scope "/" 注册的 service worker 及其附属产物：必须由代理拦截，
+# 否则会接管整个源站（含本平台 dashboard 与 DSH 工作台）。
+PI_BLOCKED_ASSETS = ("/sw.js", "/service-worker.js", "/workbox.js")
+
+
+def _merge_pi_session_cookie(cookie_header: str | None, *, pair: str) -> str | None:
+    """用刚换取的 pi 会话 Cookie 替换同名旧值，保留其他 pi Cookie。"""
+    name = pair.partition("=")[0].strip()
+    kept = [
+        segment.strip()
+        for segment in (cookie_header or "").split(";")
+        if segment.strip() and segment.split("=", 1)[0].strip() != name
+    ]
+    kept.append(pair)
+    return "; ".join(kept)
 # 代理换取 Cookie 的上游端点。
 PI_WEB_AUTH_PATH = "/api/web-auth"
 
@@ -90,9 +107,16 @@ class PiWorkspaceAdapter:
         return True
 
     def config_dir(self, identity: LinuxIdentity, runtime_owner: str) -> Path:
-        """``<linux home>/.pi/agent/<business-user>/``（共享时 owner 即 Linux 用户）。"""
+        """``<linux home>/.config/agent-bridge/pi/<runtime-owner>/``。
+
+        刻意**不**放在 pi 自己的默认 agent 目录（``~/.pi/agent``）下面：该目录
+        同时存放 pi 的 ``sessions/``、``extensions/``、``skills/``、``auth.json``
+        等真实条目，若隔离键恰好叫 ``sessions`` 之类就会指向 pi 自己的会话目录，
+        被改权限并写入托管配置；用户在终端跑 ``pi`` 时也会在自己的 agent 目录里
+        看到 Agent Bridge 的状态。
+        """
         return ensure_user_config_dir(
-            identity, ".pi", "agent", owner_name=runtime_owner
+            identity, ".config", "agent-bridge", "pi", owner_name=runtime_owner
         )
 
     def build_launch_plan(
@@ -167,6 +191,91 @@ class PiWorkspaceAdapter:
             display_name=self.display_name,
             auth_secret=password,
         )
+
+    def needs_proxy_auth(self) -> bool:
+        """Pi 的页面请求对每个请求都需要会话 Cookie，必须逐请求鉴权。"""
+        return True
+
+    def blocked_paths(self) -> tuple[str, ...]:
+        """拦截 pi-web 的根作用域 service worker 资源。
+
+        pi-web 注册 ``scope: "/"`` 的 ``/sw.js``，其 ``activate`` 里
+        ``clients.claim()`` 会立刻接管整个源站——包括本平台的 dashboard 与 DSH
+        工作台。同源只允许一个根作用域 SW，必须硬拦；注册失败对 pi-web 只是其
+        前端已 catch 的一条 console error。
+        """
+        return PI_BLOCKED_ASSETS
+
+    def filter_request_cookies(
+        self, cookie_header: str | None, *, authority: str
+    ) -> str | None:
+        """只保留 pi 自己的会话 Cookie（``pi_`` 前缀）。
+
+        平台会话（``agent_bridge_admin``）、统计等无关 Cookie 不透传给上游；
+        pi-web 的会话 Cookie 必须保持 ``Path=/`` 覆盖整站（其资源与 SSE 都用
+        根绝对路径请求）。
+        """
+        kept = [
+            segment.strip()
+            for segment in (cookie_header or "").split(";")
+            if segment.strip()
+            and segment.partition("=")[0].strip().startswith("pi_")
+        ]
+        return "; ".join(kept) if kept else None
+
+    async def resolve_upstream_auth(
+        self,
+        service,
+        *,
+        user_id: str,
+        target: str,
+        workspace_scope: str,
+        browser_cookie: str | None,
+    ) -> str | None:
+        """用状态文件里的密码换取 ``pi_web_session`` Cookie。
+
+        pi-web 的 HTTP Basic 只覆盖 ``/api/**``，页面请求一律 307 到
+        ``/login``，因此**不能**靠代理注入凭据完成鉴权；且其失败限流是单一
+        全局计数器、成功也不重置，一次错误尝试会把整实例（共享时是全组）
+        锁死最长 60 秒。正确做法是在服务端换取 Cookie 再转发，且换取请求
+        不携带 ``Authorization``。
+        """
+        try:
+            password = await asyncio.to_thread(
+                service.workspace_password(user_id, scope=workspace_scope)
+            )
+        except Exception:
+            logger.warning(
+                "Pi 工作台读取会话密码失败 user=%s scope=%s",
+                user_id,
+                workspace_scope,
+                exc_info=True,
+            )
+            return None
+        if not password:
+            return None
+        value = await asyncio.to_thread(exchange_session_cookie, target, password)
+        if value is None:
+            # 换取失败时不伪造凭据：调用方回落到浏览器自带 Cookie。
+            return None
+        return _merge_pi_session_cookie(
+            browser_cookie, pair=f"{PI_SESSION_COOKIE}={value}"
+        )
+
+    def probe_auth(self, state: dict[str, Any]) -> dict[str, str]:
+        """就绪探测带上 Basic Auth。
+
+        pi-web 启用 ``PI_WEB_PASSWORD`` 后 ``/api/home`` 需要认证：实测不带凭据
+        恒返回 401，只探测端口会让启动流程一直等不到就绪直至超时。这里用状态
+        文件里的会话密码构造 Basic 头（用户名固定为 ``pi``）。
+
+        该请求不会触碰 ``/api/web-auth``，因此不计入 pi-web 的登录失败限流。
+        """
+        password = str(state.get("auth_secret") or "")
+        if not password:
+            return {}
+        token = base64.b64encode(f"pi:{password}".encode("utf-8")).decode("ascii")
+        return {"authorization": f"Basic {token}"}
 
     def on_stopped(self, state: dict[str, Any], *, scope: str, runtime_key: str) -> None:
         # 停止后移除托管 MCP 条目，避免下次按需启动带着死 token 启动。

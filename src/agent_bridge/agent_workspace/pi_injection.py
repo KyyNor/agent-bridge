@@ -17,14 +17,20 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
+from agent_bridge.agent_workspace import safe_files
 from agent_bridge.agent_workspace.capability import WorkspaceSelection
 from agent_bridge.agent_workspace.launcher import LinuxIdentity
 
 logger = logging.getLogger(__name__)
+
+# 复用通用安全读写（不跟随软链）：本模块以 root 身份在用户可控目录下工作，
+# 固定名临时文件与软链都可能造成任意文件覆盖或数据外泄。
+_read_json = safe_files.read_managed_json
+write_managed_json = safe_files.write_managed_json_atomic
+ensure_owner = safe_files.ensure_owner
 
 # 托管条目标识；与用户自有条目按 key 区分，合并时只覆盖同 key。
 MANAGED_PROVIDER_KEY = "agent-bridge"
@@ -37,43 +43,6 @@ MCP_TOOL_TIMEOUT_MS = 300_000
 MODELS_FILENAME = "models.json"
 SETTINGS_FILENAME = "settings.json"
 MCP_FILENAME = "mcp.json"
-
-
-def _read_json(path: Path) -> dict[str, Any]:
-    """读取 JSON 对象；文件缺失或损坏时返回空字典（不阻断启动）。"""
-    if not path.exists():
-        return {}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        logger.warning(
-            "Pi 配置解析失败，按空配置处理 path=%s（将只写托管条目）", path
-        )
-        return {}
-    return payload if isinstance(payload, dict) else {}
-
-
-def write_managed_json(path: Path, payload: dict[str, Any], *, uid: int, gid: int) -> None:
-    """原子写入 JSON（0600，归属目标 Linux 用户）。"""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".agent-bridge.tmp")
-    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(tmp, path)
-    try:
-        path.chmod(0o600)
-    except OSError as exc:
-        logger.warning("Pi 配置 chmod 失败 path=%s 原因=%s", path, exc)
-    ensure_owner(path, uid=uid, gid=gid)
-
-
-def ensure_owner(path: Path, *, uid: int, gid: int) -> None:
-    """root 下把文件归属目标 Linux 用户（非 root 或同用户时跳过）。"""
-    if os.geteuid() != 0 or uid == os.geteuid():
-        return
-    try:
-        os.chown(path, uid, gid)
-    except OSError as exc:
-        logger.warning("Pi 配置 chown 失败 path=%s uid=%s 原因=%s", path, uid, exc)
 
 
 # -- models.json --
@@ -113,7 +82,7 @@ def write_models(
         models=models,
         api_key_env=PI_API_KEY_ENV,
     )
-    write_managed_json(path, payload, uid=uid, gid=gid)
+    write_managed_json(path, payload, uid=uid, gid=gid, label="Pi models")
     return path
 
 
@@ -121,10 +90,18 @@ def write_models(
 
 
 def build_settings_payload(existing: dict[str, Any], *, default_model: str) -> dict[str, Any]:
-    """写入组级默认模型，保留其余用户设置。"""
+    """写入组级默认模型，保留其余用户设置。
+
+    pi 解析默认模型需要 ``defaultProvider`` + ``defaultModel`` **成对**（见
+    ``pi-coding-agent`` 的 ``findInitialModel``：先按 CLI 参数，再按 session，
+    再读 settings 的 defaultProvider/defaultModel）。只写 ``defaultModel`` 时，
+    provider 会回落到用户上一次的值或 pi 自动选择的 provider，在那里找不到
+    该模型就会报错或被替换——组级默认模型将实际不生效。
+    """
     payload = dict(existing)
     if default_model:
         payload["defaultModel"] = default_model
+        payload["defaultProvider"] = MANAGED_PROVIDER_KEY
     return payload
 
 
@@ -136,7 +113,7 @@ def write_settings(
     payload = build_settings_payload(
         _read_json(path), default_model=default_model
     )
-    write_managed_json(path, payload, uid=uid, gid=gid)
+    write_managed_json(path, payload, uid=uid, gid=gid, label="Pi settings")
     return path
 
 
@@ -187,7 +164,7 @@ def write_mcp_servers(
         profile_key=profile_key,
         capability_token=capability_token,
     )
-    write_managed_json(path, payload, uid=uid, gid=gid)
+    write_managed_json(path, payload, uid=uid, gid=gid, label="Pi mcp")
     return path
 
 

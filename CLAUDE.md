@@ -212,9 +212,10 @@ Pi 官方没有 Web 服务模式，界面由社区实现 `@agegr/pi-web` 提供�
 `agent_workspace/pi-versions.txt`（精确版本，随版本发布，成对升级）。部署依赖
 Node ≥ 22.19；其内置终端依赖 node-pty，0.11.0 自带 linux-x64/arm64 预编译二进制。
 
-- **配置目录**：`<linux home>/.pi/agent/<business-user>/`（个人）或
-  `<linux home>/.pi/agent/<linux-user>/`（共享，经 `PI_CODING_AGENT_DIR` 整体重定向）。
-  不进入 `AGENT_BRIDGE_ROOT/data`，停止实例不删用户配置。
+- **配置目录**：`<linux home>/.config/agent-bridge/pi/<runtime-owner>/`，经
+  `PI_CODING_AGENT_DIR` 整体重定向（个人 = 业务用户，共享 = Linux 用户）。**刻意不放在
+  pi 自己的 `~/.pi/agent` 下**：该目录同时存放 pi 的 `sessions/`、`extensions/`、
+  `auth.json` 等真实条目，隔离键撞名会指向 pi 自己的会话目录。停止实例不删用户配置。
 - **模型与能力平面注入**：`models.json` / `settings.json` / `mcp.json` 只**合并**托管
   条目（`providers.agent-bridge`、`mcpServers.agent-bridge`），保留用户自有条目。
   API Key 与 capability 只经环境变量传递，**token 不落盘**——`mcp.json` 里写的是
@@ -228,6 +229,11 @@ Node ≥ 22.19；其内置终端依赖 node-pty，0.11.0 自带 linux-x64/arm64 
 - **service worker 必须拦截**：pi-web 注册 `scope: "/"` 的 `/sw.js`，其
   `clients.claim()` 会立刻接管整个源站（含本平台 dashboard 与 DSH 工作台）。同源只
   允许一个根作用域 SW，代理层对 `/sw.js` 硬返 404（注册失败在其前端已被 catch）。
+- **就绪探测必须带凭据**：`PI_WEB_PASSWORD` 启用后 `/api/home` 需认证，无凭据探测恒
+  401，启动会一直等到超时。由 `adapter.probe_auth` 用状态文件里的密码构造 Basic 头
+  （用户名固定 `pi`）；该请求不触碰 `/api/web-auth`，因此不计入登录限流。
+- **组级默认模型必须成对写入** `defaultProvider` + `defaultModel`：pi 解析默认模型
+  需要两者配对，只写 `defaultModel` 会回落到用户上一次的 provider 而找不到该模型。
 - **无 WebSocket**：聊天流式全部走 SSE；**不支持 basePath**，只能走与 DSH 相同的
   「剥前缀 + 根路径认领」形态。
 

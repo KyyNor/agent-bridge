@@ -151,7 +151,9 @@ class WorkspaceRuntimeService:
                     and (state.get("profile_key") or None) != workspace.profile_key
                 )
                 alive = self._pid_alive(int(state.get("pid") or 0))
-                healthy = alive and self._probe_port(int(state.get("port") or 0))
+                healthy = alive and self._probe_port(
+                    int(state.get("port") or 0), state
+                )
                 if not group_changed and not profile_changed and healthy:
                     self._touch_state(scope, runtime_key)
                     logger.info(
@@ -246,7 +248,7 @@ class WorkspaceRuntimeService:
                 state
                 and capability
                 and self._pid_alive(int(state.get("pid") or 0))
-                and self._probe_port(int(state.get("port") or 0))
+                and self._probe_port(int(state.get("port") or 0), state)
                 and state.get("profile_key") == cleaned_profile
                 and state.get("group_key") == group_key
                 and capability.profile_key == cleaned_profile
@@ -476,7 +478,7 @@ class WorkspaceRuntimeService:
                 return None
             pid = int(state.get("pid") or 0)
             port = int(state.get("port") or 0)
-            if not (pid and port and self._pid_alive(pid) and self._probe_port(port)):
+            if not (pid and port and self._pid_alive(pid) and self._probe_port(port, state)):
                 return None
             self._touch_state(scope, runtime_key)
             return self._base_url_for_port(port)
@@ -627,7 +629,9 @@ class WorkspaceRuntimeService:
         self._processes[int(process.pid)] = process
         self._write_state(scope, runtime_key, state)
 
-        if not self._wait_until_ready(port, process=process, timeout=plan.startup_timeout_seconds):
+        if not self._wait_until_ready(
+            port, process=process, timeout=plan.startup_timeout_seconds, state=state
+        ):
             exit_code = process.poll()
             tail = self._tail_log(log_path)
             self._terminate_pid(
@@ -690,10 +694,12 @@ class WorkspaceRuntimeService:
         )
         return stopped
 
-    def _wait_until_ready(self, port: int, *, process, timeout: float) -> bool:
+    def _wait_until_ready(
+        self, port: int, *, process, timeout: float, state: dict[str, Any] | None = None
+    ) -> bool:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if self._probe_port(port):
+            if self._probe_port(port, state):
                 return True
             if process.poll() is not None:
                 logger.error(
@@ -712,12 +718,23 @@ class WorkspaceRuntimeService:
         )
         return False
 
-    def _probe_port(self, port: int) -> bool:
+    def _probe_port(self, port: int, state: dict[str, Any] | None = None) -> bool:
+        """探测 runtime 是否就绪。
+
+        启用鉴权的后端必须由 adapter 提供探测凭据（见
+        ``WorkspaceAgentAdapter.probe_auth``），否则探测恒 401/307，
+        启动流程会一直等到超时。
+        """
         if port <= 0:
             return False
+        headers: dict[str, str] = {}
+        if state:
+            headers = self.adapter.probe_auth(state)
         try:
             response = httpx.get(
-                self._base_url_for_port(port) + self.adapter.probe_path, timeout=1.0
+                self._base_url_for_port(port) + self.adapter.probe_path,
+                timeout=1.0,
+                headers=headers or None,
             )
         except Exception:
             return False
@@ -751,7 +768,7 @@ class WorkspaceRuntimeService:
         started_at = float(state.get("started_at") or 0.0)
         last_access_at = float(state.get("last_access_at") or started_at)
         alive = self._pid_alive(pid)
-        healthy = alive and self._probe_port(port)
+        healthy = alive and self._probe_port(port, state)
         if healthy:
             status = "running"
         elif alive and (time.time() - started_at) < self.adapter.startup_timeout_seconds:
@@ -1030,7 +1047,12 @@ class WorkspaceRuntimeService:
             if not tree:
                 targets.add(pid)
         if mark:
-            targets |= self._process_tree.marked_pids(mark)
+            # 必须传入该后端的标记环境变量名：各 Agent 的标记值格式相同
+            # （scope:runtime_key），用错变量名会误杀另一种 Agent 的进程，
+            # 且回收不到本 Agent 自己的 detached 孤儿。
+            targets |= self._process_tree.marked_pids(
+                mark, mark_env=self.adapter.mark_env
+            )
         targets = self._process_tree.discard_own_process(targets)
         return {target for target in targets if self._pid_alive(target)}
 

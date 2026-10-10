@@ -17,7 +17,7 @@ import pytest
 from agent_bridge.api.workspace_proxy import (
     PROXY_PREFIX_ROUTES,
     RESERVED_PATH_PREFIXES,
-    is_blocked_pi_asset,
+    is_blocked_asset,
     match_workspace_route,
     workspace_route_for_referer,
 )
@@ -63,26 +63,48 @@ def test_referer_routes_per_agent() -> None:
 # -- service worker 拦截 --
 
 
+def _pi_adapter():
+    from agent_bridge.agent_workspace.adapters.pi import PiWorkspaceAdapter
+
+    return PiWorkspaceAdapter(configs=None, mcp_url="http://127.0.0.1:8080/mcp")
+
+
+def _dsh_adapter():
+    from agent_bridge.agent_workspace.adapters.dsh import DshWorkspaceAdapter
+
+    return DshWorkspaceAdapter(configs=None, mcp_url="http://127.0.0.1:8080/mcp")
+
+
 @pytest.mark.parametrize("path", ["/sw.js", "/sw.js?v=123", "/service-worker.js", "/workbox.js"])
 def test_blocked_pi_service_worker_paths(path: str) -> None:
-    assert is_blocked_pi_asset(path) is True
+    assert is_blocked_asset(_pi_adapter(), path) is True
 
 
 @pytest.mark.parametrize(
     "path", ["/", "/login", "/api/home", "/_next/static/chunks/a.js", "/icons/icon-192.png"]
 )
 def test_normal_pi_paths_not_blocked(path: str) -> None:
-    assert is_blocked_pi_asset(path) is False
+    assert is_blocked_asset(_pi_adapter(), path) is False
+
+
+def test_dsh_blocks_nothing() -> None:
+    """DSH 不声明拦截资源（由 adapter 而非代理硬编码）。"""
+    for path in ("/sw.js", "/", "/api/home"):
+        assert is_blocked_asset(_dsh_adapter(), path) is False
+
+
+def test_proxy_auth_dispatch_is_adapter_driven() -> None:
+    """鉴权分发由 adapter 声明，代理不再按 agent 写死分支。"""
+    assert _pi_adapter().needs_proxy_auth() is True
+    assert _dsh_adapter().needs_proxy_auth() is False
 
 
 # -- Cookie 收敛与鉴权 --
 
 
 def test_pi_request_cookies_only_forward_pi_scoped_cookies() -> None:
-    from agent_bridge.api.workspace_proxy import _pi_request_cookies
-
     header = "agent_bridge_admin=admin-secret; pi_web_session=abc; posthog=xyz"
-    kept = _pi_request_cookies(header)
+    kept = _pi_adapter().filter_request_cookies(header, authority="127.0.0.1:48500")
     assert kept == "pi_web_session=abc"
     # 平台会话与统计 Cookie 不透传给 pi-web
     assert "admin-secret" not in kept
@@ -90,14 +112,13 @@ def test_pi_request_cookies_only_forward_pi_scoped_cookies() -> None:
 
 
 def test_pi_request_cookies_returns_none_when_empty() -> None:
-    from agent_bridge.api.workspace_proxy import _pi_request_cookies
-
-    assert _pi_request_cookies("agent_bridge_admin=x") is None
-    assert _pi_request_cookies(None) is None
+    adapter = _pi_adapter()
+    assert adapter.filter_request_cookies("agent_bridge_admin=x", authority="a:1") is None
+    assert adapter.filter_request_cookies(None, authority="a:1") is None
 
 
 def test_merge_pi_session_cookie_replaces_stale_value() -> None:
-    from agent_bridge.api.workspace_proxy import _merge_pi_session_cookie
+    from agent_bridge.agent_workspace.adapters.pi import _merge_pi_session_cookie
 
     merged = _merge_pi_session_cookie(
         "pi_web_session=old; pi_other=keep", pair=f"{PI_SESSION_COOKIE}=fresh"

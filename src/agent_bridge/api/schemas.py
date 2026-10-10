@@ -41,7 +41,9 @@ class DshGroupConfigUpdateRequest(BaseModel):
 class DshRuntimeConfigUpdateRequest(BaseModel):
     web_command: str = Field(default="", max_length=1024)
     # Pi 工作台的启动命令模板（与 web_command 并列；组级配置两种 Agent 共享）。
-    pi_web_command: str = Field(default="", max_length=1024)
+    # 缺省 None 表示"未携带"，服务端保留已保存值（旧客户端不认识该字段时，
+    # 不能把管理员自定义的启动命令静默重置为默认）；显式传空串表示恢复默认。
+    pi_web_command: str | None = Field(default=None, max_length=1024)
     idle_timeout_minutes: int = Field(ge=1, le=43200)
     base_url: str = Field(default="", max_length=2048)
     available_models: list[str] = Field(default_factory=list, max_length=200)

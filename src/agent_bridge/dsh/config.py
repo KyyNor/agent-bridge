@@ -196,7 +196,7 @@ class DshConfigService:
         idle_timeout_minutes: int,
         base_url: str = "",
         available_models: list[str] | None = None,
-        pi_web_command: str = "",
+        pi_web_command: str | None = None,
         expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
@@ -210,7 +210,14 @@ class DshConfigService:
         )
         cleaned_command = normalize_web_command(web_command)
         cleaned_timeout = normalize_idle_timeout_minutes(idle_timeout_minutes)
-        cleaned_pi_command = normalize_pi_web_command(pi_web_command)
+        # ``None`` 表示"本次请求未携带"（旧客户端不认识该字段）：保留已保存值，
+        # 不能回落到默认值——否则任何旧客户端保存一次配置就会静默清掉管理员
+        # 自定义的 Pi 启动命令。显式传空串表示"恢复默认"。
+        cleaned_pi_command = (
+            normalize_pi_web_command(pi_web_command)
+            if pi_web_command is not None
+            else str(current.get("pi_web_command") or "") or normalize_pi_web_command("")
+        )
         saved = self._repo.save_runtime_config(
             web_command=cleaned_command,
             pi_web_command=cleaned_pi_command,

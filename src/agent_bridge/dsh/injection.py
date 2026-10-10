@@ -34,6 +34,7 @@ from typing import Any
 
 import yaml
 
+from agent_bridge.agent_workspace import safe_files
 from agent_bridge.agent_workspace.launcher import LinuxIdentity, demotion_kwargs
 
 logger = logging.getLogger(__name__)
@@ -249,29 +250,31 @@ def resolve_model_overlay(
     )
 
 
-def write_overlay(path: Path, entries: list[dict[str, Any]]) -> Path:
-    """写入覆盖文件；DSH 以目标 Linux 用户读取，权限收紧到 0600。内容未变化时不触盘。"""
+def write_overlay(
+    path: Path, entries: list[dict[str, Any]], *, uid: int | None = None, gid: int | None = None
+) -> Path:
+    """写入覆盖文件；内容未变化时不触盘。
+
+    本模块以 root 身份在用户可控的 ``DSH_HOME`` 下工作，因此写入必须走
+    :func:`safe_files.write_text_secure`：随机名临时文件 + ``O_NOFOLLOW`` +
+    ``O_EXCL``，写入后立即 ``fchmod(0600)`` 再原子改名。固定名临时文件与软链
+    都可能造成任意文件覆盖。
+    """
     text = dump_entry_list(entries)
-    if path.exists():
-        try:
-            if path.read_text(encoding="utf-8") == text:
-                return path
-        except OSError:
-            pass
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-    try:
-        path.chmod(0o600)
-    except OSError as exc:
-        logger.warning("DSH 模型覆盖文件 chmod 失败 path=%s 原因=%s", path, exc)
+    if path.exists() and safe_files.read_text_secure(path, label="DSH 模型覆盖文件") == text:
+        return path
+    safe_files.write_text_secure(
+        path,
+        text,
+        uid=os.geteuid() if uid is None else uid,
+        gid=os.getegid() if gid is None else gid,
+        label="DSH 模型覆盖文件",
+    )
     return path
 
 
 def remove_overlay(path: Path) -> None:
-    try:
-        path.unlink(missing_ok=True)
-    except OSError as exc:
-        logger.warning("DSH 模型覆盖文件删除失败 path=%s 原因=%s", path, exc)
+    safe_files.unlink_if_exists(path, label="DSH 模型覆盖文件")
 
 
 def _legacy_llm_config(dsh_home: Path) -> Any:
@@ -284,8 +287,12 @@ def _legacy_llm_config(dsh_home: Path) -> Any:
         path = Path(dsh_home) / name
         if not path.exists():
             continue
+        text = safe_files.read_text_secure(path, label="DSH 遗留 settings")
+        if text is None:
+            logger.warning("DSH 遗留 settings 读取失败（软链或权限不足），忽略 path=%s", path)
+            return None
         try:
-            payload = load_entry_list(path.read_text(encoding="utf-8"))
+            payload = load_entry_list(text)
         except (OSError, yaml.YAMLError):
             logger.warning("DSH 遗留 settings 解析失败，忽略其中的供应商 path=%s", path, exc_info=True)
             return None

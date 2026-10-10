@@ -47,12 +47,14 @@ from agent_bridge.api.dashboard_proxy import (
     _proxy_stream_response,
 )
 from agent_bridge.core.domain import AgentBridgeError, BackendUnavailable
+from agent_bridge.agent_workspace.adapters import ADAPTERS
 from agent_bridge.agent_workspace.adapters.pi import (
     PI_PERSONAL_PROXY_PREFIX as PI_PROXY_PREFIX,
     PI_SHARED_PROXY_PREFIX as PI_PROXY_SHARED_PREFIX,
     PI_SESSION_COOKIE,
     exchange_session_cookie,
 )
+from agent_bridge.agent_workspace.cookies import dsh_session_cookie_name
 from agent_bridge.agent_workspace.scopes import (
     WORKSPACE_AGENT_DSH,
     WORKSPACE_AGENT_PI,
@@ -130,17 +132,6 @@ def _scope_prefix(workspace_scope: str, agent: str = WORKSPACE_AGENT_DSH) -> str
     """(agent, scope) 对应的代理前缀。"""
     key = "shared" if workspace_scope == WORKSPACE_SCOPE_SHARED else "personal"
     return PROXY_PREFIXES_BY_AGENT[agent][key]
-
-
-def dsh_session_cookie_name(authority: str) -> str:
-    """DSH 浏览器会话 Cookie 名：``dsh-auth-`` + authority 的 SHA-256（base64url）。
-
-    DSH 把会话 Cookie 绑定到请求 authority（Host:port），并用进程内 signing
-    secret 签名——因此它跨进程重启后必然失效，只能用于定位自己换取的 Cookie，
-    不能当作“已完成鉴权”的依据。
-    """
-    digest = hashlib.sha256(authority.encode("utf-8")).digest()
-    return "dsh-auth-" + base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
 
 
 def match_workspace_path(path: str, prefix: str = WORKSPACE_PROXY_PREFIX) -> str | None:
@@ -274,18 +265,23 @@ def _browser_marker_override(scope: Scope) -> dict[str, str]:
     return {"sec-fetch-site": "same-origin"}
 
 
-def _request_overrides(scope: Scope, target: str) -> dict[str, str | None]:
-    """通用请求头覆盖：Origin 改写 + 浏览器信号补齐 + Cookie 收敛到 DSH 范围。"""
+def _request_overrides(scope: Scope, target: str, adapter) -> dict[str, str | None]:
+    """通用请求头覆盖：Origin 改写 + 浏览器信号补齐 + Cookie 收敛到后端范围。
+
+    Cookie 过滤由 adapter 决定（DSH 保留 ``dsh-*``、Pi 保留 ``pi_*``），平台
+    会话与统计 Cookie 一律不透传。
+    """
+    authority = urlsplit(target).netloc
     return {
         **_origin_override(scope, target),
         **_browser_marker_override(scope),
-        "cookie": _dsh_request_cookies(
-            _header_value(scope, "cookie"), authority=urlsplit(target).netloc
+        "cookie": adapter.filter_request_cookies(
+            _header_value(scope, "cookie"), authority=authority
         ),
     }
 
 
-def _forward_headers_for_exchange(scope: Scope, target: str) -> dict[str, str]:
+def _forward_headers_for_exchange(scope: Scope, target: str) -> dict[str, str]:  # noqa: D401
     """构造 token→Cookie 交换请求头：不带任何浏览器 Cookie。
 
     交换必须从干净会话开始：真实 DSH 在命中旧会话 Cookie 时可能只回 303 而
@@ -404,48 +400,13 @@ def _dsh_request_cookies(cookie_header: str | None, *, authority: str) -> str | 
     return "; ".join(kept) if kept else None
 
 
-# pi-web 的 service worker 会以 scope "/" 注册并 clients.claim()，接管整个源站。
-# 同源只允许一个根作用域 SW，必须硬拦（注册失败在其前端已被 catch）。
-PI_BLOCKED_ASSETS = ("/sw.js", "/service-worker.js", "/workbox.js")
-
-
-def is_blocked_pi_asset(path: str) -> bool:
-    """该路径是否是必须拦截的 pi-web 根作用域 service worker 资源。"""
+def is_blocked_asset(adapter, path: str) -> bool:
+    """路径是否命中该 adapter 声明的必须拦截的上游资源。"""
+    blocked = adapter.blocked_paths()
+    if not blocked:
+        return False
     bare = path.split("?", 1)[0]
-    return bare in PI_BLOCKED_ASSETS
-
-
-def pi_session_cookie_name() -> str:
-    """pi-web 会话 Cookie 名（固定名，HMAC 绑定 PI_WEB_PASSWORD）。"""
-    return PI_SESSION_COOKIE
-
-
-def _pi_request_cookies(cookie_header: str | None) -> str | None:
-    """收敛发往 pi-web 的 Cookie：只保留 pi 自己的会话 Cookie。
-
-    平台会话（``agent_bridge_admin``）、统计等无关 Cookie 不透传给上游；
-    pi-web 的会话 Cookie 必须保持 ``Path=/`` 覆盖整站（其资源与 SSE 都用根
-    绝对路径请求）。
-    """
-    kept = [
-        segment.strip()
-        for segment in (cookie_header or "").split(";")
-        if segment.strip()
-        and segment.partition("=")[0].strip().startswith("pi_")
-    ]
-    return "; ".join(kept) if kept else None
-
-
-def _merge_pi_session_cookie(cookie_header: str | None, *, pair: str) -> str | None:
-    """用刚换取的 pi 会话 Cookie 替换同名旧值。"""
-    name = pair.partition("=")[0].strip()
-    kept = [
-        segment.strip()
-        for segment in (cookie_header or "").split(";")
-        if segment.strip() and segment.split("=", 1)[0].strip() != name
-    ]
-    kept.append(pair)
-    return "; ".join(kept)
+    return bare in blocked
 
 
 def _redirect_target(location: str, *, target: str) -> tuple[str, str]:
@@ -526,13 +487,13 @@ class AgentWorkspaceProxyMiddleware:
             agent, workspace_scope, upstream_path = escaped
         prefix = _scope_prefix(workspace_scope, agent)
 
-        # pi-web 会注册 scope 为 "/" 的 service worker，其 clients.claim() 会
-        # 立刻接管整个源站（含本平台的 dashboard 与 DSH 工作台）。同源只能有
-        # 一个根作用域 SW，必须在代理层硬拦；注册失败对 pi-web 只是一条已
-        # catch 的 console error（见其 PwaRegistration 组件）。
-        if agent == WORKSPACE_AGENT_PI and is_blocked_pi_asset(path):
+        # 由 adapter 声明必须硬拦的上游资源（例如以 scope "/" 注册、会接管
+        # 整个源站的 service worker）。代理只执行拦截，不含后端知识。
+        adapter = self._adapter_for(agent)
+        if is_blocked_asset(adapter, path):
             logger.warning(
-                "已拦截 pi-web 根作用域 service worker 请求 path=%s（会接管整个源站）",
+                "已拦截 %s 的越界资源请求 path=%s",
+                adapter.display_name,
                 path,
             )
             await _send_plain(send, 404, b"Not Found")
@@ -561,10 +522,21 @@ class AgentWorkspaceProxyMiddleware:
             )
             return
 
-        if agent == WORKSPACE_AGENT_PI:
-            # Pi 没有启动 token 机制：代理用状态文件里的会话密码换取
-            # pi_web_session Cookie 后转发，浏览器无需感知密码。
-            cookie = await self._pi_session_cookie(user_id, target, workspace_scope)
+        if adapter.needs_proxy_auth():
+            # 需要代理鉴权的后端（Pi）：由 adapter 用后端自己的凭据来源换取
+            # 上游 Cookie，浏览器不接触密码/token；Cookie 过滤也交给 adapter，
+            # 换取失败时回落到浏览器自带且已按后端范围收敛的 Cookie。
+            authority = urlsplit(target).netloc
+            browser_cookie = adapter.filter_request_cookies(
+                _header_value(scope, "cookie"), authority=authority
+            )
+            cookie = await adapter.resolve_upstream_auth(
+                self.service,
+                user_id=user_id,
+                target=target,
+                workspace_scope=workspace_scope,
+                browser_cookie=browser_cookie,
+            )
             await _proxy_stream_response(
                 scope,
                 receive,
@@ -573,13 +545,13 @@ class AgentWorkspaceProxyMiddleware:
                 target=target,
                 location_prefix=prefix,
                 location_key="",
-                error_label="Pi workspace proxy failed",
+                error_label=f"{adapter.display_name} workspace proxy failed",
                 response_header_builder=lambda headers: _workspace_response_headers(
                     headers, target=target, prefix=prefix
                 ),
                 request_header_overrides={
-                    **_request_overrides(scope, target),
-                    **({"cookie": cookie} if cookie else {}),
+                    **_request_overrides(scope, target, adapter),
+                    "cookie": cookie or browser_cookie,
                 },
             )
             return
@@ -612,35 +584,23 @@ class AgentWorkspaceProxyMiddleware:
             response_header_builder=lambda headers: _workspace_response_headers(
                 headers, target=target, prefix=prefix
             ),
-            request_header_overrides=_request_overrides(scope, target),
+            request_header_overrides=_request_overrides(scope, target, adapter),
         )
 
-    async def _pi_session_cookie(
-        self, user_id: str, target: str, workspace_scope: str
-    ) -> str | None:
-        """为 Pi 请求取得会话 Cookie（与浏览器已有 Cookie 合并）。"""
-        try:
-            password = await asyncio.to_thread(
-                _resolve_runtime_service(self.service, WORKSPACE_AGENT_PI).workspace_password,
-                user_id,
-                scope=workspace_scope,
-            )
-        except Exception:
-            logger.warning(
-                "Pi 工作台读取会话密码失败 user=%s scope=%s", user_id, workspace_scope,
-                exc_info=True,
-            )
-            return None
-        if not password:
-            return None
-        value = await asyncio.to_thread(exchange_session_cookie, target, password)
-        if value is None:
-            # 换取失败时不伪造凭据：如实代理，pi-web 会返回 401。
-            return None
-        pair = f"{PI_SESSION_COOKIE}={value}"
-        return _merge_pi_session_cookie(
-            _pi_request_cookies(_header_value(scope, "cookie")), pair=pair
-        )
+    def _adapter_for(self, agent: str):
+        """取该 agent 的 adapter（用于取后端特定钩子）。
+
+        旧替身/历史装配可能没有 ``adapter`` 属性，此时回落到按 agent 构造的
+        默认 adapter，保证 Cookie 过滤等钩子始终可用。
+        """
+        runtime = _resolve_runtime_service(self.service, agent)
+        adapter = getattr(runtime, "adapter", None)
+        if adapter is not None:
+            return adapter
+        adapter_cls = ADAPTERS.get(agent)
+        if adapter_cls is None:
+            raise BackendUnavailable(f"未知的工作台 Agent：{agent}")
+        return adapter_cls(configs=getattr(self.service, "dsh_configs", None), mcp_url="")
 
     def _current_user_id(self, scope: Scope) -> str:
         """解析当前业务用户（认领隔离维度）；解析失败返回空串，仅影响记忆键。"""
@@ -656,10 +616,13 @@ class AgentWorkspaceProxyMiddleware:
     ) -> tuple[str, str, str] | None:
         """前缀外请求的归属解析：返回 ``(scope, 上游路径)``。
 
-        HTTP 按 Referer 认领：Referer 指向任一工作台前缀时，scope 即该前缀
-        的范围；嵌套文档等非前缀 Referer 先查该用户的短期记忆（该用户最近
-        把哪条路径认领给了哪个 scope），再走同 authority 非保留路径兜底（默认
-        个人）。WebSocket 无 Referer，按同源 Origin 认领，默认个人范围。
+        HTTP 按 Referer 认领：Referer 指向任一工作台前缀时，(agent, scope) 即
+        该前缀；嵌套文档等非前缀 Referer 先查该用户的短期记忆（该用户最近把哪
+        条路径认领给了哪个 agent/scope）。仍无法判定时返回 None，**不猜归属**——
+        认领错误会触发另一后端的按需启动。
+
+        WebSocket 无 Referer，按同源 Origin 认领；Agent Bridge 自身没有 WS 端点，
+        故同源 WS 归工作台（默认 DSH 个人范围，与既有行为一致）。
         """
         upstream_path = workspace_escape_path(scope)
         if upstream_path is None:
@@ -678,9 +641,25 @@ class AgentWorkspaceProxyMiddleware:
             if remembered is not None:
                 self._remember_claim(user_id, upstream_path, remembered)
                 return remembered[0], remembered[1], upstream_path
-        default = (WORKSPACE_AGENT_DSH, WORKSPACE_SCOPE_PERSONAL)
-        self._remember_claim(user_id, upstream_path, default)
-        return default[0], default[1], upstream_path
+        # 兜底：Referer 未命中任何工作台前缀时，**不猜**归属。
+        #
+        # 旧实现默认归到 (dsh, personal)，但认领错误的后果不只是 404：代理会
+        # 触发 DSH 按需启动，在用户根本没打开 DSH 工作台时拉起一个进程；共享
+        # 范围下还可能命中他人已运行的共享 runtime。
+        #
+        # pi-web 0.11.0 实测不使用 pushState 把地址改成无前缀路径（其路由与
+        # 资源请求都带 ``/api/**``、``/_next/**``，且 Referer 指向带前缀的页面），
+        # 因此真实工作台请求总能通过前缀 Referer 或认领记忆命中。仍无法判定时
+        # 不认领，交回平台自身路由处理。
+        if referer is not None:
+            same_authority = _same_authority_referer(scope, urlsplit(referer).netloc)
+            if same_authority and not is_reserved_path(referer_path or "/"):
+                logger.warning(
+                    "工作台逃逸请求无法确定归属（Referer=%s），已按平台路由处理 path=%s",
+                    referer_path,
+                    upstream_path,
+                )
+        return None
 
     def _remember_claim(
         self, user_id: str, path: str, route: tuple[str, str]
@@ -779,6 +758,7 @@ class AgentWorkspaceProxyMiddleware:
         """
         target_parts = urlsplit(target)
         authority = target_parts.netloc
+        adapter = self._adapter_for(WORKSPACE_AGENT_DSH)
 
         exchange = await self._perform_exchange(
             scope, user_id=user_id, target=target, upstream_path=upstream_path, auth_query=auth_query
@@ -833,7 +813,7 @@ class AgentWorkspaceProxyMiddleware:
                 response_header_builder=lambda headers: _workspace_response_headers(
                     headers, target=target, prefix=prefix
                 ),
-                request_header_overrides=_request_overrides(scope, target),
+                request_header_overrides=_request_overrides(scope, target, adapter),
             )
             return
 

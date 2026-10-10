@@ -106,7 +106,7 @@ def install_fakes(service, home, passwd_lookup, monkeypatch) -> FakeLauncher:
     monkeypatch.setattr(
         service.dsh,
         "_probe_port",
-        staticmethod(lambda port: any(int(start["port"]) == port for start in launcher.starts)),
+        staticmethod(lambda port, state=None: any(int(start["port"]) == port for start in launcher.starts)),
     )
     # 假 pid 不存在于真实进程表：终止一并桩掉（与 patch_lifecycle 同一约定）
     monkeypatch.setattr(
@@ -551,7 +551,7 @@ def test_shared_unhealthy_restart_keeps_active_profile_and_mcp(
     monkeypatch.setattr(
         service.dsh,
         "_probe_port",
-        staticmethod(lambda port: not (port == first_port and len(launcher.starts) == 1)),
+        staticmethod(lambda port, state=None: not (port == first_port and len(launcher.starts) == 1)),
     )
 
     # 后续成员进入触发 ensure_running；重启后必须仍是 safe 平面且 MCP 可用。
@@ -631,8 +631,9 @@ def test_proxy_escape_claims_by_referer_scope() -> None:
     assert resolve("/studio/page", "http://example.internal/studio/") == ("dsh", "shared", "/studio/page")
     assert resolve("/studio/page/asset.css", "http://example.internal/studio/page") == ("dsh", "shared", "/studio/page/asset.css")
 
-    # 不同用户相同路径互不串 scope：user2 没有 user1 的认领记忆，回落 personal。
-    assert resolve("/studio/page2", "http://example.internal/studio/", user="user2") == ("dsh", "personal", "/studio/page2")
+    # 不同用户相同路径互不串：user2 没有 user1 的认领记忆，因此**不认领**
+    # （不得回落 DSH —— 认领错误会触发另一后端的按需启动）。
+    assert resolve("/studio/page2", "http://example.internal/studio/", user="user2") is None
     # user2 随后用自己的个人工作台认领同路径，不影响 user1 的 shared 记忆。
     assert resolve("/studio/", "http://example.internal/agent-workspace/", user="user2") == ("dsh", "personal", "/studio/")
     assert resolve("/studio/page", "http://example.internal/studio/") == ("dsh", "shared", "/studio/page")
@@ -641,9 +642,9 @@ def test_proxy_escape_claims_by_referer_scope() -> None:
     assert resolve("/studio/", "http://example.internal/agent-workspace-shared/x") == ("dsh", "shared", "/studio/")
     assert resolve("/studio/page2", "http://example.internal/studio/") == ("dsh", "shared", "/studio/page2")
 
-    # 无前缀且无记忆的 Referer 回落 personal
+    # 无前缀且无记忆的 Referer 不认领：交回平台自身路由，绝不猜成 DSH。
     middleware._claimed_scopes.clear()
-    assert resolve("/assets/app.js", "http://example.internal/other-page/") == ("dsh", "personal", "/assets/app.js")
+    assert resolve("/assets/app.js", "http://example.internal/other-page/") is None
     # 保留前缀永不认领
     assert resolve("/api/v1/users", "http://example.internal/agent-workspace/") is None
 
@@ -706,7 +707,7 @@ def test_shared_workspace_api_flow(service, home, passwd_lookup, monkeypatch) ->
     monkeypatch.setattr(
         app_service.dsh,
         "_probe_port",
-        staticmethod(lambda port: any(int(start["port"]) == port for start in app_launcher.starts)),
+        staticmethod(lambda port, state=None: any(int(start["port"]) == port for start in app_launcher.starts)),
     )
     headers_user1 = {"X-Agent-Bridge-User": "user1"}
     headers_user2 = {"X-Agent-Bridge-User": "user2"}

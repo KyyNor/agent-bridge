@@ -87,8 +87,8 @@ Linux uid。两种范围的配置目录互相独立：
 ```text
 DSH 个人：/home/<linux-user>/.config/dsh/<business-user>/
 DSH 小组：/home/<linux-user>/.config/dsh/<linux-user>/   # 同组业务用户共享
-Pi  个人：/home/<linux-user>/.pi/agent/<business-user>/
-Pi  小组：/home/<linux-user>/.pi/agent/<linux-user>/     # 同组业务用户共享
+Pi  个人：/home/<linux-user>/.config/agent-bridge/pi/<business-user>/
+Pi  小组：/home/<linux-user>/.config/agent-bridge/pi/<linux-user>/   # 同组共享
 ```
 
 浏览器入口前缀（地址栏始终是 Agent Bridge 域名）：

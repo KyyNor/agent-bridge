@@ -101,3 +101,53 @@ class WorkspaceAgentAdapter(Protocol):
 
     def on_recovered(self, state: dict[str, Any], *, scope: str, runtime_key: str) -> None:
         """服务重启识别到遗留实例时的后端特定收尾。"""
+
+    def probe_auth(self, state: dict[str, Any]) -> dict[str, str]:
+        """就绪探测所需的鉴权头；默认后端无需鉴权，返回空。
+
+        返回值直接作为 HTTP 头发给 ``probe_path``。启用鉴权的后端必须提供，
+        否则探测恒为 401/307，永远等不到就绪。
+        """
+        return {}
+
+    def blocked_paths(self) -> tuple[str, ...]:
+        """该后端下必须硬拦的上游路径（相对代理前缀之外的上游路径）。
+
+        用于阻断会越权影响整个源站的上游资源（例如以 ``scope: "/"`` 注册的
+        service worker）。代理对这些路径直接返回 404，不转发。
+        """
+        return ()
+
+    def filter_request_cookies(
+        self, cookie_header: str | None, *, authority: str
+    ) -> str | None:
+        """收敛发往该后端的 Cookie；默认不透传任何浏览器 Cookie。
+
+        ``authority`` 是上游 ``host:port``：部分后端（如 DSH）把会话 Cookie 名
+        绑定到 authority，因此过滤必须知道目标端口。
+        """
+        return None
+
+    def needs_proxy_auth(self) -> bool:
+        """该后端是否需要代理在转发前完成上游鉴权。
+
+        DSH 由首访 token 换取流程处理（根导航单独走 ``_proxy_root_navigation``），
+        返回 False；Pi 的鉴权对每个请求都成立，返回 True。
+        """
+        return False
+
+    async def resolve_upstream_auth(
+        self,
+        service,
+        *,
+        user_id: str,
+        target: str,
+        workspace_scope: str,
+        browser_cookie: str | None,
+    ) -> str | None:
+        """返回该后端上游所需的 Cookie 值；无需鉴权时返回 None。
+
+        代理只负责调用，实现细节（DSH 的 token 换取、Pi 的会话密码换取）留在
+        adapter 内，避免代理出现按 agent 的中心分支。
+        """
+        return None

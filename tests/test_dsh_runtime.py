@@ -132,7 +132,7 @@ def patch_lifecycle(service, monkeypatch, *, alive_pids: set[int] | None = None,
             return True
         return pid in alive
 
-    def fake_probe(port: int) -> bool:
+    def fake_probe(port: int, state=None) -> bool:
         if launcher is not None and any(int(start["port"]) == port for start in launcher.starts):
             return True
         return port in healthy
@@ -1138,7 +1138,7 @@ def _install_fake_process_world(service, monkeypatch, *, tree: dict[int, int], m
                     queue.append(child)
         return found
 
-    def fake_marked_pids(mark: str, *, proc_root=None) -> set[int]:
+    def fake_marked_pids(mark: str, *, mark_env="", proc_root=None) -> set[int]:
         return set(marked) if mark == "personal:user1" else set()
 
     monkeypatch.setattr(service.dsh, "_pid_alive", staticmethod(fake_pid_alive))

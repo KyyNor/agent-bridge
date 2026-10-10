@@ -31,6 +31,7 @@ from agent_bridge.agent_workspace.launcher import (
     LinuxIdentity,
     ensure_user_config_dir,
 )
+from agent_bridge.agent_workspace.cookies import dsh_session_cookie_name
 from agent_bridge.agent_workspace.scopes import WORKSPACE_SCOPE_SHARED
 from agent_bridge.core.domain import ValidationError
 from agent_bridge.dsh import injection
@@ -161,6 +162,47 @@ class DshWorkspaceAdapter:
             probe_path="/",
             display_name=self.display_name,
         )
+
+    def probe_auth(self, state: dict[str, Any]) -> dict[str, str]:
+        """DSH 不启用密码，探测不带凭据。
+
+        DSH 的鉴权是启动 token 换会话 Cookie，探测路径无需也不应携带凭据。
+        """
+        return {}
+
+    def blocked_paths(self) -> tuple[str, ...]:
+        """DSH 不需要拦截任何上游路径。"""
+        return ()
+
+    def needs_proxy_auth(self) -> bool:
+        """DSH 走根导航的 token 换取流程，不需要逐请求鉴权。"""
+        return False
+
+    def filter_request_cookies(
+        self, cookie_header: str | None, *, authority: str
+    ) -> str | None:
+        """收敛发往 DSH 的 Cookie：只保留 DSH 自己需要的部分。
+
+        浏览器会把 Agent Bridge 域下的全部 Cookie 送来（``agent_bridge_admin``、
+        PostHog 等），它们与 DSH 无关，不透传给上游。保留的范围：
+
+        - 当前 authority 的 ``dsh-auth-<hash>`` 会话 Cookie——其他端口的旧会话
+          Cookie 名称不同，对本目标永远无效；
+        - 其余 ``dsh-`` 前缀的应用 Cookie。
+        """
+        session = dsh_session_cookie_name(authority)
+        kept: list[str] = []
+        for segment in (cookie_header or "").split(";"):
+            segment = segment.strip()
+            if not segment:
+                continue
+            cookie_name = segment.partition("=")[0].strip()
+            if not cookie_name.startswith("dsh-"):
+                continue
+            if cookie_name.startswith("dsh-auth-") and cookie_name != session:
+                continue
+            kept.append(segment)
+        return "; ".join(kept) if kept else None
 
     def on_stopped(self, state: dict[str, Any], *, scope: str, runtime_key: str) -> None:
         # 共享 runtime 停止后移除能力平面覆盖文件，避免下次按需启动带着死 token。

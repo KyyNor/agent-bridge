@@ -20,6 +20,7 @@ from typing import Any
 
 import yaml
 
+from agent_bridge.agent_workspace import safe_files
 from agent_bridge.agent_workspace.capability import (
     DEFAULT_CAPABILITY_TTL_SECONDS,
     WorkspaceCapability as DshWorkspaceCapability,
@@ -111,26 +112,30 @@ def build_mcp_overlay(*, mcp_url: str, profile_key: str, capability_token: str) 
     ]
 
 
-def write_mcp_overlay(path: Path, overlay: list[dict[str, Any]]) -> Path:
-    """写入覆盖文件；DSH 以目标 Linux 用户读取，权限收紧到 0600。"""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
+def write_mcp_overlay(
+    path: Path, overlay: list[dict[str, Any]], *, uid: int | None = None, gid: int | None = None
+) -> Path:
+    """写入覆盖文件；DSH 以目标 Linux 用户读取。
+
+    以 root 在用户可控的 ``DSH_HOME`` 下写入，必须走
+    :func:`safe_files.write_text_secure`（随机名临时文件 + ``O_NOFOLLOW`` +
+    ``O_EXCL``，写入后立即 ``fchmod(0600)`` 再原子改名），避免软链导致的任意
+    文件覆盖与权限窗口。
+    """
+    safe_files.write_text_secure(
+        path,
         yaml.safe_dump(overlay, allow_unicode=True, sort_keys=False),
-        encoding="utf-8",
+        # 未显式传入时沿用当前进程身份（调用方通常传入目标 Linux 用户 uid/gid）。
+        uid=os.geteuid() if uid is None else uid,
+        gid=os.getegid() if gid is None else gid,
+        label="DSH Workspace MCP 覆盖文件",
     )
-    try:
-        path.chmod(0o600)
-    except OSError as exc:
-        logger.warning("DSH Workspace MCP 覆盖文件 chmod 失败 path=%s 原因=%s", path, exc)
     return path
 
 
 def remove_mcp_overlay(path: Path) -> None:
     """移除覆盖文件（退出注入时调用，避免残留旧 capability）。"""
-    try:
-        path.unlink(missing_ok=True)
-    except OSError as exc:
-        logger.warning("DSH Workspace MCP 覆盖文件删除失败 path=%s 原因=%s", path, exc)
+    safe_files.unlink_if_exists(path, label="DSH Workspace MCP 覆盖文件")
 
 
 def ensure_owner(path: Path, *, uid: int, gid: int) -> None:

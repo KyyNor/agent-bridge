@@ -23,8 +23,15 @@ def client(wm_paths):
     return TestClient(create_app(wm_paths, {"root"}))
 
 
+def test_agents_catalog_requires_login(client) -> None:
+    """Agent 目录必须鉴权：未识别调用者返回 401。"""
+    assert client.get("/api/v1/agent-workspace/agents").status_code == 401
+
+
 def test_agents_catalog_lists_both(client) -> None:
-    response = client.get("/api/v1/agent-workspace/agents")
+    response = client.get(
+        "/api/v1/agent-workspace/agents", headers={"X-Agent-Bridge-User": "user1"}
+    )
     assert response.status_code == 200
     agents = {item["agent"]: item for item in response.json()["agents"]}
     assert set(agents) == {"dsh", "pi"}
@@ -116,3 +123,44 @@ def test_runtime_config_persists_pi_web_command(client) -> None:
         "/api/v1/agent-workspace/runtime-config", headers=headers
     ).json()
     assert reread["pi_web_command"] == saved.json()["pi_web_command"]
+
+
+def test_runtime_config_keeps_pi_command_when_field_absent(client) -> None:
+    """旧客户端不传 pi_web_command 时，必须保留已保存值而不是重置为默认。"""
+    headers = {"X-Agent-Bridge-User": "root"}
+    custom = "pi-web --no-open --port {port} --hostname 127.0.0.0.1"
+    current = client.get(
+        "/api/v1/agent-workspace/runtime-config", headers=headers
+    ).json()
+    saved = client.put(
+        "/api/v1/agent-workspace/runtime-config",
+        headers=headers,
+        json={
+            "web_command": current["web_command"],
+            "pi_web_command": custom,
+            "idle_timeout_minutes": current["idle_timeout_minutes"],
+            "base_url": current["base_url"],
+            "available_models": current["available_models"],
+            "expected_edit_token": current.get("edit_token"),
+        },
+    )
+    assert saved.status_code == 200
+    assert saved.json()["pi_web_command"] == custom
+
+    # 旧客户端：完全不传该字段
+    current = client.get(
+        "/api/v1/agent-workspace/runtime-config", headers=headers
+    ).json()
+    legacy = client.put(
+        "/api/v1/agent-workspace/runtime-config",
+        headers=headers,
+        json={
+            "web_command": current["web_command"],
+            "idle_timeout_minutes": current["idle_timeout_minutes"],
+            "base_url": current["base_url"],
+            "available_models": current["available_models"],
+            "expected_edit_token": current.get("edit_token"),
+        },
+    )
+    assert legacy.status_code == 200
+    assert legacy.json()["pi_web_command"] == custom, "旧客户端保存配置不得清空 Pi 启动命令"

@@ -77,8 +77,10 @@ def service(wm_paths, monkeypatch):
     # 组级配置：映射到 groupa 这个 Linux 用户
     svc.dsh_configs.save_group_config("root", group_key="groupa", linux_user="groupa")
     # 就绪探测与端口检查本地化，避免真实网络依赖。
-    monkeypatch.setattr(svc.pi, "_probe_port", lambda port: True)
-    monkeypatch.setattr(svc.pi, "_wait_until_ready", lambda port, *, process, timeout: True)
+    monkeypatch.setattr(svc.pi, "_probe_port", lambda port, state=None: True)
+    monkeypatch.setattr(
+        svc.pi, "_wait_until_ready", lambda port, *, process, timeout, state=None: True
+    )
     monkeypatch.setattr(svc.pi, "_port_in_use", staticmethod(lambda port: False))
     # fake pid 不会真实存在，状态计算统一按存活处理
     monkeypatch.setattr(svc.pi, "_pid_alive", staticmethod(lambda pid: pid > 0))
@@ -220,8 +222,10 @@ def test_launch_plan_sets_isolated_dir_and_password(service) -> None:
     start = service.pi._launcher.starts[0]
     env = start["env"]
     config_dir = env["PI_CODING_AGENT_DIR"]
-    # 配置目录落在该 Linux 用户 home 下，不进入 Agent Bridge 数据目录
-    assert config_dir.endswith(".pi/agent/user1")
+    # 配置目录落在该 Linux 用户 home 下，不进入 Agent Bridge 数据目录，
+    # 且不与 pi 自己的默认 agent 目录（~/.pi/agent）混用同一命名空间
+    assert config_dir.endswith(".config/agent-bridge/pi/user1")
+    assert "/.pi/agent" not in config_dir
     assert "/data/" not in config_dir
     # 密码随机生成且不为空；关闭版本检查与浏览器自启
     assert env["PI_WEB_PASSWORD"]
@@ -270,7 +274,7 @@ def test_shared_scope_uses_linux_user_dir_and_single_process(service) -> None:
     assert state_file.exists()
     config_dir = json.loads(state_file.read_text(encoding="utf-8"))["config_dir"]
     # 共享：一个 Linux 用户一个目录（不再是业务用户名）
-    assert config_dir.endswith(".pi/agent/groupa")
+    assert config_dir.endswith(".config/agent-bridge/pi/groupa")
 
     second = service.pi.authorize_workspace("user2", profile_key="safe", scope="shared")
     assert second["status"] == "running"
@@ -340,3 +344,81 @@ def test_switching_profile_restarts_runtime(service) -> None:
     service.pi.authorize_workspace("user1", profile_key="safe")
     service.pi.authorize_workspace("user1", profile_key="other")
     assert len(service.pi._launcher.starts) == 2
+
+def test_marked_pids_uses_each_agents_own_env_var(tmp_path) -> None:
+    """各 Agent 的 runtime 标记必须按各自的环境变量名匹配。
+
+    标记值格式相同（``scope:runtime_key``）。若统一按 DSH 的变量名扫描，停止 Pi
+    工作台会误杀同名用户的 DSH 进程，且 Pi 自己的 detached 孤儿回收不到。
+    """
+    from agent_bridge.agent_workspace import process_tree
+
+    def make_proc(name: str, mark_env: str, value: str) -> None:
+        pid_dir = tmp_path / name
+        pid_dir.mkdir(parents=True)
+        (pid_dir / "environ").write_bytes(
+            f"HOME=/home/u\0{mark_env}={value}\0".encode("utf-8")
+        )
+
+    make_proc("100", process_tree.RUNTIME_MARK_ENV, "personal:alice")
+    make_proc("200", process_tree.PI_RUNTIME_MARK_ENV, "personal:alice")
+
+    dsh_hits = process_tree.marked_pids(
+        "personal:alice",
+        mark_env=process_tree.RUNTIME_MARK_ENV,
+        proc_root=tmp_path,
+    )
+    pi_hits = process_tree.marked_pids(
+        "personal:alice",
+        mark_env=process_tree.PI_RUNTIME_MARK_ENV,
+        proc_root=tmp_path,
+    )
+    assert dsh_hits == {100}
+    assert pi_hits == {200}
+
+
+def test_mark_env_declaration_differs_per_agent(service) -> None:
+    assert service.dsh.adapter.mark_env != service.pi.adapter.mark_env
+    assert service.dsh.adapter.mark_env.endswith("_DSH_RUNTIME")
+    assert service.pi.adapter.mark_env.endswith("_PI_RUNTIME")
+
+
+def test_probe_auth_uses_basic_credentials() -> None:
+    """就绪探测必须带 Basic Auth，否则 pi-web 的 /api/home 恒 401。"""
+    import base64
+
+    from agent_bridge.agent_workspace.adapters.pi import PiWorkspaceAdapter
+
+    adapter = PiWorkspaceAdapter(configs=None, mcp_url="http://127.0.0.1:8080/mcp")
+    headers = adapter.probe_auth({"auth_secret": "s3cret"})
+    token = headers["authorization"].split(" ", 1)[1]
+    # 用户名固定为 pi（pi-web 硬编码常量）
+    assert base64.b64decode(token).decode() == "pi:s3cret"
+    # 无密码时不带凭据（pi-web 未启用密码的部署）
+    assert adapter.probe_auth({}) == {}
+
+
+def test_dsh_probe_needs_no_auth() -> None:
+    """DSH 不启用密码，探测不带凭据（保持既有行为）。"""
+    from agent_bridge.agent_workspace.adapters.dsh import DshWorkspaceAdapter
+
+    adapter = DshWorkspaceAdapter(configs=None, mcp_url="http://127.0.0.1:8080/mcp")
+    assert adapter.probe_auth({"auth_secret": "anything"}) == {}
+
+
+def test_settings_write_default_provider_with_model() -> None:
+    """组级默认模型必须成对写入 defaultProvider，否则 pi 找不到该模型。"""
+    from agent_bridge.agent_workspace.pi_injection import (
+        MANAGED_PROVIDER_KEY,
+        build_settings_payload,
+    )
+
+    payload = build_settings_payload({"theme": "dark"}, default_model="glm-5")
+    assert payload["defaultModel"] == "glm-5"
+    assert payload["defaultProvider"] == MANAGED_PROVIDER_KEY
+    # 用户其他设置保留
+    assert payload["theme"] == "dark"
+    # 未配置默认模型时不动用户既有设置
+    assert build_settings_payload({"defaultModel": "mine"}, default_model="") == {
+        "defaultModel": "mine"
+    }

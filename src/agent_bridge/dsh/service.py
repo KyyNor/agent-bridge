@@ -211,18 +211,11 @@ class DshRuntimeService(WorkspaceRuntimeService):
 
     # -- 兼容旧测试/调用方使用的辅助方法 --
 
-    def _available_port(self) -> int:
-        return super()._available_port()
-
     def _build_command(
         self, template: str, port: int, *, patch_paths: list[Path] | None = None
     ) -> list[str]:
         return build_dsh_command(template, port, patch_paths=patch_paths)
 
-    def _dsh_binary(self, web_command: str) -> str:
-        from agent_bridge.dsh.agent_runtime import dsh_binary_from_command
-
-        return dsh_binary_from_command(web_command)
 
     def _write_workspace_overlay(self, *args: Any, **kwargs: Any) -> Any:
         return self.adapter._write_workspace_overlay(*args, **kwargs)
@@ -248,52 +241,20 @@ class DshRuntimeService(WorkspaceRuntimeService):
     def _ensure_config_dir(self, identity: LinuxIdentity, user_id: str) -> Path:
         return self.adapter.config_dir(identity, user_id)
 
-    def _compute_status_by_state(self, state: dict[str, Any]) -> dict[str, Any]:
-        return super()._compute_status_by_state(state)
-
-    def _refresh_workspace_injection(
-        self,
-        user_id: str,
-        group_key: str,
-        config: dict[str, Any],
-        workspace: WorkspaceSelection,
-        *,
-        state: dict[str, Any] | None = None,
-    ) -> None:
-        """复用实例时重写覆盖文件，使新签发的 capability 立即生效。"""
-        resolved = state or self._read_state(WORKSPACE_SCOPE_PERSONAL, user_id) or {}
-        config_dir = Path(str(resolved.get("config_dir") or ""))
-        if not config_dir or not config_dir.is_dir():
-            logger.warning(
-                "DSH Workspace 覆盖文件刷新跳过（配置目录缺失）user=%s", user_id
-            )
-            return
-        linux_user = str(config.get("linux_user") or group_key)
-        identity = resolve_linux_identity(linux_user, self._passwd_lookup)
-        self._write_workspace_overlay(config_dir, identity, user_id, workspace)
-
-    def _resume_shared_workspace(
-        self,
-        state: dict[str, Any] | None,
-        scope: str,
-        group_key: str,
-        linux_user: str,
-        workspace: WorkspaceSelection | None,
-    ) -> WorkspaceSelection | None:
-        return super()._resume_shared_workspace(
-            state, scope, group_key, linux_user, workspace
-        )
-
     def stop_idle_expired(self) -> list[str]:
         return super().stop_idle_expired()
 
-    def _wait_until_ready(self, port: int, *, process, timeout: float | None = None) -> bool:
+    def _wait_until_ready(
+        self,
+        port: int,
+        *,
+        process,
+        timeout: float | None = None,
+        state: dict[str, Any] | None = None,
+    ) -> bool:
         return super()._wait_until_ready(
             port,
             process=process,
             timeout=timeout if timeout is not None else DSH_STARTUP_TIMEOUT_SECONDS,
+            state=state,
         )
-
-    def _capture_auth_entry(self, state: dict[str, Any]) -> dict[str, str] | None:  # type: ignore[override]
-        log_path = Path(str(state.get("log_path") or ""))
-        return capture_dsh_auth_entry(log_path)

@@ -129,17 +129,27 @@ def descendants(root_pid: int, *, parent_map: dict[int, int] | None = None) -> s
     return found
 
 
-def marked_pids(mark: str, *, proc_root: Path | None = None) -> set[int]:
+def marked_pids(
+    mark: str,
+    *,
+    mark_env: str = RUNTIME_MARK_ENV,
+    proc_root: Path | None = None,
+) -> set[int]:
     """扫描 ``/proc/<pid>/environ`` 匹配 runtime 标记的进程集合。
 
     按完整 ``NAME=value\\0`` 条目匹配，避免 ``user1`` 误中 ``user12``；
     非 Linux（无 /proc）返回空集。读取失败（权限、进程退出竞态）的条目
     静默跳过——父进程树枚举仍在，缺一两个条目只降低覆盖率、不误杀。
+
+    ``mark_env`` 必须由调用方传入该 runtime 所属后端的环境变量名：不同 Agent
+    的标记值格式相同（``<scope>:<runtime_key>``），若统一按默认的 DSH 变量名
+    扫描，停止 Pi 工作台会误杀同名用户的 DSH 进程，而 Pi 自己的 detached
+    孤儿（node-pty 拉起的 shell 等）永远匹配不到。
     """
     root = proc_root if proc_root is not None else _default_proc_root()
     if root is None:
         return set()
-    needle = f"{RUNTIME_MARK_ENV}={mark}".encode("utf-8") + b"\x00"
+    needle = f"{mark_env}={mark}".encode("utf-8") + b"\x00"
     matched: set[int] = set()
     try:
         entries = list(root.iterdir())
