@@ -84,6 +84,9 @@ class DshWorkspaceAdapter:
     port_pool_size = DSH_MAX_INSTANCES
     startup_timeout_seconds = DSH_STARTUP_TIMEOUT_SECONDS
     stop_grace_seconds = DSH_STOP_GRACE_SECONDS
+    #: 就绪探测路径。通用 runtime 的 ``_probe_port`` 直接读该属性，
+    #: 缺失会在探测里抛 AttributeError 并被吞成 False，导致永远等不到就绪。
+    probe_path = "/"
 
     def __init__(
         self,
