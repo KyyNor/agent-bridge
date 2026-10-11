@@ -75,6 +75,11 @@ class WorkspaceAgentAdapter(Protocol):
     port_pool_size: int
     #: 停止时的优雅退出窗口（秒）。
     stop_grace_seconds: float
+    #: 就绪探测请求的路径（拼接在 ``http://127.0.0.1:<port>`` 之后）。
+    #: 通用 runtime 的 ``_probe_port`` 直接读取该属性——缺失会在探测里抛
+    #: ``AttributeError`` 并被吞成 False，使 runtime 永远等不到就绪并被回收，
+    #: 因此每个 adapter 都必须显式声明。
+    probe_path: str
 
     def supports_scope(self, scope: str) -> bool:
         """该 adapter 是否支持此工作空间范围。"""
