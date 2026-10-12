@@ -1018,7 +1018,8 @@ class _EchoWebSocketServer:
                 async for message in connection:
                     await connection.send(message)
 
-            async with serve(handler, "127.0.0.1", 0) as server:
+            # 上游不设上限：只验证代理自身的帧上限。
+            async with serve(handler, "127.0.0.1", 0, max_size=None) as server:
                 self.port = server.sockets[0].getsockname()[1]
                 self._ready.set()
                 while not self._stop.is_set():
@@ -1072,6 +1073,11 @@ def test_workspace_proxy_relays_websocket(service, home, passwd_lookup, monkeypa
             assert websocket.receive_text() == "你好，workspace"
             websocket.send_bytes(b"\x01\x02")
             assert websocket.receive_bytes() == b"\x01\x02"
+            # 回归：超过 websockets 客户端默认 1 MiB 的上游帧必须能完整转发，
+            # 否则代理以 1009 断开（frame exceeds limit of 1048576 bytes）。
+            large = b"x" * (2 * 1024 * 1024)
+            websocket.send_bytes(large)
+            assert websocket.receive_bytes() == large
 
         refreshed = app_service.dsh._read_state("personal", "user1")
         assert float(refreshed["last_access_at"]) > time.time() - 60

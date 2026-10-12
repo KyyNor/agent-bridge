@@ -47,6 +47,7 @@ from agent_bridge.api.dashboard_proxy import (
     _proxy_stream_response,
 )
 from agent_bridge.core.domain import AgentBridgeError, BackendUnavailable
+from agent_bridge.server_runtime.server_process import WS_MAX_MESSAGE_BYTES
 from agent_bridge.agent_workspace.adapters import ADAPTERS
 from agent_bridge.agent_workspace.adapters.pi import (
     PI_PERSONAL_PROXY_PREFIX as PI_PROXY_PREFIX,
@@ -72,6 +73,9 @@ logger = logging.getLogger(__name__)
 # 时先于 web 进程同步执行的插件安装（冷缓存下载较慢，超时后重试可续装）。
 ENSURE_TIMEOUT_SECONDS = 240.0
 _WS_CLOSE_TIMEOUT_SECONDS = 5.0
+# 上游 WebSocket 单条消息上限。websockets 客户端默认只有 1 MiB，DSH 的
+# ``/api/remote.mux`` 会推送更大的帧（文件内容、大段输出），超限即以 1009 断开。
+# 浏览器侧由 uvicorn ``--ws-max-size`` 控制，两处共用 WS_MAX_MESSAGE_BYTES（64 MiB）。
 _EXCHANGE_TIMEOUT_SECONDS = 30.0
 
 # Agent Bridge 自身占用的根路径前缀。工作台的逃逸路由（见 workspace_escape_path）
@@ -912,6 +916,7 @@ class AgentWorkspaceProxyMiddleware:
                 subprotocols=subprotocols or None,
                 open_timeout=10.0,
                 close_timeout=_WS_CLOSE_TIMEOUT_SECONDS,
+                max_size=WS_MAX_MESSAGE_BYTES,
             ) as upstream:
                 negotiated = getattr(upstream, "subprotocol", None)
                 await send({

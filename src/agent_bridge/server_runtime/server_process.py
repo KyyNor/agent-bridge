@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 
 _LOG_CONFIG_PATH = str(Path(__file__).resolve().parent.parent / "logging.json")
 _STARTUP_HEALTH_TIMEOUT_SECONDS = 15.0
+# WebSocket 单条消息上限（uvicorn ``--ws-max-size``）。工作台代理连接上游时使用
+# 同一个值，保证浏览器 ↔ 代理 ↔ 工作台两段上限一致。
+WS_MAX_MESSAGE_BYTES = 64 * 1024 * 1024
 
 
 def _read_pid(path: Path) -> int | None:
@@ -69,6 +72,8 @@ def start_server(paths: AgentBridgePaths | None = None) -> dict[str, Any]:
                 str(config.port),
                 "--log-config",
                 _LOG_CONFIG_PATH,
+                "--ws-max-size",
+                str(WS_MAX_MESSAGE_BYTES),
             ],
             stdout=log,
             stderr=log,
