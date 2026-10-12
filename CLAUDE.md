@@ -319,7 +319,9 @@ DSH 专属语义（`dsh/`）：
   `_proxy_stream_response` 骨架（`response_header_builder` /
   `query_override` / `request_header_overrides` / `extra_response_headers` hook
   承载 Location 改写、首访 token、Cookie 与 Origin 覆盖），WebSocket 用
-  `websockets` client 桥接并剥离下游握手头。目标只能来自 `require_runtime_target`
+  `websockets` client 桥接并剥离下游握手头；单条消息上限两段一致为 64 MiB
+  （`server_process.WS_MAX_MESSAGE_BYTES` 同时用于上游 `connect(max_size=)` 与 uvicorn
+  `--ws-max-size`；client 默认 1 MiB 会让 DSH 大帧以 1009 断开）。目标只能来自 `require_runtime_target`
   （按当前登录用户 + scope 解析；共享目标由所属小组映射的 Linux 用户推导，
   命中即刷新空闲时间），未运行时线程化兜底 `ensure_running`。
 - DSH 前端按 `<base href="/">` 以根绝对路径请求资源、插件模块与 `/api/**`
