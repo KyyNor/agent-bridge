@@ -74,6 +74,8 @@ uv run agent-bridge server status
 uv run agent-bridge server stop
 ```
 
+`server status` 按 PID 进程是否存活报告“运行中”，“健康”单独反映 `/health` 是否可达。`server start` 遇到进程仍存活但健康检查未通过时会拒绝重复启动，需先执行 `server stop`。`server stop` 发送 SIGTERM 后等待进程真正退出（uvicorn 连接排空上限 10 秒 + 服务收尾上限 60 秒 + 余量），超时升级为 SIGKILL，确认退出后才删除 PID 文件。
+
 短命令 `agb` 与 `agent-bridge` 等价。当前 CLI 根命令只有 `server`、`profile`、`memory`；知识库、工作流、Agent 和系统管理通过管理后台或 HTTP API 管理。
 
 ## Agent 工作台（Workspace Runtime）

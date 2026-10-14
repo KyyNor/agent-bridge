@@ -34,6 +34,8 @@ CLI 根命令只有 `server`、`profile`、`memory`。不要在文档中添加�
 - 本阶段不增加互联网级认证；部署方负责监听地址、内网访问和反向代理边界。
 - 浏览器前端不得读取、缓存或拼接身份 Header；未识别调用者的后端请求必须明确返回 401。
 - `server_runtime/` 只负责 uvicorn 服务进程；`agent_runtime/` 负责 Coding Agent 执行，不要混用。
+- `server_runtime/server_process.py` 以 PID 存活（并校验 cmdline 防 PID 复用）判断服务运行，`/health` 只作为 `healthy` 附加信息；不得再用健康检查结果决定是否重复启动。`stop_server` 必须确认进程退出（超时升级 SIGKILL）后才删除 PID 文件。
+- uvicorn 必须带 `--timeout-graceful-shutdown`（`GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS`）：SSE 等长连接在 SIGTERM 后不会自行结束，默认无限等待会让 lifespan 收尾永不开始。lifespan 收尾经 `api/shutdown.py` 的 `run_shutdown_steps` 逐步执行（daemon 线程、单步异常隔离、总预算 `LIFESPAN_SHUTDOWN_BUDGET_SECONDS`），新增收尾动作应追加为 `ShutdownStep`，不要直接在 lifespan 中同步阻塞调用。
 
 ## 应用与存储
 
@@ -324,6 +326,10 @@ DSH 专属语义（`dsh/`）：
   `--ws-max-size`；client 默认 1 MiB 会让 DSH 大帧以 1009 断开）。目标只能来自 `require_runtime_target`
   （按当前登录用户 + scope 解析；共享目标由所属小组映射的 Linux 用户推导，
   命中即刷新空闲时间），未运行时线程化兜底 `ensure_running`。
+- 纯 ASGI 代理中所有 `await receive()` 循环必须显式处理 `http.disconnect` 并退出：
+  uvicorn 断连后每次 `receive()` 都不挂起、立即返回 disconnect（即使请求体早已
+  缓冲完毕），对其 `continue` 会让循环永不让出事件循环，整个进程的 HTTP 服务与
+  SIGTERM 处理随之冻结。`_read_body` 读到断开即返回 `None`，骨架不再请求上游。
 - DSH 前端按 `<base href="/">` 以根绝对路径请求资源、插件模块与 `/api/**`
   （`/api/remote.mux` 是 WS 通道），因此 `workspace_escape_path` 会在前缀之外认领
   这些请求：HTTP 依据 `Referer: …/agent-workspace…/…`（两个前缀分别归属

@@ -47,7 +47,8 @@ def server_stop(
 
     paths = _paths_from_root(root)
     result = _run_server_action(lambda: _app.stop_server(paths) if paths is not None else _app.stop_server())
-    typer.echo(f"已停止: {result['stopped']} 进程: {result['pid']}")
+    suffix = "（优雅退出超时，已强制终止）" if result.get("forced") else ""
+    typer.echo(f"已停止: {result['stopped']} 进程: {result['pid']}{suffix}")
 
 
 @server_app.command("status")
@@ -59,7 +60,7 @@ def server_status_cmd(
 
     paths = _paths_from_root(root)
     status = _run_server_action(lambda: _app.server_status(paths) if paths is not None else _app.server_status())
-    typer.echo(f"运行中: {status['running']} 进程: {status['pid']}")
+    typer.echo(f"运行中: {status['running']} 健康: {status.get('healthy', False)} 进程: {status['pid']}")
 
 
 @server_app.command("init")
