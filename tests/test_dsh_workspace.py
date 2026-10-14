@@ -631,6 +631,34 @@ def _middleware(dsh: _FakeDshService) -> AgentWorkspaceProxyMiddleware:
     )
 
 
+def test_workspace_proxy_skips_upstream_when_client_disconnected(respx_mock) -> None:
+    """回归：客户端在代理读取请求体前断开（如等待 ensure_running 时刷新页面）。
+
+    uvicorn 断连后 receive() 不挂起、立即返回 http.disconnect；读取循环若不处理
+    会永久占住事件循环，整个服务与信号处理随之冻结。
+    """
+    target = "http://127.0.0.1:48400"
+    route = respx_mock.route(url__startswith=target).mock(return_value=httpx.Response(200))
+    calls = {"count": 0}
+    sent: list[dict] = []
+
+    async def receive():
+        calls["count"] += 1
+        if calls["count"] > 1000:
+            raise AssertionError("receive() 被忙等调用，读取循环未处理 http.disconnect")
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        sent.append(message)
+
+    middleware = _middleware(_FakeDshService(target))
+    asyncio.run(asyncio.wait_for(middleware(_http_scope("/agent-workspace/app"), receive, send), timeout=5))
+
+    assert calls["count"] == 1
+    assert not route.called
+    assert sent == []
+
+
 def test_workspace_proxy_requires_identity() -> None:
     middleware = _middleware(_FakeDshService(None))
     status, _, _ = _drive(middleware, _http_scope("/agent-workspace/", user=None))

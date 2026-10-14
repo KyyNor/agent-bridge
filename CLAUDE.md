@@ -324,6 +324,10 @@ DSH 专属语义（`dsh/`）：
   `--ws-max-size`；client 默认 1 MiB 会让 DSH 大帧以 1009 断开）。目标只能来自 `require_runtime_target`
   （按当前登录用户 + scope 解析；共享目标由所属小组映射的 Linux 用户推导，
   命中即刷新空闲时间），未运行时线程化兜底 `ensure_running`。
+- 纯 ASGI 代理中所有 `await receive()` 循环必须显式处理 `http.disconnect` 并退出：
+  uvicorn 断连后每次 `receive()` 都不挂起、立即返回 disconnect（即使请求体早已
+  缓冲完毕），对其 `continue` 会让循环永不让出事件循环，整个进程的 HTTP 服务与
+  SIGTERM 处理随之冻结。`_read_body` 读到断开即返回 `None`，骨架不再请求上游。
 - DSH 前端按 `<base href="/">` 以根绝对路径请求资源、插件模块与 `/api/**`
   （`/api/remote.mux` 是 WS 通道），因此 `workspace_escape_path` 会在前缀之外认领
   这些请求：HTTP 依据 `Referer: …/agent-workspace…/…`（两个前缀分别归属

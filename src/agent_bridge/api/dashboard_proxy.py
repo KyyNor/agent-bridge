@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 from contextlib import suppress
 from typing import Any
@@ -12,6 +13,8 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from agent_bridge.knowledge_management.code_knowledge.dashboard_urls import external_dashboard_url
 from agent_bridge.core.domain import AgentBridgeError
 
+
+logger = logging.getLogger(__name__)
 
 HOP_BY_HOP_HEADERS = {
     b"connection",
@@ -282,6 +285,10 @@ async def _proxy_stream_response(
     调用方在骨架之外自行生成的响应头（如换取到的新会话 Cookie）。
     """
     body = await _read_body(receive)
+    if body is None:
+        # 客户端在请求体读完前已断开：无人接收响应，不再建立上游请求。
+        logger.debug("代理请求在读取请求体时客户端已断开 path=%s", upstream_path)
+        return
     target_parts = urlsplit(target)
     query = query_override if query_override is not None else scope.get("query_string", b"").decode("latin-1")
     upstream_url = urlunsplit((
@@ -359,11 +366,20 @@ async def _await_disconnect(receive: Receive, disconnected: asyncio.Event) -> No
             return
 
 
-async def _read_body(receive: Receive) -> bytes:
+async def _read_body(receive: Receive) -> bytes | None:
+    """读取完整请求体；客户端已断开时返回 ``None``。
+
+    必须显式处理 ``http.disconnect``：uvicorn 在连接断开后（包括请求体早已
+    缓冲完毕、但应用在前置 await 期间客户端离开的场景）每次 ``receive()``
+    都不经任何挂起点立即返回 ``http.disconnect``。若对其 ``continue``，循环
+    永不让出事件循环，整个进程的 HTTP 服务与信号处理随之冻结。
+    """
     chunks: list[bytes] = []
     more_body = True
     while more_body:
         message = await receive()
+        if message["type"] == "http.disconnect":
+            return None
         if message["type"] != "http.request":
             continue
         body = message.get("body", b"")

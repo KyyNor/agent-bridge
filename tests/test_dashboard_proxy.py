@@ -10,6 +10,7 @@ from agent_bridge.api.dashboard_proxy import (
     MemoryDashboardProxyMiddleware,
     _match_dashboard_path,
     _match_memory_dashboard_path,
+    _read_body,
     _memory_key_from_referer,
     _repo_key_from_referer,
     _repo_key_from_token,
@@ -395,3 +396,103 @@ def test_memory_dashboard_proxy_stops_reading_upstream_when_client_disconnects(r
     # the client goes away (~5 ticks in 0.1s). One that ignores disconnect keeps
     # pulling forever (~30 ticks in 0.6s) and leaks the upstream connection.
     assert 1 <= pull_count < 15, f"upstream kept being read after disconnect: {pull_count} pulls"
+
+
+# -- 客户端断连：uvicorn 在断开后对 receive() 不挂起、立即返回 http.disconnect --
+
+
+_RECEIVE_CALL_LIMIT = 1000
+
+
+def _uvicorn_like_receive(prelude: list[dict] | None = None):
+    """模拟 uvicorn 断连后的 receive：先吐出 ``prelude``，之后每次立即返回 disconnect。
+
+    返回的协程内没有任何 await，与 uvicorn ``RequestResponseCycle.receive`` 在
+    ``disconnected=True`` 时的行为一致；对其 ``continue`` 的读取循环会永不让出
+    事件循环。调用次数超过上限即抛错，让回归在测试里失败而不是挂死。
+    """
+    pending = list(prelude or [])
+    calls = {"count": 0}
+
+    async def receive():
+        calls["count"] += 1
+        if calls["count"] > _RECEIVE_CALL_LIMIT:
+            raise AssertionError("receive() 被忙等调用，读取循环未处理 http.disconnect")
+        if pending:
+            return pending.pop(0)
+        return {"type": "http.disconnect"}
+
+    return receive, calls
+
+
+def test_read_body_returns_none_when_client_already_disconnected() -> None:
+    receive, calls = _uvicorn_like_receive()
+
+    assert asyncio.run(_read_body(receive)) is None
+    assert calls["count"] == 1
+
+
+def test_read_body_returns_none_when_client_disconnects_mid_body() -> None:
+    receive, calls = _uvicorn_like_receive([
+        {"type": "http.request", "body": b"part", "more_body": True},
+    ])
+
+    assert asyncio.run(_read_body(receive)) is None
+    assert calls["count"] == 2
+
+
+def test_read_body_joins_chunked_body() -> None:
+    receive, _ = _uvicorn_like_receive([
+        {"type": "http.request", "body": b"ab", "more_body": True},
+        {"type": "http.request", "body": b"", "more_body": True},
+        {"type": "http.request", "body": b"cd", "more_body": False},
+    ])
+
+    assert asyncio.run(_read_body(receive)) == b"abcd"
+
+
+def _assert_disconnected_request_skips_upstream(middleware, scope, respx_mock, upstream_url: str) -> None:
+    route = respx_mock.route(url__startswith=upstream_url).mock(return_value=httpx.Response(200))
+    receive, calls = _uvicorn_like_receive()
+    sent: list[dict] = []
+
+    async def send(message):
+        sent.append(message)
+
+    asyncio.run(asyncio.wait_for(middleware(scope, receive, send), timeout=5))
+
+    assert calls["count"] == 1
+    assert not route.called
+    assert sent == []
+
+
+def test_codegraph_dashboard_proxy_skips_upstream_when_client_disconnected(respx_mock) -> None:
+    middleware = DashboardProxyMiddleware(
+        app=_noop_app,
+        target_resolver={"headroom": "http://127.0.0.1:48000/?token=abc"}.get,
+    )
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/dashboard/headroom/api/query",
+        "query_string": b"",
+        "headers": [],
+    }
+
+    _assert_disconnected_request_skips_upstream(middleware, scope, respx_mock, "http://127.0.0.1:48000/")
+
+
+def test_memory_dashboard_proxy_skips_upstream_when_client_disconnected(respx_mock) -> None:
+    middleware = MemoryDashboardProxyMiddleware(
+        app=_noop_app,
+        target_resolver={"test-mem": "http://127.0.0.1:48100/"}.get,
+    )
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/memory-dashboard/test-mem/api/stats",
+        "query_string": b"",
+        "headers": [],
+    }
+
+    _assert_disconnected_request_skips_upstream(middleware, scope, respx_mock, "http://127.0.0.1:48100/")
