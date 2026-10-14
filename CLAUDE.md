@@ -34,6 +34,8 @@ CLI 根命令只有 `server`、`profile`、`memory`。不要在文档中添加�
 - 本阶段不增加互联网级认证；部署方负责监听地址、内网访问和反向代理边界。
 - 浏览器前端不得读取、缓存或拼接身份 Header；未识别调用者的后端请求必须明确返回 401。
 - `server_runtime/` 只负责 uvicorn 服务进程；`agent_runtime/` 负责 Coding Agent 执行，不要混用。
+- `server_runtime/server_process.py` 以 PID 存活（并校验 cmdline 防 PID 复用）判断服务运行，`/health` 只作为 `healthy` 附加信息；不得再用健康检查结果决定是否重复启动。`stop_server` 必须确认进程退出（超时升级 SIGKILL）后才删除 PID 文件。
+- uvicorn 必须带 `--timeout-graceful-shutdown`（`GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS`）：SSE 等长连接在 SIGTERM 后不会自行结束，默认无限等待会让 lifespan 收尾永不开始。lifespan 收尾经 `api/shutdown.py` 的 `run_shutdown_steps` 逐步执行（daemon 线程、单步异常隔离、总预算 `LIFESPAN_SHUTDOWN_BUDGET_SECONDS`），新增收尾动作应追加为 `ShutdownStep`，不要直接在 lifespan 中同步阻塞调用。
 
 ## 应用与存储
 

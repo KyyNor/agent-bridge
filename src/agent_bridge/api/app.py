@@ -4,6 +4,7 @@ import asyncio
 import logging
 import shutil
 import tempfile
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from agent_bridge.api.dashboard_proxy import DashboardProxyMiddleware, MemoryDashboardProxyMiddleware
+from agent_bridge.api.shutdown import ShutdownStep, run_shutdown_steps
 from agent_bridge.api.workspace_proxy import AgentWorkspaceProxyMiddleware
 from agent_bridge.access_control.identity import RequestIdentityResolver
 from agent_bridge.access_control.admin_access import AdminAccessService
@@ -28,6 +30,7 @@ from agent_bridge.core.domain import AgentBridgeError
 from agent_bridge.automation.workflows.validation import WorkflowDefinitionValidationError
 from agent_bridge.app.service import AgentBridgeService
 from agent_bridge.web.pages import capability_admin_page
+from agent_bridge.server_runtime.server_process import LIFESPAN_SHUTDOWN_BUDGET_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -111,24 +114,36 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
         logger.info("Agent Bridge 服务停止 root=%s", resolved_paths.root)
         if not plugin_task.done():
             plugin_task.cancel()
-        service.codegraph.ua_client.stop_all_dashboards()
-        try:
-            service.memory.worker_service.stop_all_workers()
-        except Exception:
-            logger.warning("停止 claude-mem worker 失败", exc_info=True)
-        service.model_evaluations.stop_all()
-        for _slug, _runtime in service.workspace_agents.items():
-            try:
-                _runtime.stop_all()
-            except Exception:
-                logger.warning("停止工作台 Runtime 失败 agent=%s", _slug, exc_info=True)
-            _runtime.stop()
-        service.codegraph_scheduler.stop()
-        service.understand_scheduler.stop()
-        service.plugin_update_scheduler.stop()
-        service.doc_sync_scheduler.stop()
-        service.workflow_scheduler.stop()
-        service.data_retention_scheduler.stop()
+
+        def _stop_workspace_runtime(runtime) -> Callable[[], None]:
+            def _stop() -> None:
+                try:
+                    runtime.stop_all()
+                finally:
+                    runtime.stop()
+
+            return _stop
+
+        shutdown_steps = [
+            ShutdownStep("codegraph_dashboards", service.codegraph.ua_client.stop_all_dashboards),
+            ShutdownStep("claude_mem_workers", service.memory.worker_service.stop_all_workers),
+            ShutdownStep("model_evaluations", service.model_evaluations.stop_all),
+            *(
+                ShutdownStep(f"workspace_{slug}", _stop_workspace_runtime(runtime))
+                for slug, runtime in service.workspace_agents.items()
+            ),
+            ShutdownStep("codegraph_scheduler", service.codegraph_scheduler.stop),
+            ShutdownStep("understand_scheduler", service.understand_scheduler.stop),
+            ShutdownStep("plugin_update_scheduler", service.plugin_update_scheduler.stop),
+            ShutdownStep("doc_sync_scheduler", service.doc_sync_scheduler.stop),
+            ShutdownStep("workflow_scheduler", service.workflow_scheduler.stop),
+            ShutdownStep("data_retention_scheduler", service.data_retention_scheduler.stop),
+        ]
+        unfinished = await run_shutdown_steps(
+            shutdown_steps, budget_seconds=LIFESPAN_SHUTDOWN_BUDGET_SECONDS
+        )
+        if unfinished:
+            logger.error("Agent Bridge 服务收尾未全部完成 unfinished=%s", unfinished)
         logger.info("Agent Bridge 服务已停止")
 
     app = FastAPI(title="Agent Bridge", docs_url=None, openapi_url=None, redoc_url=None, lifespan=lifespan)
