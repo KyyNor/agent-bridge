@@ -393,9 +393,9 @@ DSH 专属语义（`dsh/`）：
 
 工作流编辑器对归属组用户开放，表单路由的首屏依赖必须全部是登录即可读的接口：脚本、技能、能力平面列表，以及 `GET /api/v1/agent-runtime/backends`（默认后端 + 各后端 slug/展示名/能力/思考力度，由 `_available_agent_backends_payload` 投影，不含命令与模型配置）。管理员专用配置接口（`/agent-runtime/config`、`/sync-config`、`/claude-mem/config` 等）只服务系统管理页，不得进入业务页面加载链路；工作流写入权限始终由 `owner_group_key` 决定。
 
-节点 ID 是 `{{ nodes.<id>.* }}` 引用与边 `source`/`target` 的锚点，只允许小写字母、数字、下划线和连字符（引用按首个点号切分 ID，因此 ID 不含点号）。编辑器允许重命名，级联改写边端点、模板引用与边条件；总结型工作流的系统输出节点 ID 锁定。删除节点必须先算出悬空引用面并请用户确认，再连带清理下游 `prompt`/`path`/脚本参数里的 `{{ nodes.<已删节点>.* }}`、条件指向该节点的边与相连的普通边，不得留下悬空引用让整图校验失败。校验必须区分“引用节点已不存在”（`missing_reference_node`）与“引用了非祖先节点”（`invalid_reference`）：前者要清理文本，后者要调整拓扑，合并报同一个 code 会把用户引向错误的修复方向。
+节点 ID 是 `{{ nodes.<id>.* }}` 引用与边 `source`/`target` 的锚点，只允许小写字母、数字、下划线和连字符（引用按首个点号切分 ID，因此 ID 不含点号）。编辑器允许重命名，级联改写边端点、模板引用与边条件；总结型工作流的系统输出节点 ID 锁定。删除节点必须先算出悬空引用面并请用户确认，再连带清理下游 `prompt`/`path`/`title`/脚本参数（递归对象与数组）里的 `{{ nodes.<已删节点>.* }}`、条件指向该节点的边与相连的普通边，不得留下悬空引用让整图校验失败。影响预览与实际改写共用字段遍历，列出完整字段路径；只匹配 `nodes.` 后第一个路径段，不能把 `nodes.b.output.nodes.a` 中的数据字段误当成节点 a。校验必须区分“引用节点已不存在”（`missing_reference_node`）与“引用了非祖先节点”（`invalid_reference`）：前者要清理文本，后者要调整拓扑，合并报同一个 code 会把用户引向错误的修复方向。
 
-工作流定义在编辑器里是 Vue 响应式对象，而 `structuredClone` 无法克隆 reactive Proxy（抛 `DataCloneError`）。任何对工作流图做整体拷贝的路径（含 `migrateWorkflowGraph` 这类类型迁移）必须先 `toRaw` 再深拷贝；`toRaw` 只解包顶层，`graph.nodes.filter(...)` 的元素仍是代理，不能在筛选之后再套 `toRaw`。
+工作流定义在编辑器里是 Vue 响应式对象，而 `structuredClone` 无法克隆 reactive Proxy（抛 `DataCloneError`）。`toRaw` 只解包当前层；增删、重命名或面板编辑还会把 Proxy 存入普通数组/对象。任何对工作流图做整体拷贝的路径（含 `migrateWorkflowGraph` 这类类型迁移）必须递归解包并拷贝 JSON 数据，既不能在筛选后才套 `toRaw`，也不能只解包图的顶层。
 
 `agent` 与 `output` 节点的 `timeout_seconds` 是 1–86400 秒的运行控制参数，默认 600 秒；它不属于节点产物语义，单独调整超时不得使节点或下游失去复用资格。工作流名称、描述、节点显示名称和 Output 节点配置标题是展示字段，调整它们同样不得改变增量复用或触发重跑。节点 ID 参与 `content_hash`：重命名与改提示词同属执行语义变更，会让受影响任务失去复用资格，编辑器已在 ID 字段就地说明这一点。版本判定走双口径：执行语义口径（`content_hash`，剥离 name/description/timeout/title 等字段）喂重跑与 stale 判定，单独调整这些展示/控制字段时必须稳定不变；版本历史口径（`version_hash`，含这些字段）喂版本号递增与 diff，会随之变更并产生新 `revision_no`——这是版本记录而非增量版本，版本号递增本身不触发重跑。
 

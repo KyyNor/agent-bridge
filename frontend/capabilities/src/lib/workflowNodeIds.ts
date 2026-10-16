@@ -8,30 +8,23 @@ import type { WorkflowEdge, WorkflowGraph, WorkflowNode } from '../api/types'
 export const NODE_ID_PATTERN = /^[a-z][a-z0-9_-]*$/
 const NODE_ID_MAX_LENGTH = 64
 
-/** 判断 `marker` 在 `text` 的 `start` 位置是否构成完整引用（避免 `agent-1` 误匹配 `agent-11`）。 */
-function isWholeReference(text: string, start: number, marker: string): boolean {
-  const next = text[start + marker.length]
-  return next === undefined || !/[A-Za-z0-9_-]/.test(next)
-}
-
 function forEachTemplateExpression(
   template: string,
-  visit: (expression: string) => string | null,
+  visit: (expression: string, nodeId: string, prefix: string, suffix: string) => string | null,
 ): string {
-  return template.replace(/\{\{\s*nodes\.[A-Za-z0-9_-]+[^}]*?\}\}/g, expression => visit(expression) ?? expression)
+  // 与后端 REFERENCE_RE 使用相同的路径字符；节点 ID 只取 nodes 后第一个路径段。
+  return template.replace(
+    /(\{\{\s*nodes\.)([A-Za-z0-9_-]+)((?:\.[A-Za-z0-9_.-]*)?\s*\}\})/g,
+    (expression, prefix: string, nodeId: string, suffix: string) => visit(expression, nodeId, prefix, suffix) ?? expression,
+  )
 }
 
 /** 把模板里指向被重命名节点的 `{{ nodes.<old>.* }}` 换成 `{{ nodes.<new>.* }}`。 */
 export function rewriteTemplateReferences(template: string, rename: Map<string, string>): string {
   if (!template || !rename.size) return template
-  return forEachTemplateExpression(template, expression => {
-    for (const [from, to] of rename) {
-      const marker = `nodes.${from}`
-      const markerIndex = expression.indexOf(marker)
-      if (markerIndex < 0 || !isWholeReference(expression, markerIndex, marker)) continue
-      return `${expression.slice(0, markerIndex)}nodes.${to}${expression.slice(markerIndex + marker.length)}`
-    }
-    return null
+  return forEachTemplateExpression(template, (_expression, nodeId, prefix, suffix) => {
+    const to = rename.get(nodeId)
+    return to === undefined ? null : `${prefix}${to}${suffix}`
   })
 }
 
@@ -39,15 +32,10 @@ export function rewriteTemplateReferences(template: string, rename: Map<string, 
 export function stripTemplateReferences(template: string, removed: Set<string>): string {
   if (!template || !removed.size) return template
   let stripped = false
-  const next = forEachTemplateExpression(template, expression => {
-    for (const id of removed) {
-      const marker = `nodes.${id}`
-      const markerIndex = expression.indexOf(marker)
-      if (markerIndex < 0 || !isWholeReference(expression, markerIndex, marker)) continue
-      stripped = true
-      return ''
-    }
-    return null
+  const next = forEachTemplateExpression(template, (_expression, nodeId) => {
+    if (!removed.has(nodeId)) return null
+    stripped = true
+    return ''
   })
   // 仅在实际删除过引用时整理空白，避免顺带改写用户原有排版。
   return stripped ? next.replace(/[ \t]{2,}/g, ' ').trim() : template
@@ -68,26 +56,42 @@ function renameConditionField(field: string, rename: Map<string, string>): strin
   return field
 }
 
-function mapNodeTemplates(node: WorkflowNode, transform: (template: string) => string): WorkflowNode {
+type TemplateTransform = (template: string, field: string) => string
+
+/** 脚本参数支持任意层次的 JSON 对象/数组，与后端 render_value 和校验遍历保持一致。 */
+function mapTemplateValue(value: unknown, field: string, transform: TemplateTransform): unknown {
+  if (typeof value === 'string') return transform(value, field)
+  if (Array.isArray(value)) {
+    const next = value.map((item, index) => mapTemplateValue(item, `${field}.${index}`, transform))
+    return next.every((item, index) => item === value[index]) ? value : next
+  }
+  if (value !== null && typeof value === 'object') {
+    let changed = false
+    const entries = Object.entries(value).map(([key, item]) => {
+      const next = mapTemplateValue(item, `${field}.${key}`, transform)
+      if (next !== item) changed = true
+      return [key, next]
+    })
+    return changed ? Object.fromEntries(entries) : value
+  }
+  return value
+}
+
+function mapNodeTemplates(node: WorkflowNode, transform: TemplateTransform): WorkflowNode {
   if (node.type === 'agent') {
-    const prompt = transform(node.config.prompt || '')
+    const prompt = transform(node.config.prompt || '', 'prompt')
     return prompt === node.config.prompt ? node : { ...node, config: { ...node.config, prompt } }
   }
   if (node.type === 'output') {
-    const prompt = transform(node.config.prompt || '')
-    const path = transform(node.config.path || '')
-    if (prompt === node.config.prompt && path === node.config.path) return node
-    return { ...node, config: { ...node.config, prompt, path } }
+    const prompt = transform(node.config.prompt || '', 'prompt')
+    const path = transform(node.config.path || '', 'path')
+    const title = transform(node.config.title || '', 'title')
+    if (prompt === node.config.prompt && path === node.config.path && title === node.config.title) return node
+    return { ...node, config: { ...node.config, prompt, path, title } }
   }
   if (node.type === 'script') {
-    let changed = false
-    const params: Record<string, unknown> = { ...node.config.params }
-    for (const [key, value] of Object.entries(params)) {
-      if (typeof value !== 'string') continue
-      const next = transform(value)
-      if (next !== value) { params[key] = next; changed = true }
-    }
-    return changed ? { ...node, config: { ...node.config, params } } : node
+    const params = mapTemplateValue(node.config.params, 'params', transform) as Record<string, unknown>
+    return params === node.config.params ? node : { ...node, config: { ...node.config, params } }
   }
   return node
 }
@@ -140,15 +144,11 @@ export function collectNodeRemovalImpact(graph: WorkflowGraph, removedIds: Itera
   for (const node of graph.nodes) {
     if (removed.has(node.id)) continue
     const fields: string[] = []
-    if (node.type === 'agent' || node.type === 'output') {
-      for (const [label, template] of [['prompt', node.config.prompt], ['path', node.type === 'output' ? node.config.path : '']] as const) {
-        if (template && stripTemplateReferences(template, removed) !== template) fields.push(label)
-      }
-    } else if (node.type === 'script') {
-      for (const [key, value] of Object.entries(node.config.params)) {
-        if (typeof value === 'string' && stripTemplateReferences(value, removed) !== value) fields.push(`params.${key}`)
-      }
-    }
+    // 影响预览和实际改写共用字段遍历，避免确认弹窗漏报嵌套参数或标题。
+    mapNodeTemplates(node, (template, field) => {
+      if (stripTemplateReferences(template, removed) !== template) fields.push(field)
+      return template
+    })
     if (fields.length) danglingNodes.push({ node, fields })
   }
   return {

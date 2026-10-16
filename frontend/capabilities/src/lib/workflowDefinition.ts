@@ -4,6 +4,16 @@ import type { AgentBackendCatalog, ManagedScript, WorkflowEdge, WorkflowGraph, W
 
 export interface ManualInputField { path: string; type: string; required: boolean; description: string }
 
+/** 工作流定义是 JSON 数据；递归解包并拷贝，兼容编辑后混入的嵌套 Proxy。 */
+function cloneGraphValue<T>(value: T): T {
+  const raw = toRaw(value)
+  if (Array.isArray(raw)) return raw.map(item => cloneGraphValue(item)) as T
+  if (raw !== null && typeof raw === 'object') {
+    return Object.fromEntries(Object.entries(raw).map(([key, item]) => [key, cloneGraphValue(item)])) as T
+  }
+  return raw
+}
+
 const markdownPrompt = '根据全部上游节点输出生成结构清晰的 Markdown 主报告；返回 title、summary、content，content 必须是完整 Markdown。'
 const htmlPrompt = '只根据 Markdown 主产物生成完整 HTML 文档；返回 title、summary、content，content 必须包含 html 或 body 标签、内联 CSS、无外链脚本。'
 
@@ -24,10 +34,8 @@ export function migrateWorkflowGraph(
   to: WorkflowType,
   defaultBackend: string,
 ): WorkflowGraph {
-  // `graph` 取自 Vue 响应式表单状态，而 structuredClone 无法克隆 reactive Proxy（抛
-  // DataCloneError）。`toRaw` 只解包顶层，`graph.nodes.filter(...)` 的元素仍是代理，
-  // 因此必须在入口整体拍平一次，后续筛选与改写都只操作普通对象。
-  const source = structuredClone(toRaw(graph)) as WorkflowGraph
+  // 增删、重命名或面板编辑会把 Proxy 存入普通数组/对象，顶层 toRaw 不足以解包。
+  const source = cloneGraphValue(graph)
   if (from === to) return source
 
   const protectedIds = summarySystemNodeIds(source, from)

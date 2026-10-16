@@ -23,7 +23,7 @@ from agent_bridge.knowledge_management.docs_knowledge.backends._office_convert i
 
 def test_soffice_targets_covers_legacy_office() -> None:
     """The legacy -> OOXML mapping must include the formats we advertise."""
-    assert SOFFICE_TARGETS == {".doc": ".docx", ".ppt": ".pptx"}
+    assert SOFFICE_TARGETS == {".doc": ".docx", ".ppt": ".pptx", ".xls": ".xlsx"}
 
 
 def test_find_soffice_returns_path_when_on_path(monkeypatch: pytest.MonkeyPatch) -> None:

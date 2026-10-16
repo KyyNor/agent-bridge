@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { reactive, ref } from 'vue'
+import { effectScope, reactive, ref, toRaw } from 'vue'
+import { useWorkflowEditorState } from '../src/composables/useWorkflowEditorState.ts'
 import { migrateWorkflowGraph } from '../src/lib/workflowDefinition.ts'
-import { applyNodeIdRename, collectNodeRemovalImpact, edgeConditionNodeId, removeNodesWithReferences, validateNodeId } from '../src/lib/workflowNodeIds.ts'
+import { applyNodeIdRename, collectNodeRemovalImpact, edgeConditionNodeId, removeNodesWithReferences, rewriteTemplateReferences, stripTemplateReferences, validateNodeId } from '../src/lib/workflowNodeIds.ts'
 import type { WorkflowGraph, WorkflowNode } from '../src/api/types.ts'
 
 function agent(id: string, prompt: string, x = 0): WorkflowNode {
@@ -30,6 +31,38 @@ test('工作流类型切换接受 Vue 响应式图，不再抛 DataCloneError', 
   assert.equal(reactive(back).nodes[0].config.prompt, '采集 {{ nodes.agent-2.output }}')
   assert.deepEqual(migrateWorkflowGraph(form.value, 'operation', 'operation', 'codex').nodes.map(node => node.id), ['agent-1', 'agent-2'])
 })
+
+for (const edit of ['add', 'rename', 'delete', 'replace'] as const) {
+  test(`编辑器 ${edit} 后仍可往返切换工作流类型，且不共享嵌套对象`, () => {
+    const scope = effectScope()
+    try {
+      scope.run(() => {
+        const editor = useWorkflowEditorState({
+          defaultBackend: ref('codex'), profiles: ref([]), onSaved: async () => {}, toast: () => 0,
+        })
+        editor.form.value.definition = {
+          nodes: [agent('a', '采集'), agent('b', '整理 {{ nodes.a.output.text }}')],
+          edges: [{ id: 'a-b', source: 'a', target: 'b', condition: { field: 'nodes.a.output.text', operator: 'exists', value: null } }],
+        }
+        if (edit === 'add') editor.addNode('agent')
+        if (edit === 'rename') editor.renameWorkflowNode('a', 'gather')
+        if (edit === 'delete') editor.form.value.definition = removeNodesWithReferences(editor.form.value.definition, ['a'])
+        if (edit === 'replace') editor.replaceNode({ ...editor.form.value.definition.nodes[0], name: '改名' })
+
+        const source = editor.form.value.definition
+        const before = JSON.parse(JSON.stringify(source)) as WorkflowGraph
+        editor.changeWorkflowType('summary')
+        assert.equal(editor.form.value.workflow_type, 'summary')
+        editor.changeWorkflowType('operation')
+        assert.deepEqual(structuredClone(toRaw(editor.form.value.definition)), before)
+        editor.form.value.definition.nodes[0].config.prompt = '修改迁移后的图'
+        assert.deepEqual(JSON.parse(JSON.stringify(source)), before)
+      })
+    } finally {
+      scope.stop()
+    }
+  })
+}
 
 test('删除节点会清理下游悬空引用、相连边与失效条件边', () => {
   const graph: WorkflowGraph = {
@@ -93,6 +126,61 @@ test('重命名不会误伤前缀相同的其他节点引用', () => {
   }
   const next = applyNodeIdRename(graph, 'agent-1', 'gather')
   assert.equal(next.nodes[2].config.prompt, '{{ nodes.agent-11.output }}')
+})
+
+test('重命名和删除覆盖嵌套脚本参数、数组与输出标题，预览列出完整字段路径', () => {
+  const report = output('report', 'markdown', 'report.md', '报告')
+  if (report.type === 'output') report.config.title = '标题 {{ nodes.a.output.text }}'
+  const params = {
+    payload: { text: '{{ nodes.a.output.text }}', keep: '{{ nodes.b.output.text }}' },
+    items: ['{{ nodes.a.output.text }}', { text: '依据 {{ nodes.a.output.text }} 生成' }, 3, false, null],
+  }
+  const graph: WorkflowGraph = {
+    nodes: [agent('a', '采集'), agent('b', '整理'), {
+      id: 'script', type: 'script', name: '脚本', position: { x: 0, y: 0 },
+      config: { script_key: 's', params, timeout_seconds: 60 },
+    }, report],
+    edges: [
+      { id: 'a-b', source: 'a', target: 'b', condition: null },
+      { id: 'b-script', source: 'b', target: 'script', condition: null },
+      { id: 'script-report', source: 'script', target: 'report', condition: null },
+    ],
+  }
+  const before = structuredClone(graph)
+  const impact = collectNodeRemovalImpact(graph, ['a'])
+  assert.deepEqual(impact.danglingNodes.map(({ node, fields }) => [node.id, fields]), [
+    ['script', ['params.payload.text', 'params.items.0', 'params.items.1.text']],
+    ['report', ['title']],
+  ])
+
+  const renamed = applyNodeIdRename(graph, 'a', 'gather')
+  assert.deepEqual(renamed.nodes[2].config.params, {
+    payload: { text: '{{ nodes.gather.output.text }}', keep: '{{ nodes.b.output.text }}' },
+    items: ['{{ nodes.gather.output.text }}', { text: '依据 {{ nodes.gather.output.text }} 生成' }, 3, false, null],
+  })
+  assert.equal(renamed.nodes[3].config.title, '标题 {{ nodes.gather.output.text }}')
+
+  const deleted = removeNodesWithReferences(graph, ['a'])
+  assert.deepEqual(deleted.nodes[1].config.params, {
+    payload: { text: '', keep: '{{ nodes.b.output.text }}' },
+    items: ['', { text: '依据 生成' }, 3, false, null],
+  })
+  assert.equal(deleted.nodes[2].config.title, '标题')
+  assert.deepEqual(collectNodeRemovalImpact(deleted, ['a']).danglingNodes, [])
+  assert.deepEqual(graph, before)
+})
+
+test('引用只按首个节点路径段匹配，不误改输出数据中的 nodes 字段', () => {
+  const other = '{{ nodes.b.output.nodes.a }}'
+  const prefix = '{{ nodes.a-long.output.text }}'
+  const own = '{{  nodes.a.output.nodes.a  }}'
+  const template = `${other} / ${prefix} / ${own}`
+  assert.equal(rewriteTemplateReferences(template, new Map([['a', 'gather']])), `${other} / ${prefix} / {{  nodes.gather.output.nodes.a  }}`)
+  assert.equal(stripTemplateReferences(template, new Set(['a'])), `${other} / ${prefix} /`)
+  assert.equal(stripTemplateReferences(other, new Set(['a'])), other)
+  assert.equal(stripTemplateReferences(prefix, new Set(['a'])), prefix)
+  // 非法模板不是后端可解析的引用，不应被节点操作顺带改写。
+  assert.equal(rewriteTemplateReferences('{{ nodes.a + 1 }}', new Map([['a', 'gather']])), '{{ nodes.a + 1 }}')
 })
 
 test('节点 ID 校验拦截非法字符与重复占用', () => {
