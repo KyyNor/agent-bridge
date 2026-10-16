@@ -6,6 +6,8 @@ import { Handle, Position, VueFlow, type Connection, type Edge, type Node } from
 import { Maximize, Trash2 } from '@lucide/vue'
 import type { WorkflowGraph, WorkflowNodeType, WorkflowType, WorkflowValidationError } from '../../api/types'
 import { fromVueFlowElements, isProtectedSummaryEdge, isProtectedSummaryNode, toVueFlowElements } from '../../lib/workflowDefinition'
+import { collectNodeRemovalImpact, removeNodesWithReferences } from '../../lib/workflowNodeIds'
+import { confirm } from '../../composables/useConfirm'
 import { workflowNodeToneClass, workflowNodeTypeText } from '../../lib/workflowNodeVisuals'
 import Button from '../../components/ui/button/Button.vue'
 import '@vue-flow/core/dist/style.css'
@@ -44,11 +46,10 @@ function onPaneClick() { selectedNodeId.value = null; selectedEdgeId.value = nul
 function updatePosition(event: { node: Node }) { const node = flowNodes.value.find(item => item.id === event.node.id); if (node) { node.position = event.node.position; sync() } }
 function deleteSelected() {
   if (selectedNodeId.value) {
-    const domain = graph.value.nodes.find(node => node.id === selectedNodeId.value)
+    const id = selectedNodeId.value
+    const domain = graph.value.nodes.find(node => node.id === id)
     if (domain && !isProtectedSummaryNode(domain, props.workflowType)) {
-      flowNodes.value = flowNodes.value.filter(node => node.id !== selectedNodeId.value)
-      flowEdges.value = flowEdges.value.filter(edge => edge.source !== selectedNodeId.value && edge.target !== selectedNodeId.value)
-      selectedNodeId.value = null; sync()
+      void removeNodeWithReferenceCleanup(id, domain.name)
     }
     return
   }
@@ -56,6 +57,29 @@ function deleteSelected() {
     const domain = graph.value.edges.find(edge => edge.id === selectedEdgeId.value)
     if (domain && !isProtectedSummaryEdge(domain, props.workflowType)) { flowEdges.value = flowEdges.value.filter(edge => edge.id !== selectedEdgeId.value); selectedEdgeId.value = null; sync() }
   }
+}
+
+/**
+ * 删除节点前先算出悬空引用面并请用户确认，再连同引用一并清理。
+ * 遗留 `{{ nodes.<已删节点>.* }}` 会让整图校验失败，用户必须逐个下游节点手工删文本。
+ */
+async function removeNodeWithReferenceCleanup(id: string, name: string) {
+  const impact = collectNodeRemovalImpact(graph.value, [id])
+  if (impact.danglingNodes.length || impact.orphanedEdges.length) {
+    const affected = [
+      ...impact.danglingNodes.map(item => `· ${item.node.name}（${item.node.id}）的 ${item.fields.join('、')} 引用将被清理`),
+      ...impact.orphanedEdges.map(edge => `· 条件引用该节点的连线 ${edge.id} 将被删除`),
+    ]
+    const accepted = await confirm({
+      title: `删除节点「${name}」？`,
+      description: ['以下内容引用了它，删除后会一并处理：', ...affected].join('\n'),
+      confirmText: '删除并清理引用',
+      destructive: true,
+    })
+    if (!accepted) return
+  }
+  graph.value = removeNodesWithReferences(graph.value, [id])
+  selectedNodeId.value = null
 }
 function drop(event: DragEvent) {
   const type = event.dataTransfer?.getData('application/agent-bridge-workflow-node') as WorkflowNodeType | ''

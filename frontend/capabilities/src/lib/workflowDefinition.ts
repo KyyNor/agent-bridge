@@ -1,3 +1,4 @@
+import { toRaw } from 'vue'
 import type { Edge, Node } from '@vue-flow/core'
 import type { AgentBackendCatalog, ManagedScript, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowType } from '../api/types'
 
@@ -23,28 +24,26 @@ export function migrateWorkflowGraph(
   to: WorkflowType,
   defaultBackend: string,
 ): WorkflowGraph {
-  if (from === to) return structuredClone(graph)
+  // `graph` 取自 Vue 响应式表单状态，而 structuredClone 无法克隆 reactive Proxy（抛
+  // DataCloneError）。`toRaw` 只解包顶层，`graph.nodes.filter(...)` 的元素仍是代理，
+  // 因此必须在入口整体拍平一次，后续筛选与改写都只操作普通对象。
+  const source = structuredClone(toRaw(graph)) as WorkflowGraph
+  if (from === to) return source
 
-  const protectedIds = summarySystemNodeIds(graph, from)
+  const protectedIds = summarySystemNodeIds(source, from)
+  const isUserEdge = (edge: WorkflowEdge) =>
+    !edge.system_role && !protectedIds.has(edge.source) && !protectedIds.has(edge.target)
+
   if (to === 'operation') {
-    const nodes = graph.nodes.filter(node => !protectedIds.has(node.id))
     return {
-      nodes: structuredClone(nodes),
-      edges: structuredClone(
-        graph.edges.filter(
-          edge => !edge.system_role && !protectedIds.has(edge.source) && !protectedIds.has(edge.target),
-        ),
-      ),
+      nodes: source.nodes.filter(node => !protectedIds.has(node.id)),
+      edges: source.edges.filter(isUserEdge),
     }
   }
 
-  const nodes = structuredClone(graph.nodes.filter(node => !protectedIds.has(node.id)))
+  const nodes = source.nodes.filter(node => !protectedIds.has(node.id))
   const nodeIds = new Set(nodes.map(node => node.id))
-  const edges = structuredClone(
-    graph.edges.filter(
-      edge => !edge.system_role && !protectedIds.has(edge.source) && !protectedIds.has(edge.target),
-    ),
-  )
+  const edges = source.edges.filter(isUserEdge)
   const outgoing = new Set(
     edges
       .filter(edge => nodeIds.has(edge.source) && nodeIds.has(edge.target))

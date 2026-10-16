@@ -33,10 +33,42 @@ def _agent(node_id, *, prompt="", result_mode="text", output_schema=None):
     }
 
 
-def test_validator_returns_stable_code_for_invalid_ancestor_reference(wm_paths):
-    service = AgentBridgeService.create(wm_paths, {"root"})
+def _graph_referencing(reference: str, *, with_referenced_node: bool) -> dict:
+    nodes = [
+        {
+            "id": "a",
+            "type": "agent",
+            "name": "A",
+            "position": {"x": 0, "y": 0},
+            "config": {"prompt": "", "backend_key": "codex"},
+        },
+        {
+            "id": "b",
+            "type": "agent",
+            "name": "B",
+            "position": {"x": 1, "y": 0},
+            "config": {"prompt": reference, "backend_key": "codex"},
+        },
+    ]
+    edges = [{"id": "a-b", "source": "a", "target": "b", "condition": None}]
+    if with_referenced_node:
+        # 与 b 同为 a 的下游，b 引用不到它：节点存在，但不是祖先。
+        nodes.append(
+            {
+                "id": "c",
+                "type": "agent",
+                "name": "C",
+                "position": {"x": 2, "y": 0},
+                "config": {"prompt": "", "backend_key": "codex"},
+            }
+        )
+        edges.append({"id": "a-c", "source": "a", "target": "c", "condition": None})
+    return {"nodes": nodes, "edges": edges}
 
-    result = service.workflows.validator.validate(
+
+def _validate_reference(wm_paths, reference: str, *, with_referenced_node: bool):
+    service = AgentBridgeService.create(wm_paths, {"root"})
+    return service.workflows.validator.validate(
         actor="root",
         workflow={
             "workflow_key": "bad-ref",
@@ -45,32 +77,30 @@ def test_validator_returns_stable_code_for_invalid_ancestor_reference(wm_paths):
             "profile_key": "default",
             "status": "active",
             "workflow_type": "operation",
-            "definition": {
-                "nodes": [
-                    {
-                        "id": "a",
-                        "type": "agent",
-                        "name": "A",
-                        "position": {"x": 0, "y": 0},
-                        "config": {"prompt": "", "backend_key": "codex"},
-                    },
-                    {
-                        "id": "b",
-                        "type": "agent",
-                        "name": "B",
-                        "position": {"x": 1, "y": 0},
-                        "config": {"prompt": "{{ nodes.c.output.text }}", "backend_key": "codex"},
-                    },
-                ],
-                "edges": [{"id": "a-b", "source": "a", "target": "b", "condition": None}],
-            },
+            "definition": _graph_referencing(reference, with_referenced_node=with_referenced_node),
         },
     )
+
+
+def test_validator_returns_stable_code_for_invalid_ancestor_reference(wm_paths):
+    result = _validate_reference(wm_paths, "{{ nodes.c.output.text }}", with_referenced_node=True)
 
     assert result.valid is False
     assert result.errors[0].code == "invalid_reference"
     assert result.errors[0].scope == "node"
     assert result.errors[0].id == "b"
+    assert result.errors[0].message == "节点引用必须来自祖先节点: c"
+
+
+def test_validator_reports_dangling_reference_separately_from_ancestor_reference(wm_paths):
+    """引用已被删除的节点必须与“引用非祖先节点”区分开，否则用户会误判修复方向。"""
+    result = _validate_reference(wm_paths, "{{ nodes.c.output.text }}", with_referenced_node=False)
+
+    assert result.valid is False
+    assert result.errors[0].code == "missing_reference_node"
+    assert result.errors[0].scope == "node"
+    assert result.errors[0].id == "b"
+    assert result.errors[0].message == "节点引用指向已不存在的节点: c"
 
 
 def test_validator_requires_complete_workflow_metadata(wm_paths):

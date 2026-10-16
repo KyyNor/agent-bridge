@@ -502,13 +502,20 @@ class WorkflowValidator:
                         issues.append(self._missing_reference_path("node", node.id, field, path))
                         continue
                     if referenced_id not in ancestors:
+                        # 与 collect_graph_issues 保持同一套语义：引用节点已被删除要单独成码，
+                        # 否则用户会把“清理悬空文本”误当成“调整拓扑”。
+                        dangling = referenced_id not in nodes
                         issues.append(
                             WorkflowValidationIssue(
                                 scope="node",
                                 id=node.id,
                                 field=field,
-                                code="invalid_reference",
-                                message=f"节点引用必须来自祖先节点: {referenced_id}",
+                                code="missing_reference_node" if dangling else "invalid_reference",
+                                message=(
+                                    f"节点引用指向已不存在的节点: {referenced_id}"
+                                    if dangling
+                                    else f"节点引用必须来自祖先节点: {referenced_id}"
+                                ),
                             )
                         )
                         continue

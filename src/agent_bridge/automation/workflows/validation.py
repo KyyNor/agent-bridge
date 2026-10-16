@@ -126,8 +126,24 @@ def collect_graph_issues(graph: WorkflowGraph, workflow_type: WorkflowType) -> l
         for field, template in _node_templates(node):
             for referenced in re.findall(r"\{\{\s*nodes\.([A-Za-z0-9_.-]+)", template):
                 referenced_id = referenced.split(".", 1)[0]
-                if referenced_id not in ancestors:
-                    issues.append(_issue("node", node.id, field, "invalid_reference", f"节点引用必须来自祖先节点: {referenced_id}"))
+                if referenced_id in ancestors:
+                    continue
+                # 引用节点已被删除与引用了非祖先节点是两种问题，必须分开报：
+                # 前者要清理悬空文本，后者要调整拓扑，混为一谈会让用户无从下手。
+                if referenced_id not in node_ids:
+                    issues.append(
+                        _issue(
+                            "node",
+                            node.id,
+                            field,
+                            "missing_reference_node",
+                            f"节点引用指向已不存在的节点: {referenced_id}",
+                        )
+                    )
+                else:
+                    issues.append(
+                        _issue("node", node.id, field, "invalid_reference", f"节点引用必须来自祖先节点: {referenced_id}")
+                    )
 
     if workflow_type is WorkflowType.summary:
         _validate_summary_graph(graph, incoming, outgoing, issues)

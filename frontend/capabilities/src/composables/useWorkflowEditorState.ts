@@ -8,6 +8,7 @@ import {
 } from '../api/client'
 import type { ProjectProfile, WorkflowDefinition, WorkflowDraft, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowNodeType, WorkflowTaskRefreshPolicy, WorkflowType, WorkflowValidationError } from '../api/types'
 import { createDefaultGraph, migrateWorkflowGraph } from '../lib/workflowDefinition'
+import { applyNodeIdRename } from '../lib/workflowNodeIds'
 
 type Toast = (options: { title: string; description?: string; variant?: 'default' | 'success' | 'error' | 'warning' }) => number
 
@@ -196,5 +197,10 @@ export function useWorkflowEditorState(options: {
   }
   function replaceNode(node: WorkflowNode) { form.value.definition = { ...form.value.definition, nodes: form.value.definition.nodes.map(item => item.id === node.id ? node : item) } }
   function replaceEdge(edge: WorkflowEdge) { form.value.definition = { ...form.value.definition, edges: form.value.definition.edges.map(item => item.id === edge.id ? edge : item) } }
-  return { form, saving, formError, formDirty, graphErrors, schemaEditorErrors, runValidationGuard, taskRefreshPolicy, selectedNodeId, selectedEdgeId, configDrawerOpen, configDrawerMode, selectedNode, selectedEdge, resetForm, prepareCreateForm, prepareEditForm, scopedGraphIssues, parseWorkflowIssues: parseIssues, workflowDraft: draft, validateWorkflowDraft, saveWorkflow, changeWorkflowType, createNode, addNode, selectWorkflowNode, selectWorkflowEdge, setConfigDrawerOpen, setConfigDrawerMode, setNodeSchemaValidity, replaceNode, replaceEdge }
+  const takenNodeIds = computed(() => form.value.definition.nodes.map(node => node.id))
+  function renameWorkflowNode(from: string, to: string) {
+    form.value.definition = applyNodeIdRename(form.value.definition, from, to)
+    selectedNodeId.value = to
+  }
+  return { form, saving, formError, formDirty, graphErrors, schemaEditorErrors, runValidationGuard, taskRefreshPolicy, selectedNodeId, selectedEdgeId, configDrawerOpen, configDrawerMode, selectedNode, selectedEdge, takenNodeIds, resetForm, prepareCreateForm, prepareEditForm, scopedGraphIssues, parseWorkflowIssues: parseIssues, workflowDraft: draft, validateWorkflowDraft, saveWorkflow, changeWorkflowType, createNode, addNode, selectWorkflowNode, selectWorkflowEdge, setConfigDrawerOpen, setConfigDrawerMode, setNodeSchemaValidity, replaceNode, replaceEdge, renameWorkflowNode }
 }
