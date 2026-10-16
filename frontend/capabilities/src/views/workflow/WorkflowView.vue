@@ -41,7 +41,7 @@ import GroupBadge from '../../components/GroupBadge.vue'
 import SegmentedTabs from '../../components/SegmentedTabs.vue'
 import StatCard from '../../components/StatCard.vue'
 import RevisionHistoryPanel from '../../components/version/RevisionHistoryPanel.vue'
-import { createDefaultGraph, deriveManualInputFields, deriveWorkflowBackendKeys, isProtectedSummaryEdge, migrateWorkflowGraph } from '../../lib/workflowDefinition'
+import { createDefaultGraph, deriveManualInputFields, deriveWorkflowBackendKeys, isProtectedSummaryEdge, isProtectedSummaryNode, migrateWorkflowGraph } from '../../lib/workflowDefinition'
 import { workflowNodeToneClass, workflowNodeTypeText } from '../../lib/workflowNodeVisuals'
 import { deriveAvailableData } from '../../lib/workflowReferences'
 import {
@@ -167,6 +167,8 @@ const {
   addNode,
   selectWorkflowNode,
   selectWorkflowEdge,
+  renameWorkflowNode,
+  takenNodeIds,
   setConfigDrawerOpen,
   setConfigDrawerMode,
   taskRefreshPolicy,
@@ -2006,6 +2008,7 @@ async function confirmClearWorkflow() {
                 :backends="backendKeys"
                 :reference-items="[]"
                 :issues="[]"
+                id-readonly
                 @replace="replaceTourAgentNode"
               />
             </CardContent>
@@ -2048,7 +2051,10 @@ async function confirmClearWorkflow() {
                 :backends="backendKeys"
                 :reference-items="selectedNodeReferenceItems"
                 :issues="selectedNodeIssues"
+                :taken-node-ids="takenNodeIds"
+                :id-readonly="isProtectedSummaryNode(selectedNode, form.workflow_type)"
                 @replace="replaceNode"
+                @rename-id="renameWorkflowNode"
                 @schema-validity="setNodeSchemaValidity"
               />
               <WorkflowEdgeConfigPanel
@@ -2177,7 +2183,10 @@ async function confirmClearWorkflow() {
             :backends="backendKeys"
             :reference-items="selectedNodeReferenceItems"
             :issues="selectedNodeIssues"
+            :taken-node-ids="takenNodeIds"
+            :id-readonly="isProtectedSummaryNode(selectedNode, form.workflow_type)"
             @replace="replaceNode"
+            @rename-id="renameWorkflowNode"
             @schema-validity="setNodeSchemaValidity"
           />
           <WorkflowEdgeConfigPanel

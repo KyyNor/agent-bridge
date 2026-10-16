@@ -1,7 +1,18 @@
+import { toRaw } from 'vue'
 import type { Edge, Node } from '@vue-flow/core'
 import type { AgentBackendCatalog, ManagedScript, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowType } from '../api/types'
 
 export interface ManualInputField { path: string; type: string; required: boolean; description: string }
+
+/** 工作流定义是 JSON 数据；递归解包并拷贝，兼容编辑后混入的嵌套 Proxy。 */
+function cloneGraphValue<T>(value: T): T {
+  const raw = toRaw(value)
+  if (Array.isArray(raw)) return raw.map(item => cloneGraphValue(item)) as T
+  if (raw !== null && typeof raw === 'object') {
+    return Object.fromEntries(Object.entries(raw).map(([key, item]) => [key, cloneGraphValue(item)])) as T
+  }
+  return raw
+}
 
 const markdownPrompt = '根据全部上游节点输出生成结构清晰的 Markdown 主报告；返回 title、summary、content，content 必须是完整 Markdown。'
 const htmlPrompt = '只根据 Markdown 主产物生成完整 HTML 文档；返回 title、summary、content，content 必须包含 html 或 body 标签、内联 CSS、无外链脚本。'
@@ -23,28 +34,24 @@ export function migrateWorkflowGraph(
   to: WorkflowType,
   defaultBackend: string,
 ): WorkflowGraph {
-  if (from === to) return structuredClone(graph)
+  // 增删、重命名或面板编辑会把 Proxy 存入普通数组/对象，顶层 toRaw 不足以解包。
+  const source = cloneGraphValue(graph)
+  if (from === to) return source
 
-  const protectedIds = summarySystemNodeIds(graph, from)
+  const protectedIds = summarySystemNodeIds(source, from)
+  const isUserEdge = (edge: WorkflowEdge) =>
+    !edge.system_role && !protectedIds.has(edge.source) && !protectedIds.has(edge.target)
+
   if (to === 'operation') {
-    const nodes = graph.nodes.filter(node => !protectedIds.has(node.id))
     return {
-      nodes: structuredClone(nodes),
-      edges: structuredClone(
-        graph.edges.filter(
-          edge => !edge.system_role && !protectedIds.has(edge.source) && !protectedIds.has(edge.target),
-        ),
-      ),
+      nodes: source.nodes.filter(node => !protectedIds.has(node.id)),
+      edges: source.edges.filter(isUserEdge),
     }
   }
 
-  const nodes = structuredClone(graph.nodes.filter(node => !protectedIds.has(node.id)))
+  const nodes = source.nodes.filter(node => !protectedIds.has(node.id))
   const nodeIds = new Set(nodes.map(node => node.id))
-  const edges = structuredClone(
-    graph.edges.filter(
-      edge => !edge.system_role && !protectedIds.has(edge.source) && !protectedIds.has(edge.target),
-    ),
-  )
+  const edges = source.edges.filter(isUserEdge)
   const outgoing = new Set(
     edges
       .filter(edge => nodeIds.has(edge.source) && nodeIds.has(edge.target))

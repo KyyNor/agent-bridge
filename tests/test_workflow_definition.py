@@ -179,3 +179,39 @@ def test_edge_condition_cannot_read_parallel_node_output():
         assert any(issue.id == "left-end" and issue.field == "condition.field" for issue in exc.issues)
     else:
         raise AssertionError("expected condition dependency validation error")
+
+
+def test_collect_graph_issues_distinguishes_dangling_node_reference():
+    """删除前置节点后遗留的引用必须报“已不存在”，而不是误导性的“非祖先”。"""
+    from agent_bridge.automation.workflows.definition import (
+        AgentConfig,
+        AgentNode,
+        NodePosition,
+        WorkflowEdge,
+        WorkflowGraph,
+    )
+    from agent_bridge.automation.workflows.models import WorkflowType
+    from agent_bridge.automation.workflows.validation import collect_graph_issues
+
+    def agent(node_id: str, prompt: str) -> AgentNode:
+        return AgentNode(
+            id=node_id,
+            type="agent",
+            name=node_id,
+            position=NodePosition(x=0, y=0),
+            config=AgentConfig(prompt=prompt, backend_key="codex"),
+        )
+
+    graph = WorkflowGraph(
+        nodes=[agent("agent-2", "{{ nodes.agent-1.output }}"), agent("agent-1", "采集")],
+        edges=[WorkflowEdge(id="e1", source="agent-1", target="agent-2")],
+    )
+    # 先按用户场景删掉 agent-1，再保留 agent-2 里对它的引用。
+    graph.nodes = [node for node in graph.nodes if node.id != "agent-1"]
+    graph.edges = []
+
+    issues = collect_graph_issues(graph, WorkflowType.operation)
+
+    assert [issue.code for issue in issues] == ["missing_reference_node"]
+    assert issues[0].message == "节点引用指向已不存在的节点: agent-1"
+    assert issues[0].id == "agent-2"

@@ -3,6 +3,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { ArrowDown, ArrowUp, Check, ChevronRight, Trash2 } from '@lucide/vue'
 import type { ManagedScript, SkillPrompt, WorkflowNode, WorkflowValidationError } from '../../api/types'
 import { deriveNodeOutputSchema, type WorkflowReferenceItem } from '../../lib/workflowReferences'
+import { validateNodeId } from '../../lib/workflowNodeIds'
 import Button from '../../components/ui/button/Button.vue'
 import Input from '../../components/ui/input/Input.vue'
 import Textarea from '../../components/ui/textarea/Textarea.vue'
@@ -18,10 +19,11 @@ import SelectValue from '../../components/ui/select/SelectValue.vue'
 
 interface InsertableField { focus(): void; insertText(value: string): void }
 
-const props = defineProps<{ node: WorkflowNode; scripts: ManagedScript[]; skills: SkillPrompt[]; backends: string[]; referenceItems?: WorkflowReferenceItem[]; issues?: WorkflowValidationError[] }>()
+const props = defineProps<{ node: WorkflowNode; scripts: ManagedScript[]; skills: SkillPrompt[]; backends: string[]; referenceItems?: WorkflowReferenceItem[]; issues?: WorkflowValidationError[]; takenNodeIds?: string[]; idReadonly?: boolean }>()
 const emit = defineEmits<{
   replace: [node: WorkflowNode]
   'schema-validity': [nodeId: string, valid: boolean, message: string]
+  'rename-id': [from: string, to: string]
 }>()
 const activeField = ref<InsertableField | null>(null)
 const sectionRef = ref<HTMLElement | null>(null)
@@ -45,6 +47,24 @@ const selectedScript = computed(() => {
 const scriptProperties = computed(() => (selectedScript.value?.input_schema?.properties || {}) as Record<string, Record<string, unknown>>)
 const requiredParams = computed(() => new Set(Array.isArray(selectedScript.value?.input_schema?.required) ? selectedScript.value?.input_schema.required.filter((key): key is string => typeof key === 'string') : []))
 const outputSchema = computed(() => deriveNodeOutputSchema(props.node, selectedScript.value))
+/** 节点 ID 草稿与校验信息；提交前先本地校验，通过后交由上层级联重写引用。 */
+const idDraft = ref(props.node.id)
+const idError = ref('')
+watch(() => props.node.id, () => { idDraft.value = props.node.id; idError.value = '' })
+/** 说明文案在脚本里拼装：模板内直接写 `{{ nodes.… }}` 会被当成插值提前解析。 */
+const idHint = computed(() => `引用写作 {{ nodes.${props.node.id}.* }}，改名会同步更新下游引用与连线。重命名与改提示词同属执行语义变更，会让受影响任务失去增量复用资格。`)
+
+function commitNodeId() {
+  if (props.idReadonly) return
+  const next = idDraft.value.trim()
+  if (next === props.node.id) { idError.value = ''; return }
+  const taken = (props.takenNodeIds || []).filter(id => id !== props.node.id)
+  const problem = validateNodeId(next, taken)
+  if (problem) { idError.value = problem; return }
+  idError.value = ''
+  idDraft.value = next
+  emit('rename-id', props.node.id, next)
+}
 
 function replace(patch: Record<string, unknown>) { emit('replace', { ...props.node, ...patch } as WorkflowNode) }
 function config(patch: Record<string, unknown>) { replace({ config: { ...props.node.config, ...patch } }) }
@@ -131,6 +151,20 @@ function getTaskEmptyMode() {
         <WorkflowReferencePicker :items="referenceItems" mode="template" @insert="insertReference" @inserted="onReferenceInserted" />
       </div>
     </details>
+    <div>
+      <label class="mb-1 block text-xs text-muted-foreground">节点 ID</label>
+      <Input
+        v-model="idDraft"
+        :disabled="idReadonly"
+        class="font-mono"
+        :aria-invalid="Boolean(idError)"
+        :aria-describedby="idError ? issueId('id-draft') : undefined"
+        @blur="commitNodeId"
+        @keydown.enter.prevent="commitNodeId"
+      />
+      <p v-if="idError" :id="issueId('id-draft')" class="mt-1 text-xs text-destructive">{{ idError }}</p>
+      <p v-else-if="!idReadonly" class="mt-1 text-xs text-muted-foreground">{{ idHint }}</p>
+    </div>
     <div>
       <label class="mb-1 block text-xs text-muted-foreground">名称</label>
       <Input :model-value="node.name" :aria-invalid="Boolean(issueFor('name'))" :aria-describedby="issueFor('name') ? issueId('name') : undefined" @update:model-value="replace({ name: String($event) })" />
