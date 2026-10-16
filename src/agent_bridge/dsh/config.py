@@ -37,6 +37,10 @@ COMMAND_PLACEHOLDERS = ("port", "patch")
 DEFAULT_IDLE_TIMEOUT_MINUTES = 720
 MIN_IDLE_TIMEOUT_MINUTES = 1
 MAX_IDLE_TIMEOUT_MINUTES = 30 * 24 * 60
+# token 数量型配置（上下文长度、单次输出上限）的上限。取 10M：已远超当前主流
+# 模型的实际取值（上下文最长在 1M 量级，输出上限多在 32K~64K），只为挡住误
+# 输入（如把字节数当 token 数填进来），不构成真实能力约束。
+MAX_TOKEN_LIMIT_TOKENS = 10_000_000
 
 _LINUX_USER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9._-]*\$?$")
 
@@ -89,6 +93,41 @@ def normalize_models(values: list[str] | None) -> list[str]:
         if name and name not in models:
             models.append(name)
     return models
+
+
+def normalize_token_limit(value: int | None, *, label: str) -> int:
+    """校验「token 数量」型配置；0 表示不声明（沿用 CLI 自身默认）。
+
+    DSH ``llm-pi-ai`` 的 zod schema 是 ``z.number().step(1).min(1)``（正整数），
+    Pi 的 ``models.json`` 要求正数且在合成时对 ``<= 0`` 直接抛错。两个上游的
+    口径只在整数上重合，因此这里统一按正整数校验——非整数只会被 Pi 接受、
+    被 DSH 拒绝，写死在配置层可以避免注入出一个 DSH 起不来的覆盖文件。
+    """
+    if value is None:
+        return 0
+    try:
+        limit = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(f"{label}必须是整数") from exc
+    if isinstance(value, float) and limit != value:
+        raise ValidationError(f"{label}必须是整数")
+    if limit == 0:
+        return 0
+    if limit < 0 or limit > MAX_TOKEN_LIMIT_TOKENS:
+        raise ValidationError(
+            f"{label}必须在 0（不声明）或 1-{MAX_TOKEN_LIMIT_TOKENS} 之间"
+        )
+    return limit
+
+
+def normalize_context_window(value: int | None) -> int:
+    """校验上下文长度；0 表示不声明（沿用 CLI 自身默认）。"""
+    return normalize_token_limit(value, label="上下文长度")
+
+
+def normalize_max_tokens(value: int | None) -> int:
+    """校验单次输出上限；0 表示不声明（沿用 CLI 自身默认）。"""
+    return normalize_token_limit(value, label="最大输出 token 数")
 
 
 class DshConfigService:
@@ -197,6 +236,8 @@ class DshConfigService:
         base_url: str = "",
         available_models: list[str] | None = None,
         pi_web_command: str | None = None,
+        context_window: int | None = None,
+        max_tokens: int | None = None,
         expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
@@ -218,12 +259,26 @@ class DshConfigService:
             if pi_web_command is not None
             else str(current.get("pi_web_command") or "") or normalize_pi_web_command("")
         )
+        # 上下文长度沿用同一条「未携带 / 显式清空」语义：旧客户端不认识该字段时
+        # 不能把管理员配置的窗口静默清掉，显式传 0 表示恢复为不声明。
+        cleaned_context_window = (
+            normalize_context_window(context_window)
+            if context_window is not None
+            else int(current.get("context_window") or 0)
+        )
+        cleaned_max_tokens = (
+            normalize_max_tokens(max_tokens)
+            if max_tokens is not None
+            else int(current.get("max_tokens") or 0)
+        )
         saved = self._repo.save_runtime_config(
             web_command=cleaned_command,
             pi_web_command=cleaned_pi_command,
             idle_timeout_minutes=cleaned_timeout,
             base_url=normalize_base_url(base_url),
             available_models=normalize_models(available_models),
+            context_window=cleaned_context_window,
+            max_tokens=cleaned_max_tokens,
         )
         resolved = self._resolve_runtime_config_from(saved)
         logger.info(
@@ -246,6 +301,8 @@ class DshConfigService:
             "base_url": runtime["base_url"],
             "base_url_source": runtime["base_url_source"],
             "available_models": runtime["available_models"],
+            "context_window": runtime["context_window"],
+            "max_tokens": runtime["max_tokens"],
             "default_model": str(group.get("default_model") or ""),
             "api_key": str(group.get("api_key") or ""),
         }
@@ -287,6 +344,8 @@ class DshConfigService:
             "base_url": resolved_base_url,
             "base_url_source": source,
             "available_models": normalize_models(raw.get("available_models") or []),
+            "context_window": normalize_context_window(raw.get("context_window")),
+            "max_tokens": normalize_max_tokens(raw.get("max_tokens")),
             "updated_at": raw.get("updated_at"),
         }
 
@@ -300,6 +359,8 @@ class DshConfigService:
             "resolved_base_url": str(config.get("base_url") or ""),
             "base_url_source": str(config.get("base_url_source") or ""),
             "available_models": list(config.get("available_models") or []),
+            "context_window": int(config.get("context_window") or 0),
+            "max_tokens": int(config.get("max_tokens") or 0),
             "updated_at": config.get("updated_at"),
         }
 
@@ -312,6 +373,8 @@ class DshConfigService:
             "idle_timeout_minutes": int(config.get("idle_timeout_minutes") or 0),
             "base_url": str(config.get("saved_base_url") or ""),
             "available_models": list(config.get("available_models") or []),
+            "context_window": int(config.get("context_window") or 0),
+            "max_tokens": int(config.get("max_tokens") or 0),
         }
 
     @classmethod

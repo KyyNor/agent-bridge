@@ -12,7 +12,12 @@ import StatusBadge from '../StatusBadge.vue'
 import PiVersionsList from './PiVersionsList.vue'
 
 const runtimeConfig = ref<DshRuntimeConfig | null>(null)
-const runtimeForm = ref({ web_command: '', pi_web_command: '', idle_timeout_minutes: 120, base_url: '', models: [''] })
+
+// 上限 10M 只为挡住误输入（如把字节数当 token 数填），与服务端校验保持一致。
+function isTokenLimit(value: number) {
+  return Number.isInteger(value) && value >= 0 && value <= 10_000_000
+}
+const runtimeForm = ref({ web_command: '', pi_web_command: '', idle_timeout_minutes: 120, base_url: '', models: [''], context_window: 0, max_tokens: 0 })
 const runtimeSaving = ref(false)
 const runtimeError = ref('')
 const runtimeMessage = ref('')
@@ -45,6 +50,10 @@ const idleTimeoutValid = computed(
   () => Number.isInteger(runtimeForm.value.idle_timeout_minutes) && runtimeForm.value.idle_timeout_minutes >= 1,
 )
 const modelsValid = computed(() => runtimeForm.value.models.every(item => item.trim().length > 0))
+// 0 表示不声明，由 DSH / Pi 沿用各自默认（DSH 262144、Pi 128000）。
+const contextWindowValid = computed(() => isTokenLimit(runtimeForm.value.context_window))
+// 单次输出上限，同样 0 = 不声明（DSH 32768、Pi 16384）。
+const maxTokensValid = computed(() => isTokenLimit(runtimeForm.value.max_tokens))
 const defaultModelValid = computed(
   () => !groupForm.value.default_model || modelOptions.value.includes(groupForm.value.default_model),
 )
@@ -63,6 +72,8 @@ async function loadRuntimeConfig() {
       idle_timeout_minutes: config.idle_timeout_minutes,
       base_url: config.base_url,
       models: config.available_models.length ? [...config.available_models] : [''],
+      context_window: config.context_window ?? 0,
+      max_tokens: config.max_tokens ?? 0,
     }
     runtimeError.value = ''
   } catch (e: any) {
@@ -107,7 +118,7 @@ function removeModelRow(index: number) {
 }
 
 async function saveRuntimeConfig() {
-  if (!runtimeConfig.value || !idleTimeoutValid.value || !modelsValid.value) return
+  if (!runtimeConfig.value || !idleTimeoutValid.value || !modelsValid.value || !contextWindowValid.value || !maxTokensValid.value) return
   runtimeSaving.value = true
   runtimeError.value = ''
   runtimeMessage.value = ''
@@ -118,6 +129,8 @@ async function saveRuntimeConfig() {
       idle_timeout_minutes: runtimeForm.value.idle_timeout_minutes,
       base_url: runtimeForm.value.base_url.trim(),
       available_models: runtimeForm.value.models.map(item => item.trim()).filter(Boolean),
+      context_window: runtimeForm.value.context_window,
+      max_tokens: runtimeForm.value.max_tokens,
       expected_edit_token: runtimeConfig.value.edit_token,
     })
     runtimeConfig.value = saved
@@ -127,6 +140,8 @@ async function saveRuntimeConfig() {
       idle_timeout_minutes: saved.idle_timeout_minutes,
       base_url: saved.base_url,
       models: saved.available_models.length ? [...saved.available_models] : [''],
+      context_window: saved.context_window ?? 0,
+      max_tokens: saved.max_tokens ?? 0,
     }
     runtimeMessage.value = '运行配置已保存，下次启动工作台时生效'
   } catch (e: any) {
@@ -264,6 +279,40 @@ async function saveGroupConfig() {
           </div>
         </div>
         <div class="grid grid-cols-[12rem_1fr] items-center gap-4">
+          <div class="text-sm">上下文长度 <span class="text-xs text-muted-foreground">(公共)</span></div>
+          <div class="space-y-1">
+            <Input
+              v-model.number="runtimeForm.context_window"
+              type="number"
+              min="0"
+              max="10000000"
+              placeholder="留空或填 0 表示不声明"
+              class="w-56 font-mono text-sm"
+            />
+            <div v-if="contextWindowValid" class="text-xs text-muted-foreground">
+              以 <code class="font-mono">contextWindow</code> 逐模型注入到上面列出的模型，DSH 与 Pi 同时生效；0 表示不声明，沿用各自默认（DSH 262144、Pi 128000）
+            </div>
+            <div v-else class="text-xs text-destructive">请输入 0-10000000 的整数</div>
+          </div>
+        </div>
+        <div class="grid grid-cols-[12rem_1fr] items-center gap-4">
+          <div class="text-sm">单次输出上限 <span class="text-xs text-muted-foreground">(公共)</span></div>
+          <div class="space-y-1">
+            <Input
+              v-model.number="runtimeForm.max_tokens"
+              type="number"
+              min="0"
+              max="10000000"
+              placeholder="留空或填 0 表示不声明"
+              class="w-56 font-mono text-sm"
+            />
+            <div v-if="maxTokensValid" class="text-xs text-muted-foreground">
+              以 <code class="font-mono">maxTokens</code> 逐模型注入，DSH 与 Pi 同时生效；0 表示不声明，沿用各自默认（DSH 32768、Pi 16384）
+            </div>
+            <div v-else class="text-xs text-destructive">请输入 0-10000000 的整数</div>
+          </div>
+        </div>
+        <div class="grid grid-cols-[12rem_1fr] items-center gap-4">
           <div class="text-sm">空闲回收阈值 <span class="text-xs text-muted-foreground">(分钟)</span></div>
           <div class="flex items-center gap-3">
             <Input v-model.number="runtimeForm.idle_timeout_minutes" type="number" min="1" class="w-32 font-mono text-sm" />
@@ -272,7 +321,7 @@ async function saveGroupConfig() {
           </div>
         </div>
         <div class="flex items-center gap-3">
-          <Button size="sm" :disabled="runtimeSaving || !idleTimeoutValid || !modelsValid" @click="saveRuntimeConfig()">
+          <Button size="sm" :disabled="runtimeSaving || !idleTimeoutValid || !modelsValid || !contextWindowValid || !maxTokensValid" @click="saveRuntimeConfig()">
             {{ runtimeSaving ? '保存中...' : '保存运行配置' }}
           </Button>
           <span v-if="runtimeError" class="text-xs text-destructive">{{ runtimeError }}</span>

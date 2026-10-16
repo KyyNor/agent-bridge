@@ -89,7 +89,7 @@ class DshConfigRepository:
             row = conn.execute(
                 """
                 SELECT web_command, pi_web_command, idle_timeout_minutes, base_url,
-                       available_models_json, updated_at
+                       available_models_json, context_window, max_tokens, updated_at
                 FROM dsh_runtime_config WHERE id = 1
                 """
             ).fetchone()
@@ -100,6 +100,8 @@ class DshConfigRepository:
                 "idle_timeout_minutes": 0,
                 "base_url": "",
                 "available_models": [],
+                "context_window": 0,
+                "max_tokens": 0,
                 "updated_at": None,
             }
         config = dict(row)
@@ -114,6 +116,8 @@ class DshConfigRepository:
         base_url: str,
         available_models: list[str],
         pi_web_command: str | None = None,
+        context_window: int = 0,
+        max_tokens: int = 0,
     ) -> dict[str, Any]:
         updated_at = utc_iso()
         with self._connect() as conn:
@@ -121,15 +125,17 @@ class DshConfigRepository:
                 """
                 INSERT INTO dsh_runtime_config (
                   id, web_command, pi_web_command, idle_timeout_minutes, base_url,
-                  available_models_json, updated_at
+                  available_models_json, context_window, max_tokens, updated_at
                 )
-                VALUES (1, ?, ?, ?, ?, ?, ?)
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                   web_command = excluded.web_command,
                   pi_web_command = excluded.pi_web_command,
                   idle_timeout_minutes = excluded.idle_timeout_minutes,
                   base_url = excluded.base_url,
                   available_models_json = excluded.available_models_json,
+                  context_window = excluded.context_window,
+                  max_tokens = excluded.max_tokens,
                   updated_at = excluded.updated_at
                 """,
                 (
@@ -138,6 +144,8 @@ class DshConfigRepository:
                     idle_timeout_minutes,
                     base_url,
                     json.dumps(available_models, ensure_ascii=False),
+                    context_window,
+                    max_tokens,
                     updated_at,
                 ),
             )

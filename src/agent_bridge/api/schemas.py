@@ -47,6 +47,13 @@ class DshRuntimeConfigUpdateRequest(BaseModel):
     idle_timeout_minutes: int = Field(ge=1, le=43200)
     base_url: str = Field(default="", max_length=2048)
     available_models: list[str] = Field(default_factory=list, max_length=200)
+    # 托管模型条目的上下文长度（token）。0 表示不声明，由 DSH / Pi 沿用各自
+    # 默认（DSH 262144、Pi 128000）。语义同 pi_web_command：None = 未携带，
+    # 保留已保存值；显式 0 = 恢复为不声明。
+    context_window: int | None = Field(default=None, ge=0, le=10_000_000)
+    # 单次输出上限（token），语义与取值校验同 context_window；0 = 不声明
+    # （DSH 32768、Pi 16384）。
+    max_tokens: int | None = Field(default=None, ge=0, le=10_000_000)
     expected_edit_token: str | None = None
 
 

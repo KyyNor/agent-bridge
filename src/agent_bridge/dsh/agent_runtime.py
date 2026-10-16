@@ -137,6 +137,8 @@ class DshAgentRuntimeResolver:
             base_url=base_url,
             models=available_models,
             default_model=resolved_model,
+            context_window=int(binding.get("context_window") or 0),
+            max_tokens=int(binding.get("max_tokens") or 0),
             env={**os.environ, **resolved.process_env()},
             cwd=identity.home if identity.home.is_dir() else dsh_home,
             identity=identity,

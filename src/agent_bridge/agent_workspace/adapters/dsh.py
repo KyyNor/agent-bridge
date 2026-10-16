@@ -431,6 +431,8 @@ class DshWorkspaceAdapter:
             base_url=str(binding.get("base_url") or ""),
             models=[str(item) for item in binding.get("available_models") or []],
             default_model=str(binding.get("default_model") or ""),
+            context_window=int(binding.get("context_window") or 0),
+            max_tokens=int(binding.get("max_tokens") or 0),
             env=env,
             cwd=identity.home if identity.home.is_dir() else config_dir,
             identity=identity,

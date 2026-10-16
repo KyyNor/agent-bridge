@@ -471,6 +471,10 @@ def apply_followup_schema(store: Any, conn: sqlite3.Connection) -> None:
             "available_models_json": "TEXT NOT NULL DEFAULT '[]'",
             # Pi 工作台的启动命令模板（与 DSH 的 web_command 并列，组级配置共享）。
             "pi_web_command": "TEXT NOT NULL DEFAULT ''",
+            # 托管模型条目的上下文长度（0 = 不声明，沿用 CLI 自身默认）。
+            "context_window": "INTEGER NOT NULL DEFAULT 0",
+            # 托管模型条目的单次输出上限（0 = 不声明，同上）。
+            "max_tokens": "INTEGER NOT NULL DEFAULT 0",
         },
     )
     store._ensure_columns(conn, "dsh_group_configs", {"default_model": "TEXT NOT NULL DEFAULT ''"})

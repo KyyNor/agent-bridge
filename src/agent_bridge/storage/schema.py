@@ -603,6 +603,8 @@ CREATE TABLE IF NOT EXISTS dsh_runtime_config (
   idle_timeout_minutes INTEGER NOT NULL DEFAULT 0,
   base_url TEXT NOT NULL DEFAULT '',
   available_models_json TEXT NOT NULL DEFAULT '[]',
+  context_window INTEGER NOT NULL DEFAULT 0,
+  max_tokens INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS model_evaluation_runs (

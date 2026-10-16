@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -138,6 +139,73 @@ def test_models_json_drops_managed_provider_when_not_configured() -> None:
     existing = {"providers": {MANAGED_PROVIDER_KEY: {"baseUrl": "stale"}}}
     payload = build_models_payload(existing, base_url="", models=[], api_key_env="X")
     assert MANAGED_PROVIDER_KEY not in payload["providers"]
+
+
+def test_models_json_injects_context_window_per_model() -> None:
+    """配置的上下文长度必须逐模型写成 contextWindow；未配置时不写该键。"""
+    from agent_bridge.agent_workspace.pi_injection import (
+        MANAGED_PROVIDER_KEY,
+        build_models_payload,
+    )
+
+    declared = build_models_payload(
+        {}, base_url="https://models.example/v1", models=["m1", "m2"],
+        api_key_env="X", context_window=262144,
+    )["providers"][MANAGED_PROVIDER_KEY]["models"]
+    assert [item["contextWindow"] for item in declared] == [262144, 262144]
+
+    # 0 = 不声明：沿用 pi 自身默认（provider-composer 回落到 128000），
+    # 不能写 0——pi 的 models.json schema 与合成期都会拒绝非正数。
+    undeclared = build_models_payload(
+        {}, base_url="https://models.example/v1", models=["m1"],
+        api_key_env="X", context_window=0,
+    )["providers"][MANAGED_PROVIDER_KEY]["models"]
+    assert "contextWindow" not in undeclared[0]
+
+    # 默认参数同样不写，保持未配置部署的既有产物不变。
+    assert "contextWindow" not in build_models_payload(
+        {}, base_url="https://models.example/v1", models=["m1"], api_key_env="X",
+    )["providers"][MANAGED_PROVIDER_KEY]["models"][0]
+
+
+def test_models_json_context_window_reaches_disk(service, tmp_path) -> None:
+    """组配置里的两个上限要真正落到 models.json（端到端走注入路径）。"""
+    from agent_bridge.agent_workspace import pi_injection
+
+    pi_injection.write_models(
+        tmp_path,
+        uid=os.getuid(),
+        gid=os.getgid(),
+        base_url="https://models.example/v1",
+        models=["m1"],
+        context_window=131072,
+        max_tokens=32768,
+    )
+    written = json.loads((tmp_path / "models.json").read_text(encoding="utf-8"))
+    models = written["providers"][pi_injection.MANAGED_PROVIDER_KEY]["models"]
+    assert models[0]["contextWindow"] == 131072
+    assert models[0]["maxTokens"] == 32768
+
+
+def test_models_json_omits_unset_limits_and_injects_each_independently() -> None:
+    """两个上限互相独立：只配一个时另一个不得出现，且 0 一律省略而非写 0。"""
+    from agent_bridge.agent_workspace.pi_injection import (
+        MANAGED_PROVIDER_KEY,
+        build_models_payload,
+    )
+
+    def entry(**kwargs):
+        payload = build_models_payload(
+            {}, base_url="https://models.example/v1", models=["m1"],
+            api_key_env="X", **kwargs,
+        )
+        return payload["providers"][MANAGED_PROVIDER_KEY]["models"][0]
+
+    assert entry() == {"id": "m1", "name": "m1"}
+    assert entry(context_window=262144) == {"id": "m1", "name": "m1", "contextWindow": 262144}
+    assert entry(max_tokens=32768) == {"id": "m1", "name": "m1", "maxTokens": 32768}
+    # 显式 0 与省略等价：models.json 整份 schema 校验，写 0 会让用户自有 provider 一起丢失
+    assert entry(context_window=0, max_tokens=0) == {"id": "m1", "name": "m1"}
 
 
 def test_mcp_json_only_manages_agent_bridge_entry() -> None:

@@ -200,7 +200,7 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
   服务、路由与代理按 `agent` 参数分发，**不写中心 `if/elif`**。
 
 配置分层（两种 Agent 共享，`dsh/config.py`）：`DshConfigService` 负责全局运行配置
-（DSH/Pi 各自的启动命令模板、空闲阈值、公共 Base URL 与可用模型）与组级配置
+（DSH/Pi 各自的启动命令模板、空闲阈值、公共 Base URL、可用模型与上下文/输出上限）与组级配置
 （`linux_user` / `default_model` / `api_key`）的校验、脱敏与 edit_token 并发保护。
 组级 Linux 用户映射在两种 Agent 间共享，不重复配置。
 
@@ -273,6 +273,21 @@ DSH 专属语义（`dsh/`）：
   不改写 profile 文件）。代价：DSH 配置编辑器拒绝修改被命令行覆盖层接管的行，
   注入期间这两行在 DSH 设置界面中只读。API Key 只经 `AGENT_BRIDGE_DSH_API_KEY`
   环境变量传递，不落盘。
+- **上下文长度与输出上限按模型逐条声明**（`dsh_runtime_config.context_window` 与
+  `max_tokens`，0 = 不声明）：公共模型接入各带一个全局值，对 `available_models`
+  里的每个模型写成 `contextWindow` / `maxTokens`，DSH（`llm-pi-ai`）与 Pi
+  （`models.json`）同时生效。**上下文长度必须逐模型写，不能用 DSH 的
+  `defaultContextWindow`**：DSH 解析顺序是
+  `entry.contextWindow ?? base?.contextWindow ?? request.defaultContextWindow`，
+  `base` 是内置目录的同名模型，`deepseek-flash` 这类 shipped 模型名会被内置值抢先；
+  Pi 的 `models.json` 也没有 provider 级默认值。取值受两个上游共同约束——
+  DSH zod 为 `z.number().step(1).min(1)`，Pi 为正数且在 provider 合成期对 `<= 0`
+  直接抛错（且 Pi 是**整份 models.json 校验失败、连用户自有 provider 一起丢失**），
+  故配置层统一按正整数校验（`normalize_token_limit`，两个字段共用口径），
+  非整数只会被 Pi 接受而被 DSH 拒绝。未配置（0）时**不写该键**，注入产物与未接入
+  该字段前完全一致（上下文回落 DSH 262144 / Pi 128000，输出上限回落
+  DSH 32768 / Pi 16384）。两个字段各自独立，且沿用 `pi_web_command` 的
+  「未携带保留、显式 0 清空」语义。
 - `dsh_group_configs`/`dsh_runtime_config` 分层迁移必须先回填再删列：早期版本的
   组级 `base_url`/`available_models_json` 由 `_backfill_dsh_public_llm_config`
   合并进全局行（只填全局为空的字段），否则升级会静默丢失已保存的模型接入。

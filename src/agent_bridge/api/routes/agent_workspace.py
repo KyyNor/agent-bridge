@@ -124,6 +124,8 @@ def create_agent_workspace_handlers(service, actor) -> SimpleNamespace:
             idle_timeout_minutes=payload.idle_timeout_minutes,
             base_url=payload.base_url,
             available_models=payload.available_models,
+            context_window=payload.context_window,
+            max_tokens=payload.max_tokens,
             expected_edit_token=payload.expected_edit_token,
         )
 

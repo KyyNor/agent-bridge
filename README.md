@@ -118,7 +118,9 @@ linux-x64/arm64 预编译二进制，无需在服务器上准备编译工具链�
 
 管理员在「系统管理 → DSH Web Runtime」维护两层配置：
 
-- **公共接入（全局）**：`base_url`、`available_models[]`，以及启动命令模板
+- **公共接入（全局）**：`base_url`、`available_models[]`、`context_window`
+  （上下文长度，0 = 不声明，默认沿用 DSH 262144 / Pi 128000）、`max_tokens`
+  （单次输出上限，0 = 不声明，默认沿用 DSH 32768 / Pi 16384），以及启动命令模板
   （默认 `dsh web {patch} --host 127.0.0.1 --port {port} --no-open`）与空闲
   回收阈值（分钟，默认 720 = 12 小时；升级不会覆盖已显式保存的值）。`base_url`
   留空时回落为系统「公共模型配置」的 Base URL；`--no-open` 关闭 DSH 的浏览器
@@ -134,13 +136,22 @@ linux-x64/arm64 预编译二进制，无需在服务器上准备编译工具链�
 
 启动时 Agent Bridge 把公共接入与组级默认模型生成为 DSH 的 `--patch` 覆盖文件
 `<DSH_HOME>/agent-bridge-model.patch.yml`（`llm-pi-ai.providers.agent-bridge` 声明
-Base URL、模型目录与承载密钥的环境变量名，`agent-default-model` 指定默认模型），
+Base URL、模型目录、可选的每模型 `contextWindow` / `maxTokens` 与承载密钥的环境变量名，
+`agent-default-model` 指定默认模型），
 随启动命令的 `{patch}` 叠加生效；API Key 只经 `AGENT_BRIDGE_DSH_API_KEY` 环境变量
 传给 DSH 进程，不写入文件。DSH 0.2 起不再读取 `settings.yaml`，Agent Bridge 也不再
 写它；注入前会读取 DSH 当前生效的供应商配置并只合并 `agent-bridge` 一项，用户在
 DSH 中自配的其他供应商与遗留 `settings.yaml` 中的供应商都会保留。由于 DSH 不允许
 在界面中修改被命令行覆盖层接管的配置，注入期间 DSH 设置页中的供应商与默认模型
 为只读，需在 Agent Bridge 的 DSH 运行配置中调整。
+
+`context_window` 与 `max_tokens` 对 DSH 与 Pi 两个工作台同时生效，按模型逐条写成
+`contextWindow` / `maxTokens`（Pi 的 `models.json` 同名键），因此自定义网关上的模型也按
+配置的长度计算，而不是各自 CLI 的内置假设。上下文长度不能用 DSH 的
+`defaultContextWindow`：同名 shipped 模型（如 `deepseek-flash`）会被内置目录的值抢先。
+取值必须是正整数——DSH 的 schema 拒绝非整数，Pi 则在任一字段 `<= 0` 时让**整份
+`models.json` 失效**（连用户自有的 provider 一起丢失），因此非法值在保存配置时就被
+拒绝。留空或填 0 表示不声明该键；两个字段各自独立，互不影响。
 
 插件首装：插件名单内置于包内（`src/agent_bridge/dsh/dsh-plugins.txt`，随版本
 发布；每行一个 spec，如 `@scope/name@0.4.5`，支持 `#` 注释；全部钉住精确

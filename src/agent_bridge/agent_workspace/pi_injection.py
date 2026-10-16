@@ -3,8 +3,8 @@
 pi-coding-agent 在 ``PI_CODING_AGENT_DIR`` 下读取这三个文件。Agent Bridge 只
 **合并托管条目**，绝不覆盖用户自有配置：
 
-- ``models.json``：合并 ``providers.agent-bridge``（公共 Base URL + 可用模型），
-  保留用户自有 provider；
+- ``models.json``：合并 ``providers.agent-bridge``（公共 Base URL、可用模型与
+  可选的每模型 ``contextWindow`` / ``maxTokens``），保留用户自有 provider；
 - ``settings.json``：写入组级 ``defaultModel``，保留其余设置；
 - ``mcp.json``：只写 ``agent-bridge`` 这一个 HTTP server，capability 经
   ``${AGENT_BRIDGE_PI_CAPABILITY}`` 由环境变量展开——**token 不落盘**。不选
@@ -48,10 +48,35 @@ MCP_FILENAME = "mcp.json"
 # -- models.json --
 
 
+def _model_entry(name: str, *, context_window: int, max_tokens: int) -> dict[str, Any]:
+    """构造一条托管模型条目；两个上限字段都是「0 = 不声明」，故省略而非写 0。
+
+    ``models.json`` 是整份 schema 校验，``contextWindow`` / ``maxTokens``
+    ``<= 0`` 会让整个文件失效（连用户自有的 provider 一起丢失）。
+    """
+    entry: dict[str, Any] = {"id": name, "name": name}
+    if context_window > 0:
+        entry["contextWindow"] = context_window
+    if max_tokens > 0:
+        entry["maxTokens"] = max_tokens
+    return entry
+
+
 def build_models_payload(
-    existing: dict[str, Any], *, base_url: str, models: list[str], api_key_env: str
+    existing: dict[str, Any],
+    *,
+    base_url: str,
+    models: list[str],
+    api_key_env: str,
+    context_window: int = 0,
+    max_tokens: int = 0,
 ) -> dict[str, Any]:
-    """合并托管 provider：``providers.agent-bridge``，保留用户自有 provider。"""
+    """合并托管 provider：``providers.agent-bridge``，保留用户自有 provider。
+
+    ``context_window`` / ``max_tokens`` > 0 时按模型逐条声明 ``contextWindow`` /
+    ``maxTokens``；0 表示不声明，pi 会回落到自身的默认（128000 / 16384）。
+    ``models.json`` 没有 provider 级默认值，因此只能逐模型声明。
+    """
     payload = dict(existing)
     providers = dict(payload.get("providers") or {})
     if not base_url or not models:
@@ -64,7 +89,8 @@ def build_models_payload(
             # API Key 只经环境变量展开，不写入文件。
             "apiKey": "${" + api_key_env + "}",
             "models": [
-                {"id": name, "name": name} for name in models
+                _model_entry(name, context_window=context_window, max_tokens=max_tokens)
+                for name in models
             ],
         }
     payload["providers"] = providers
@@ -72,7 +98,14 @@ def build_models_payload(
 
 
 def write_models(
-    config_dir: Path, *, uid: int, gid: int, base_url: str, models: list[str]
+    config_dir: Path,
+    *,
+    uid: int,
+    gid: int,
+    base_url: str,
+    models: list[str],
+    context_window: int = 0,
+    max_tokens: int = 0,
 ) -> Path:
     """写入 ``models.json``；返回文件路径。"""
     path = config_dir / MODELS_FILENAME
@@ -81,6 +114,8 @@ def write_models(
         base_url=base_url,
         models=models,
         api_key_env=PI_API_KEY_ENV,
+        context_window=context_window,
+        max_tokens=max_tokens,
     )
     write_managed_json(path, payload, uid=uid, gid=gid, label="Pi models")
     return path

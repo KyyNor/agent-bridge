@@ -5,8 +5,8 @@ DSH（DeepSeek Harness）0.2 起移除了 ``$DSH_HOME/settings.yaml``：启动�
 ``settings.yaml.imported``。因此模型接入不再写该文件，而是在每次启动前生成
 一份 loader patch，随启动命令以 ``--patch`` 叠加在 profile 层之后：
 
-- ``llm-pi-ai`` 行声明 ``agent-bridge`` 供应商（Base URL、模型目录与承载
-  API Key 的环境变量名 ``apiKeyEnv``）；
+- ``llm-pi-ai`` 行声明 ``agent-bridge`` 供应商（Base URL、模型目录、可选的每模型
+  ``contextWindow`` / ``maxTokens`` 与承载 API Key 的环境变量名 ``apiKeyEnv``）；
 - ``agent-default-model`` 行指定默认供应商与模型。
 
 DSH 的 patch 会**整体替换**目标行的 ``config``，而 ``llm-pi-ai`` 只允许一个
@@ -117,13 +117,44 @@ def model_overlay_path(dsh_home: Path) -> Path:
     return Path(dsh_home) / MODEL_OVERLAY_FILENAME
 
 
-def build_provider_entry(*, base_url: str, models: list[str]) -> dict[str, Any]:
-    """构造 DSH ``llm-pi-ai.providers`` 中的托管供应商条目。"""
+def _model_entry(model: str, *, context_window: int, max_tokens: int) -> dict[str, Any]:
+    """构造一条托管模型目录项；两个上限字段都是「0 = 不声明」，故省略而非写 0。
+
+    两个字段都不能写 0：DSH 的 zod 是 ``step(1).min(1)``，Pi 在合成期对
+    ``<= 0`` 直接抛错（且会让整份 ``models.json`` 校验失败）。
+    """
+    entry: dict[str, Any] = {"id": model, "name": model}
+    if context_window > 0:
+        entry["contextWindow"] = context_window
+    if max_tokens > 0:
+        entry["maxTokens"] = max_tokens
+    return entry
+
+
+def build_provider_entry(
+    *,
+    base_url: str,
+    models: list[str],
+    context_window: int = 0,
+    max_tokens: int = 0,
+) -> dict[str, Any]:
+    """构造 DSH ``llm-pi-ai.providers`` 中的托管供应商条目。
+
+    ``context_window`` / ``max_tokens`` > 0 时按模型逐条声明 ``contextWindow`` /
+    ``maxTokens``；0 表示不声明。上下文长度逐条声明而不是用 ``llm-pi-ai`` 的
+    ``defaultContextWindow``：DSH 的解析顺序是
+    ``entry.contextWindow ?? base?.contextWindow ?? request.defaultContextWindow``，
+    ``base`` 是内置目录的同名模型条目——像 ``deepseek-flash`` 这种 shipped 模型
+    名会被内置值抢先，落不到管理员配置的值。
+    """
     return {
         "displayName": MANAGED_PROVIDER_DISPLAY_NAME,
         "api": MANAGED_WIRE_PROTOCOL,
         "baseURL": base_url,
-        "models": [{"id": model, "name": model} for model in models],
+        "models": [
+            _model_entry(model, context_window=context_window, max_tokens=max_tokens)
+            for model in models
+        ],
         "apiKeyEnv": MANAGED_API_KEY_ENV,
     }
 
@@ -178,6 +209,8 @@ def build_model_overlay(
     default_model: str,
     llm_config: Any = None,
     legacy_llm_config: Any = None,
+    context_window: int = 0,
+    max_tokens: int = 0,
 ) -> list[dict[str, Any]] | None:
     """构造模型接入的 ``--patch`` 条目；接入未配置（无 Base URL 或模型）时返回 ``None``。
 
@@ -193,7 +226,12 @@ def build_model_overlay(
         section = _mapping(source)
         providers.update(_mapping(section.get("providers")))
         merged.update(section)
-    providers[MANAGED_PROVIDER_KEY] = build_provider_entry(base_url=base_url, models=models)
+    providers[MANAGED_PROVIDER_KEY] = build_provider_entry(
+        base_url=base_url,
+        models=models,
+        context_window=context_window,
+        max_tokens=max_tokens,
+    )
     merged["providers"] = providers
     entries: list[dict[str, Any]] = [{"id": LLM_ENTRY_ID, "config": merged}]
     if default_model and default_model in models:
@@ -217,6 +255,8 @@ def resolve_model_overlay(
     env: dict[str, str],
     cwd: Path,
     identity: LinuxIdentity,
+    context_window: int = 0,
+    max_tokens: int = 0,
     config_reader: Any = None,
 ) -> list[dict[str, Any]] | None:
     """读取当前生效的 ``llm-pi-ai`` 配置并构造合并后的模型覆盖条目。"""
@@ -247,6 +287,8 @@ def resolve_model_overlay(
         default_model=default_model,
         llm_config=llm_config,
         legacy_llm_config=_legacy_llm_config(dsh_home),
+        context_window=context_window,
+        max_tokens=max_tokens,
     )
 
 

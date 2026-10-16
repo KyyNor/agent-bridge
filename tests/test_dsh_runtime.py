@@ -296,6 +296,171 @@ def test_runtime_config_roundtrip_and_defaults(service) -> None:
         )
 
 
+def test_runtime_context_window_roundtrip_and_validation(service) -> None:
+    """上下文长度：可保存/回显，非法值被拒，未携带时保留已保存值。"""
+    configure_runtime(service, context_window=262144)
+    config = service.dsh_configs.get_runtime_config("root")
+    assert config["context_window"] == 262144
+    assert service.dsh_configs.model_binding_for("groupa")["context_window"] == 262144
+
+    saved = service.dsh_configs.save_runtime_config(
+        "root",
+        web_command=config["web_command"],
+        idle_timeout_minutes=120,
+        base_url="http://model.internal/v1",
+        available_models=["gpt-x"],
+        context_window=131072,
+        expected_edit_token=config["edit_token"],
+    )
+    assert saved["context_window"] == 131072
+
+    # 显式 0 = 恢复为不声明
+    cleared = service.dsh_configs.save_runtime_config(
+        "root",
+        web_command=saved["web_command"],
+        idle_timeout_minutes=120,
+        base_url="http://model.internal/v1",
+        available_models=["gpt-x"],
+        context_window=0,
+        expected_edit_token=saved["edit_token"],
+    )
+    assert cleared["context_window"] == 0
+
+    # 未携带（None，旧客户端）必须保留已保存值，不能静默清掉
+    preserved = service.dsh_configs.save_runtime_config(
+        "root",
+        web_command=cleared["web_command"],
+        idle_timeout_minutes=120,
+        base_url="http://model.internal/v1",
+        available_models=["gpt-x"],
+        expected_edit_token=cleared["edit_token"],
+    )
+    assert preserved["context_window"] == 0
+
+    saved = service.dsh_configs.save_runtime_config(
+        "root",
+        web_command=preserved["web_command"],
+        idle_timeout_minutes=120,
+        base_url="http://model.internal/v1",
+        available_models=["gpt-x"],
+        context_window=262144,
+        expected_edit_token=preserved["edit_token"],
+    )
+    # 旧客户端语义：不带该字段保存，已配置值仍在
+    assert saved["context_window"] == 262144
+
+    for invalid in (-1, 10_000_001):
+        with pytest.raises(Exception):
+            service.dsh_configs.save_runtime_config(
+                "root",
+                web_command=saved["web_command"],
+                idle_timeout_minutes=120,
+                base_url="http://model.internal/v1",
+                available_models=["gpt-x"],
+                context_window=invalid,
+                expected_edit_token=saved["edit_token"],
+            )
+
+
+def test_runtime_max_tokens_roundtrip_and_validation(service) -> None:
+    """单次输出上限：语义与上下文长度完全一致（未携带保留 / 0 清空 / 非法拒绝）。"""
+    configure_runtime(service, context_window=262144, max_tokens=32768)
+    config = service.dsh_configs.get_runtime_config("root")
+    assert config["max_tokens"] == 32768
+    binding = service.dsh_configs.model_binding_for("groupa")
+    assert binding["max_tokens"] == 32768
+    # 两个字段互不影响
+    assert binding["context_window"] == 262144
+
+    saved = service.dsh_configs.save_runtime_config(
+        "root",
+        web_command=config["web_command"],
+        idle_timeout_minutes=120,
+        base_url="http://model.internal/v1",
+        available_models=["gpt-x"],
+        max_tokens=65536,
+        expected_edit_token=config["edit_token"],
+    )
+    assert saved["max_tokens"] == 65536
+    assert saved["context_window"] == 262144
+
+    # 只带 max_tokens 保存时，context_window 不能被清掉
+    preserved = service.dsh_configs.save_runtime_config(
+        "root",
+        web_command=saved["web_command"],
+        idle_timeout_minutes=120,
+        base_url="http://model.internal/v1",
+        available_models=["gpt-x"],
+        max_tokens=0,
+        expected_edit_token=saved["edit_token"],
+    )
+    assert preserved["max_tokens"] == 0
+    assert preserved["context_window"] == 262144
+
+    kept = service.dsh_configs.save_runtime_config(
+        "root",
+        web_command=preserved["web_command"],
+        idle_timeout_minutes=120,
+        base_url="http://model.internal/v1",
+        available_models=["gpt-x"],
+        expected_edit_token=preserved["edit_token"],
+    )
+    assert kept["max_tokens"] == 0
+    assert kept["context_window"] == 262144
+
+    for invalid in (-1, 10_000_001):
+        with pytest.raises(Exception):
+            service.dsh_configs.save_runtime_config(
+                "root",
+                web_command=kept["web_command"],
+                idle_timeout_minutes=120,
+                base_url="http://model.internal/v1",
+                available_models=["gpt-x"],
+                max_tokens=invalid,
+                expected_edit_token=kept["edit_token"],
+            )
+
+
+def test_runtime_token_limits_defaults_to_zero(service) -> None:
+    """未配置的部署读到 0（不声明），注入产物与改动前完全一致。"""
+    config = service.dsh_configs.get_runtime_config("root")
+    assert config["context_window"] == 0
+    assert config["max_tokens"] == 0
+
+    from agent_bridge.dsh import injection
+
+    provider = injection.build_provider_entry(base_url="http://x/v1", models=["m1"])
+    assert provider["models"] == [{"id": "m1", "name": "m1"}]
+
+
+def test_model_overlay_declares_token_limits_per_model(service, home, monkeypatch) -> None:
+    """覆盖文件逐模型写 contextWindow / maxTokens；不靠 llm-pi-ai 的默认值。"""
+    from agent_bridge.dsh import injection
+
+    configure_runtime(service, context_window=262144, max_tokens=32768)
+    config_dir = home / "groupa" / ".config" / "dsh" / "user1"
+    config_dir.mkdir(parents=True)
+    monkeypatch.setattr(injection, "read_entry_config", lambda **kwargs: None)
+
+    path = service.dsh._write_model_overlay(
+        config_dir,
+        types.SimpleNamespace(uid=os.getuid(), gid=os.getgid(), home=home / "groupa"),
+        service.dsh_configs.model_binding_for("groupa"),
+        env={"DSH_HOME": str(config_dir)},
+        dsh_binary="dsh",
+    )
+    entries = {
+        entry["id"]: entry["config"]
+        for entry in injection.load_entry_list(path.read_text(encoding="utf-8"))
+    }
+    models = entries["llm-pi-ai"]["providers"]["agent-bridge"]["models"]
+    assert [item["contextWindow"] for item in models] == [262144, 262144]
+    assert [item["maxTokens"] for item in models] == [32768, 32768]
+    # 不使用 defaultContextWindow：内置目录里同名 shipped 模型（如 deepseek-flash）
+    # 会按 entry → base → default 的顺序抢先解析，落不到管理员配置的值。
+    assert "defaultContextWindow" not in entries["llm-pi-ai"]
+
+
 def test_config_endpoints_require_admin(service) -> None:
     from fastapi.testclient import TestClient
     from agent_bridge.api.app import create_app
