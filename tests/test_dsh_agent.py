@@ -304,6 +304,8 @@ class _QueuePipe:
         item = await self.queue.get()
         if item is None:
             return b""
+        if isinstance(item, BaseException):
+            raise item
         return item
 
     def emit_eof(self) -> None:
@@ -312,11 +314,8 @@ class _QueuePipe:
 
 
 class _EmptyPipe:
-    def __aiter__(self) -> "_EmptyPipe":
-        return self
-
-    async def __anext__(self) -> bytes:
-        raise StopAsyncIteration
+    async def readline(self) -> bytes:
+        return b""
 
 
 class _FakeStdin:
@@ -332,6 +331,12 @@ class _FakeStdin:
         for message in self._process.handler(json.loads(line)):
             if message == "EOF":
                 self._process.stdout.emit_eof()
+                continue
+            if message == "OVERSIZE":
+                # 复现 StreamReader.readline 对超限行抛出的 ValueError。
+                self._process.stdout.queue.put_nowait(
+                    ValueError("Separator is found, but chunk is longer than limit")
+                )
                 continue
             self._process.stdout.queue.put_nowait(
                 (json.dumps(message, ensure_ascii=False) + "\n").encode("utf-8")
@@ -600,7 +605,7 @@ def test_dsh_run_prompt_error_propagates(monkeypatch: pytest.MonkeyPatch, tmp_pa
             return [{"jsonrpc": "2.0", "id": request_id, "result": {"sessionId": "sess-1"}}]
         return [{"jsonrpc": "2.0", "id": request_id, "result": {}}]
 
-    _install_fake_process(monkeypatch, handler)
+    process = _install_fake_process(monkeypatch, handler)
     run = DshCodingAgent(runtime=_FakeRuntime()).start(_request(tmp_path))
 
     async def consume() -> None:
@@ -609,6 +614,9 @@ def test_dsh_run_prompt_error_propagates(monkeypatch: pytest.MonkeyPatch, tmp_pa
                 pass
 
     asyncio.run(consume())
+    # prompt 失败路径也必须完成收尾：session/close 已发出、stdin 已关闭（进程收尸）。
+    assert any(item.get("method") == "session/close" for item in process.requests)
+    assert process.stdin.closed is True
 
 
 def test_dsh_run_process_exit_fails_pending_prompt_fast(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -636,6 +644,31 @@ def test_dsh_run_process_exit_fails_pending_prompt_fast(monkeypatch: pytest.Monk
     started = time.monotonic()
     asyncio.run(consume())
     assert time.monotonic() - started < 10
+    # 结算失败不得跳过 shutdown，否则 DSH 子进程泄漏。
+    assert process.stdin.closed is True
+
+
+def test_dsh_run_skips_oversized_stdout_line(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # 单行超过 StreamReader 上限只丢弃该行，读取通道继续工作，run 正常结算。
+    base = _acp_handler([{"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "ok"}}])
+
+    def handler(request: dict[str, Any]) -> list[Any]:
+        messages = base(request)
+        if request.get("method") == "session/prompt":
+            return ["OVERSIZE", *messages]
+        return messages
+
+    process = _install_fake_process(monkeypatch, handler)
+    run = DshCodingAgent(runtime=_FakeRuntime()).start(_request(tmp_path))
+
+    async def consume() -> list[Any]:
+        return [update async for update in run.updates()]
+
+    updates = asyncio.run(consume())
+    final = updates[-1].final
+    assert final is not None and final.is_error is False
+    assert final.result == "ok"
+    assert process.stdin.closed is True
 
 
 def test_dsh_run_abort_sends_cancel_and_closes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

@@ -59,6 +59,9 @@ _CLIENT_INFO = {"name": "agent-bridge", "version": "1"}
 _PROMPT_RPC_TIMEOUT_SECONDS = 86400.0
 _STARTUP_TIMEOUT_SECONDS = 60.0
 _CLOSE_TIMEOUT_SECONDS = 15.0
+# ACP stdout/stderr 单行上限。asyncio 默认 64 KiB，DSH 把大段工具输出/消息块
+# 作为单行 JSON-RPC 写出时极易超限；超过此上限的行才丢弃并告警。
+_STREAM_LINE_LIMIT_BYTES = 64 * 1024 * 1024
 # dsh 的 LLM provider 注册可能在 ACP 服务开始应答之后才完成（托管供应商
 # 异步注册）；此窗口内的 ``no adapter registered`` 属于启动竞态，
 # 在同一进程上退避重试。
@@ -410,7 +413,17 @@ class _AcpJsonRpc:
             return
         try:
             while True:
-                raw = await stdout.readline()
+                try:
+                    raw = await stdout.readline()
+                except ValueError as exc:
+                    # 单行超过 StreamReader 上限：readline 已丢弃该行（或其已缓冲部分，
+                    # 残余片段会作为非 JSON 行跳过），通道仍可继续读取，不能判死整条 run。
+                    logger.warning(
+                        "DSH ACP stdout 单行超过上限已丢弃 limit=%s 原因=%s",
+                        _STREAM_LINE_LIMIT_BYTES,
+                        exc,
+                    )
+                    continue
                 if not raw:
                     break
                 line = raw.decode("utf-8", errors="replace").strip()
@@ -469,7 +482,15 @@ class _AcpJsonRpc:
         if stderr is None:
             return
         try:
-            async for raw in stderr:
+            while True:
+                try:
+                    raw = await stderr.readline()
+                except ValueError:
+                    # 超长 stderr 行直接丢弃；读取必须继续，否则管道写满会阻塞 DSH 进程。
+                    logger.warning("DSH ACP stderr 单行超过上限已丢弃")
+                    continue
+                if not raw:
+                    break
                 text = raw.decode("utf-8", errors="replace")
                 self._stderr_chunks.append(text)
                 if self._stderr_callback is not None:
@@ -674,19 +695,26 @@ class _DshRun:
                 await self.abort()
             raise
         finally:
-            if settle_task is not None:
-                settle_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await settle_task
-            if self._session_id is not None:
+            # 收尾每一步独立容错，保证 shutdown() 无条件执行：settle_task 带异常
+            # 结束时（prompt RPC 失败、读取通道故障、暖机重试耗尽），再次 await
+            # 会把该异常从 finally 内抛出、跳过 shutdown，DSH 子进程就此泄漏。
+            # 原异常已由 try 块向调用方传递，这里只需吞掉。
+            try:
+                if settle_task is not None:
+                    settle_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError, Exception):
+                        await settle_task
+                if self._session_id is not None:
+                    with contextlib.suppress(Exception):
+                        await client.call(
+                            "session/close",
+                            {"sessionId": self._session_id},
+                            timeout=_CLOSE_TIMEOUT_SECONDS,
+                        )
                 with contextlib.suppress(Exception):
-                    await client.call(
-                        "session/close",
-                        {"sessionId": self._session_id},
-                        timeout=_CLOSE_TIMEOUT_SECONDS,
-                    )
-            await client.cancel_tasks()
-            await client.shutdown()
+                    await client.cancel_tasks()
+            finally:
+                await client.shutdown()
         if final is None:
             # updates() 未经 prompt 结算即退出（如进程崩溃）；补错误终态。
             stderr_tail = client.stderr_summary(limit=600)
@@ -763,6 +791,7 @@ class _DshRun:
             stderr=asyncio.subprocess.PIPE,
             cwd=str(self.request.cwd),
             env=env,
+            limit=_STREAM_LINE_LIMIT_BYTES,
             **demotion_kwargs(binding.identity),
         )
         client = _AcpJsonRpc(process, stderr=self.request.stderr)

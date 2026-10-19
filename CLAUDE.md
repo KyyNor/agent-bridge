@@ -167,6 +167,10 @@ MetaMCP 网关生效；权限请求按无人值守语义自动放行（沙箱仍
 进 `messages.jsonl`。DSH 侧 LLM provider 注册可能晚于 ACP 应答开始（启动竞态），adapter
 对 `no adapter registered` 做退避重试，resolver 预创建标准 HOME 子目录以规避全新目录
 下 provider 注册失败。
+`updates()` 的 finally 收尾每步独立容错，`client.shutdown()`（stdin EOF → SIGTERM → SIGKILL）
+必须无条件执行：prompt 结算失败时再次 await `settle_task` 会把异常从 finally 抛出并跳过
+shutdown，导致失败 run 的 DSH 子进程泄漏。ACP 管道 `limit` 为 64 MiB（默认 64 KiB 会被大段
+工具输出击穿），读取 stdout/stderr 遇超限行只丢弃该行并告警，不判死读取通道。
 
 Agent run 的 `events.jsonl` 是可重放事实来源。`AgentService` 必须先将带单 run 递增
 `event_id` 的事件 flush 到该文件，再交给进程内发布器分发给
