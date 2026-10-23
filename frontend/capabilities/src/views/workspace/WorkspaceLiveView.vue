@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { currentWebWorkspaceSupport, normalizeWorkspaceMode } from '../../lib/workspaceBrowser'
+import WorkspaceTerminal from '../../components/dsh/WorkspaceTerminal.vue'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from '../../api/client'
@@ -26,6 +28,7 @@ const keepAliveTimer: { id: number | null } = { id: null }
 
 const requestedProfile = typeof route.query.profile === 'string' ? route.query.profile : ''
 const agent = computed<WorkspaceAgent>(() => normalizeWorkspaceAgent(route.query.agent))
+const mode = normalizeWorkspaceMode(route.query.mode)
 const scope = computed(() => normalizeWorkspaceScope(route.query.scope))
 const agentLabel = computed(() => workspaceAgentLabel(agent.value))
 const title = computed(() => workspaceTitle(agent.value, scope.value))
@@ -41,7 +44,9 @@ async function enterWorkspace() {
   errorMessage.value = ''
   stopKeepAlive()
   try {
-    const result = await api.authorizeDshWorkspace(requestedProfile || null, scope.value, agent.value)
+    if (mode === 'web' && !currentWebWorkspaceSupport()) throw new Error('当前浏览器不支持 Web 工作台，请返回入口选择网页终端。')
+    if (mode === 'terminal' && scope.value !== 'personal') throw new Error('网页终端目前仅支持个人范围。')
+    const result = await api.authorizeDshWorkspace(requestedProfile || null, scope.value, agent.value, mode)
     activeProfile.value = result.profile_key
     iframeSrc.value = result.workspace_url || workspaceEntryUrl(agent.value, scope.value)
     phase.value = 'active'
@@ -67,7 +72,7 @@ function startKeepAlive() {
   // 定期查询自身 runtime：既能展示空闲状态，也能发现进程异常退出
   keepAliveTimer.id = window.setInterval(async () => {
     try {
-      const status = await api.getDshRuntimeStatus(scope.value, agent.value)
+      const status = await api.getDshRuntimeStatus(scope.value, agent.value, mode)
       if (!isWorkspaceAlive(status.status)) {
         stopKeepAlive()
         errorMessage.value = `${title.value}进程已停止或异常退出，请重新进入。`
@@ -101,7 +106,8 @@ function stopKeepAlive() {
         </span>
       </div>
       <div class="flex items-center gap-2">
-        <Button v-if="phase === 'active'" variant="outline" size="sm" @click="reloadWorkspace()">刷新</Button>
+        <Button v-if="phase === 'active' && mode === 'web'" variant="outline" size="sm" @click="reloadWorkspace()">刷新</Button>
+        <Button v-if="mode === 'terminal' && phase === 'active'" variant="outline" size="sm" @click="enterWorkspace()">重新进入</Button>
         <Button variant="outline" size="sm" @click="closeTab()">关闭工作台</Button>
       </div>
     </div>
@@ -110,6 +116,7 @@ function stopKeepAlive() {
       <LoadingState :label="`正在启动 ${title}，首次启动可能需要约一分钟...`" />
     </div>
 
+    <WorkspaceTerminal v-else-if="phase === 'active' && mode === 'terminal'" :key="iframeKey" :agent="agent" @ended="stopKeepAlive" />
     <iframe
       v-else-if="phase === 'active'"
       :key="iframeKey"

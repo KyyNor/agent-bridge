@@ -401,6 +401,18 @@ class AgentBridgeService:
             self.dsh.adapter.slug: self.dsh,
             self.pi.adapter.slug: self.pi,
         }
+        from agent_bridge.agent_workspace.terminal_adapter import TERMINAL_ADAPTERS
+        from agent_bridge.agent_workspace.terminal_service import TerminalRuntimeService
+
+        self.workspace_terminals = {
+            slug: TerminalRuntimeService(adapter_type=adapter, paths=paths, configs=self.dsh_configs,
+                                         access=self.access, admins=admins)
+            for slug, adapter in TERMINAL_ADAPTERS.items()
+        }
+        self.workspace_runtimes = {
+            **self.workspace_agents,
+            **{f"{slug}-terminal": runtime for slug, runtime in self.workspace_terminals.items()},
+        }
         self._register_workspace_agents()
         self.plugin_update_scheduler = PluginUpdateScheduler(service=self, store=store, admins=admins)
         self.data_retention = DataRetentionService(
@@ -467,7 +479,7 @@ class AgentBridgeService:
                 recovered,
             )
         service.model_evaluations.recover_interrupted_runs()
-        for slug, runtime in service.workspace_agents.items():
+        for slug, runtime in service.workspace_runtimes.items():
             recovered_runtime = runtime.recover()
             if (
                 recovered_runtime["kept"]
@@ -2141,15 +2153,18 @@ class AgentBridgeService:
         新增 Agent 只需在 ``workspace_agents`` 里注册其 runtime 服务，路由、
         MetaMCP 与空闲回收都按该表分发，不在这里写中心 if/elif。
         """
-        for slug, runtime in self.workspace_agents.items():
+        for slug, runtime in self.workspace_runtimes.items():
             self._workspace_by_slug[slug] = runtime
 
-    def workspace_runtime(self, agent: str) -> Any:
+    def workspace_runtime(self, agent: str, *, mode: str = "web") -> Any:
         """按 agent slug 取工作台 runtime 服务。"""
         from agent_bridge.agent_workspace.scopes import normalize_workspace_agent
 
         slug = normalize_workspace_agent(agent)
-        runtime = self._workspace_by_slug.get(slug)
+        from agent_bridge.core.domain import ValidationError
+        if mode not in {"web", "terminal"}:
+            raise ValidationError("工作台界面只支持 web/terminal")
+        runtime = self._workspace_by_slug.get(slug if mode == "web" else f"{slug}-terminal")
         if runtime is None:
             raise NotFound(f"未知的工作台 Agent：{agent}")
         return runtime

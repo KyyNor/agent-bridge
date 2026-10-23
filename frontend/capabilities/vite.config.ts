@@ -22,6 +22,7 @@ export default defineConfig({
     // 如 Object.hasOwn (Chrome 93+)、Array.prototype.at (Chrome 92+) 等
     legacy({
       targets: ['chrome >= 90'],
+      modernTargets: ['chrome >= 90'],
     }),
   ],
   resolve: {
@@ -33,6 +34,8 @@ export default defineConfig({
     outDir: '../../src/agent_bridge/static/capabilities',
     emptyOutDir: true,
     cssTarget: 'chrome90',
+    // modern module 也必须降级：xterm 6 含 Chrome 90 无法解析的 class static block。
+    target: 'chrome90',
   },
   server: {
     proxy: {

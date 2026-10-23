@@ -100,6 +100,44 @@ DSH 个人：/agent-workspace/          DSH 小组：/agent-workspace-shared/
 Pi  个人：/agent-workspace-pi/        Pi  小组：/agent-workspace-pi-shared/
 ```
 
+### 网页终端（Chrome 90）
+
+进入「Agent 工作台」可选择 Web 或网页终端。Web 界面要求 Chrome 111+ 或同等
+浏览器能力；不满足时入口禁用，手动打开 Web 链接也会提示使用终端。终端仅开放
+个人范围，每种 Agent 每人一个会话，同时只允许一个页面连接；关闭或断线后保留
+120 秒，期间刷新可连接原进程并重放最近最多 512 KiB 输出。超过宽限、Agent 退出、
+空闲回收或服务重启后需重新进入；不承诺服务重启后的终端续跑。
+终端自动退出也会回收完整后代树；Linux 下用每会话独立标记补收已脱离父链的孤儿，
+拒绝 SIGTERM 的进程会升级 SIGKILL，其他会话不受影响。
+
+前端固定 `@xterm/xterm@6.0.0` + `@xterm/addon-fit@0.11.0`，默认 DOM 渲染；
+modern 与 legacy 构建都明确面向 Chrome 90（6.x 原始包含旧内核不能解析的语法）。
+终端沿用同一组级 Linux 用户、模型接入与 Profile MCP 权限，Web/终端分别托管，
+不修改上游页面、不提供任意 shell 启动入口。API `/api/v1/agent-workspace/*` 使用
+`mode=web|terminal`（默认 web）；终端 WS 为 `/api/v1/agent-workspace/terminal/{agent}`，
+校验登录身份与同源 Origin，目标及凭据只从当前用户 runtime 状态取得。
+
+依赖：Python 的 POSIX PTY（无需 node-pty）、Node ≥22.19、可用的 `pi` 与 `dsh` CLI。
+DSH 按 npm `latest` 验证为 `@deepseek-ai/dsh@0.2.1-rc.2`；TUI 使用社区插件
+`@deepseek-harness-tui/dsh-tui@0.16.1`，单独锁在 `dsh/dsh-tui-plugins.txt`，启动前安装
+到 `tui` profile。TUI 插件失败会拒绝启动、下次重试，Web 插件不会装进 TUI profile。
+社区 TUI 首次可能显示仅面向 DeepSeek 官方密钥的向导；已使用平台模型接入时按 Esc
+跳过，模型与能力平面已由平台配置，无需重复输入密钥。
+部署机可预先执行：
+
+```bash
+npm install -g @deepseek-ai/dsh@0.2.1-rc.2
+# 平台以各 Linux 用户身份在自己的 DSH_HOME 安装；以下用于当前用户的独立 TUI：
+dsh plugin --profile tui add @deepseek-harness-tui/dsh-tui@0.16.1
+dsh --profile tui
+```
+
+终端配置目录：`~/.config/agent-bridge/dsh-terminal/<business-user>/` 与
+`~/.config/agent-bridge/pi-terminal/<business-user>/`。社区 DSH TUI 的偏好固定写入
+`HOME/.dsh-tui`，因此终端为它分配配置目录下的独立 `home/`，避免同 Linux 用户下的
+业务用户互相读取偏好与历史；操作系统 uid 与初始工作目录仍来自组级 Linux 用户。
+密钥只经环境变量传递，Pi 的配置文件仍通过公共安全文件 helper 写入。
+
 ### Pi Agent
 
 Pi 官方没有 Web 服务模式，工作台界面由社区实现 `@agegr/pi-web` 提供，Agent Bridge

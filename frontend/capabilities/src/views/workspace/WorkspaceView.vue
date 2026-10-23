@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { currentWebWorkspaceSupport, type WorkspaceMode } from '../../lib/workspaceBrowser'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ExternalLink } from '@lucide/vue'
@@ -40,6 +41,8 @@ const profilesError = ref('')
 const selectedProfile = ref('')
 const agent = ref<WorkspaceAgent>(DEFAULT_WORKSPACE_AGENT)
 const scope = ref<WorkspaceScope>('personal')
+const webSupported = currentWebWorkspaceSupport()
+const mode = ref<WorkspaceMode>(webSupported ? 'web' : 'terminal')
 const runtime = ref<DshRuntimeStatus | null>(null)
 const actionError = ref('')
 const stopping = ref(false)
@@ -69,7 +72,7 @@ const scopeOptions = computed<Option<WorkspaceScope>[]>(() => {
     { value: 'personal', label: '个人', description: '独立工作台，只保留你自己的 session 与记忆' },
     { value: 'shared', label: '小组', description: '同组成员共享同一个工作台、session 与记忆' },
   ]
-  return sharedSupported.value ? options : options.filter(option => option.value === 'personal')
+  return sharedSupported.value && mode.value === 'web' ? options : options.filter(option => option.value === 'personal')
 })
 const profileOptions = computed<Option<string>[]>(() => [
   {
@@ -85,6 +88,10 @@ const profileOptions = computed<Option<string>[]>(() => [
   })),
 ])
 
+watch(mode, () => {
+  if (mode.value === 'terminal') scope.value = 'personal'
+  void loadRuntime()
+})
 watch(scope, () => {
   actionError.value = ''
   void loadRuntime()
@@ -99,7 +106,7 @@ watch(agent, () => {
 onMounted(async () => {
   const preferred = readPreferredSelection()
   agent.value = preferred.agent
-  scope.value = preferred.scope
+  scope.value = mode.value === 'terminal' ? 'personal' : preferred.scope
   await Promise.all([loadAgents(), loadProfiles(), loadRuntime()])
   loading.value = false
 })
@@ -143,10 +150,11 @@ async function loadProfiles() {
 async function loadRuntime() {
   const requestedAgent = agent.value
   const requestedScope = scope.value
+  const requestedMode = mode.value
   try {
-    const status = await api.getDshRuntimeStatus(requestedScope, requestedAgent)
+    const status = await api.getDshRuntimeStatus(requestedScope, requestedAgent, requestedMode)
     // 快速切换 Agent/范围时丢弃过期响应，避免状态卡展示上一个实例。
-    if (requestedAgent !== agent.value || requestedScope !== scope.value) return
+    if (requestedAgent !== agent.value || requestedScope !== scope.value || requestedMode !== mode.value) return
     runtime.value = status
   } catch {
     runtime.value = null
@@ -166,6 +174,7 @@ function openWorkspace() {
     name: 'workspace-live',
     query: {
       agent: agent.value,
+      mode: mode.value,
       scope: scope.value,
       ...(selectedProfile.value ? { profile: selectedProfile.value } : {}),
     },
@@ -181,7 +190,7 @@ async function stopRuntime() {
   stopping.value = true
   actionError.value = ''
   try {
-    await api.stopDshRuntime(scope.value, agent.value)
+    await api.stopDshRuntime(scope.value, agent.value, mode.value)
     await loadRuntime()
   } catch (e: any) {
     actionError.value = e.message || '停止工作台失败'
@@ -268,6 +277,15 @@ async function stopRuntime() {
         </div>
         <div v-else class="space-y-2" :class="{ 'pointer-events-none opacity-60': profileLocked }">
           <WorkspaceOptionGrid v-model="selectedProfile" :options="profileOptions" stacked />
+        </div>
+        <div class="space-y-2 border-t border-border pt-4">
+          <div class="text-sm font-medium">界面</div>
+          <div class="flex gap-2">
+            <Button :variant="mode === 'web' ? 'default' : 'outline'" :disabled="!webSupported" @click="mode = 'web'">Web 工作台</Button>
+            <Button :variant="mode === 'terminal' ? 'default' : 'outline'" @click="mode = 'terminal'">网页终端</Button>
+          </div>
+          <p v-if="!webSupported" class="text-xs text-muted-foreground">当前浏览器不满足 Web 工作台要求（Chrome 111+ 或同等能力），请使用网页终端。</p>
+          <p v-if="mode === 'terminal'" class="text-xs text-muted-foreground">终端仅支持个人范围；每个 Agent 一个会话，同时只允许一个页面输入。</p>
         </div>
         <div class="flex items-center gap-3">
           <Button size="sm" @click="openWorkspace()">

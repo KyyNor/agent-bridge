@@ -54,39 +54,43 @@ def create_agent_workspace_handlers(service, actor) -> SimpleNamespace:
     def get_runtime(
         agent: str = "dsh",
         scope: str = "personal",
+        mode: str = "web",
         current_actor: str = Depends(actor),
     ) -> dict[str, Any]:
-        return service.workspace_runtime(agent).runtime_status(current_actor, scope=scope)
+        return service.workspace_runtime(agent, mode=mode).runtime_status(current_actor, scope=scope)
 
     def authorize_workspace(
         payload: DshWorkspaceAuthorizeRequest,
         agent: str = "dsh",
+        mode: str = "web",
         current_actor: str = Depends(actor),
     ) -> dict[str, Any]:
-        return service.workspace_runtime(agent).authorize_workspace(
+        return service.workspace_runtime(agent, mode=mode).authorize_workspace(
             current_actor, profile_key=payload.profile_key, scope=payload.scope
         )
 
     def ensure_runtime(
         agent: str = "dsh",
         scope: str = "personal",
+        mode: str = "web",
         current_actor: str = Depends(actor),
     ) -> dict[str, Any]:
-        return service.workspace_runtime(agent).ensure_running(current_actor, scope=scope)
+        return service.workspace_runtime(agent, mode=mode).ensure_running(current_actor, scope=scope)
 
     def stop_runtime(
         agent: str = "dsh",
         scope: str = "personal",
+        mode: str = "web",
         current_actor: str = Depends(actor),
     ) -> dict[str, Any]:
-        return service.workspace_runtime(agent).stop_runtime(current_actor, scope=scope)
+        return service.workspace_runtime(agent, mode=mode).stop_runtime(current_actor, scope=scope)
 
     def list_runtimes(agent: str = "", current_actor: str = Depends(actor)) -> dict[str, Any]:
         """管理端实例列表；``agent`` 为空时返回全部 Agent。"""
         if agent:
             return {"runtimes": service.workspace_runtime(agent).list_runtimes(current_actor)}
         runtimes: list[dict[str, Any]] = []
-        for runtime in service.workspace_agents.values():
+        for runtime in service.workspace_runtimes.values():
             runtimes.extend(runtime.list_runtimes(current_actor))
         return {"runtimes": runtimes}
 

@@ -60,9 +60,9 @@ def plugin_marker_path(dsh_home: Path) -> Path:
     return Path(dsh_home) / PLUGIN_MARKER_FILENAME
 
 
-def build_profile_install_command(dsh_binary: str) -> list[str]:
+def build_profile_install_command(dsh_binary: str, *, profile: str = PLUGIN_PROFILE) -> list[str]:
     """构造 profile 初始化命令：``<dsh> plugin --profile web install``。"""
-    return [dsh_binary, "plugin", "--profile", PLUGIN_PROFILE, "install"]
+    return [dsh_binary, "plugin", "--profile", profile, "install"]
 
 
 def ensure_build_blocks(profile_dir: Path) -> bool:
@@ -152,9 +152,9 @@ def write_installed_specs(dsh_home: Path, specs: list[str]) -> Path:
     return path
 
 
-def build_install_command(dsh_binary: str, spec: str) -> list[str]:
+def build_install_command(dsh_binary: str, spec: str, *, profile: str = PLUGIN_PROFILE) -> list[str]:
     """构造单个插件的安装命令：``<dsh> plugin --profile web add <spec>``。"""
-    return [dsh_binary, "plugin", "--profile", PLUGIN_PROFILE, "add", spec]
+    return [dsh_binary, "plugin", "--profile", profile, "add", spec]
 
 
 def plugin_state_path(dsh_home: Path) -> Path:
