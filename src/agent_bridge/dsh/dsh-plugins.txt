@@ -5,9 +5,9 @@
 # 版本策略：全部钉住精确版本（不使用 @latest / ^ / ~），同一 Agent Bridge
 # 版本在各部署装出一致的插件集；升级插件 = 在本文件改版本号并随版本发布，
 # 安装进度 marker 按 spec 差异驱动补装/升级，移除条目不会卸载已装插件。
-@linxin666/dsh-client-ui-task-board@0.4.5
-@linxin666/dsh-client-ui-skill-explorer@0.4.5
-@linxin666/dsh-client-ui-git-graph@0.4.5
-@anionex/dsh-turn-rewind@0.3.9
-dsh-better-sidebar@0.25.0
-dsh-context@0.66.1
+@linxin666/dsh-client-ui-task-board@0.4.8
+@linxin666/dsh-client-ui-skill-explorer@0.4.8
+@linxin666/dsh-client-ui-git-graph@0.4.8
+@anionex/dsh-turn-rewind@0.3.10
+dsh-better-sidebar@0.28.0
+dsh-context@0.74.0

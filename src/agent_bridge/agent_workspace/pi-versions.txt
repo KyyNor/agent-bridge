@@ -8,5 +8,5 @@
 # 部署装出一致的可用组合，并便于未来整体替换实现。
 #
 # 部署要求：Node >= 22.19（pi-web engines 声明）。内置终端依赖 node-pty，
-# @agegr/pi-web 0.11.0 自带 linux-x64/arm64 预编译二进制，无需本地工具链。
-@agegr/pi-web@0.11.0
+# @agegr/pi-web 0.12.2 自带 linux-x64/arm64 预编译二进制，无需本地工具链。
+@agegr/pi-web@0.12.2

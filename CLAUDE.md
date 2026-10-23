@@ -216,7 +216,7 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
 Pi 官方没有 Web 服务模式，界面由社区实现 `@agegr/pi-web` 提供，只依赖其公开启动
 契约（CLI 参数 + 环境变量），不 fork、不打补丁；版本钉死在包内
 `agent_workspace/pi-versions.txt`（精确版本，随版本发布，成对升级）。部署依赖
-Node ≥ 22.19；其内置终端依赖 node-pty，0.11.0 自带 linux-x64/arm64 预编译二进制。
+Node ≥ 22.19；其内置终端依赖 node-pty，0.12.2 自带 linux-x64/arm64 预编译二进制。
 
 - **配置目录**：`<linux home>/.config/agent-bridge/pi/<runtime-owner>/`，经
   `PI_CODING_AGENT_DIR` 整体重定向（个人 = 业务用户，共享 = Linux 用户）。**刻意不放在
