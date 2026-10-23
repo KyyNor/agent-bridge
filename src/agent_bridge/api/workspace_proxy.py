@@ -644,7 +644,7 @@ class AgentWorkspaceProxyMiddleware:
                 return remembered[0], remembered[1], upstream_path
         # 兜底保持 DSH 既有语义：归到 (dsh, personal)。DSH 插件的嵌套文档（如
         # ``/ipollowork-design/studio/``）在认领记忆过期或服务重启后只能靠它继续
-        # 工作。Pi 不依赖这条兜底——pi-web 0.11.0 实测不会 pushState 到无前缀
+        # 工作。Pi 不依赖这条兜底——pi-web 0.12.2 实测不会 pushState 到无前缀
         # 路径，其请求总能经前缀 Referer 或认领记忆归属；若将来实测发现会，应为
         # Pi 单独设计归属规则，而不是改动 DSH 的兜底。
         default = (WORKSPACE_AGENT_DSH, WORKSPACE_SCOPE_PERSONAL)

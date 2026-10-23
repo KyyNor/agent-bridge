@@ -5,11 +5,12 @@ Agent Bridge 只依赖其公开启动契约（CLI 参数 + 环境变量），不
 补丁；两个包**成对锁定精确版本**，随 Agent Bridge 版本发布，升级 = 在本文件
 改版本号。
 
-版本钉死的原因：pi-web 直接依赖官方 ``@earendil-works/*``，其 API/页面随
-minor 版本变化；锁版本保证各部署装出一致的可用组合，也便于整体替换实现。
+版本钉死的原因：pi-web 直接依赖官方 ``@earendil-works/*``（0.12.2 精确钉住
+``@earendil-works/pi-coding-agent`` 1.2.0），其 API/页面随 minor 版本变化；
+锁版本保证各部署装出一致的可用组合，也便于整体替换实现。
 
 部署依赖：Node ≥ 22.19（pi-web 的 ``engines`` 声明）；内置终端依赖
-``node-pty``，0.11.0 自带 linux-x64/arm64 预编译二进制，无需本地工具链。
+``node-pty``，0.12.2 自带 linux-x64/arm64 预编译二进制，无需本地工具链。
 """
 
 from __future__ import annotations
