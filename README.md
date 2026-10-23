@@ -192,7 +192,7 @@ DSH 中自配的其他供应商与遗留 `settings.yaml` 中的供应商都会�
 拒绝。留空或填 0 表示不声明该键；两个字段各自独立，互不影响。
 
 插件首装：插件名单内置于包内（`src/agent_bridge/dsh/dsh-plugins.txt`，随版本
-发布；每行一个 spec，如 `@scope/name@0.4.5`，支持 `#` 注释；全部钉住精确
+发布；每行一个 spec，如 `@scope/name@0.4.8`，支持 `#` 注释；全部钉住精确
 版本以保证同一版本各部署插件集一致，升级插件即改版本号随版本部署）。插件在 **web 进程启动之前**
 以目标 Linux 用户身份逐个执行 `dsh plugin --profile web add <spec>` 安装完毕
 （运行中的 DSH 不会热加载 profile 变更，先启动后安装会出现首访无插件的竞态），

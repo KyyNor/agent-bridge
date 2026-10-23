@@ -4,7 +4,7 @@ pi 官方没有 Web 服务模式，这里用 pi-web 提供浏览器界面。集�
 启动契约（CLI 参数 + 环境变量），不 fork、不打补丁；版本由包内
 :mod:`~agent_bridge.agent_workspace.pi_versions` 的清单钉死，可整体替换。
 
-已核实的上游契约（@agegr/pi-web 0.11.0，2026-10 实测）：
+已核实的上游契约（@agegr/pi-web 0.12.2，2026-10 实测）：
 
 - 启动：``pi-web --no-open --port <p> --hostname 127.0.0.1``，Node ≥ 22.19；
 - 鉴权：``PI_WEB_PASSWORD`` 非空即启用。**HTTP Basic 只覆盖 ``/api/**``，

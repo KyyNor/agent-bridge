@@ -277,7 +277,7 @@ def test_version_manifest_rejects_range(tmp_path, monkeypatch) -> None:
         "manifest_path",
         lambda: tmp_path / "pi-versions.txt",
     )
-    (tmp_path / "pi-versions.txt").write_text("@agegr/pi-web@^0.11.0\n", encoding="utf-8")
+    (tmp_path / "pi-versions.txt").write_text("@agegr/pi-web@^0.12.2\n", encoding="utf-8")
     with pytest.raises(ValueError):
         pi_versions.read_version_manifest()
 
