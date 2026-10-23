@@ -357,3 +357,13 @@
     height: 2.25rem;
   }
 }
+
+/* TUI 默认 ANSI 调色板以暗底设计；独立语义令牌避免浅色平台下灰字失去对比。 */
+:root {
+  --terminal-background: #101722;
+  --terminal-foreground: #e5eaf2;
+}
+.workspace-terminal {
+  background: var(--terminal-background);
+  color: var(--terminal-foreground);
+}

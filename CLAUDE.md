@@ -211,6 +211,29 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
 `dsh/` 是 DSH 专属包：`DshRuntimeService` 现在是通用 runtime + DSH adapter 的薄壳
 （并保留 DSH 首访 token 入口维护）；`injection.py` 负责把模型接入写进 DSH 原生配置。
 
+### 网页终端
+
+`mode=terminal` 当前仅支持 personal。`TERMINAL_ADAPTERS` 注册 DSH/Pi TUI adapter，
+`TerminalRuntimeService` 复用公共 runtime 的身份、状态、端口、capability 与回收，
+`workspace_runtimes` 汇总 Web/终端生命周期，`workspace_agents` 保持原 Web 目录。
+终端的配置目录与环境标记独立于 Web（`AGENT_BRIDGE_DSH_TERMINAL_RUNTIME` /
+`AGENT_BRIDGE_PI_TERMINAL_RUNTIME`），MCP capability 槽位也彼此独立。
+
+`terminal_server.py` 在目标用户身份下以 POSIX PTY 托管固定 Agent 命令。控制终端的
+setsid/TIOCSCTTY 在独立 Python helper 中完成，禁止 preexec_fn；本机 bridge 用每次
+启动随机秘密鉴权，秘密只在环境及 0600 状态文件存在，启动 Agent 前从环境移除。
+浏览器 WS 入口必须校验同源 Origin 和登录，组归属/Profile/能力授权变化会拒绝连接；
+输入时与每 20 秒复核，ping 不刷新空闲计时。禁止接受任意命令/端口/目标 URL。
+
+每个会话只有一个可写连接；输出队列与重放缓冲分别有界，慢连接主动断开。断线
+保留 120 秒，超时回收，运行退出由 UI 明确显示；服务重启时统一回收终端遗留实例。
+默认 DOM renderer；xterm 6.0.0 + fit 0.11.0 固定版本，modernTargets/build target
+均为 chrome90，不依赖运行时注入 API 垫片。Web 入口单独执行浏览器门禁。
+
+DSH TUI 插件锁 `dsh/dsh-tui-plugins.txt` 与 Web 锁分开，profile=tui；适配器复用
+公共插件安装/指纹逻辑，但必需 TUI 插件缺失必须失败。社区 TUI 的 HOME/.dsh-tui
+偏好不能按 DSH_HOME 隔离，因此使用独立 HOME；模型与 MCP 仍复用公共覆盖层。
+
 ### Pi Agent 工作台
 
 Pi 官方没有 Web 服务模式，界面由社区实现 `@agegr/pi-web` 提供，只依赖其公开启动

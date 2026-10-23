@@ -47,6 +47,8 @@
 - `workflow_runs` 的任务维度索引 `idx_workflow_runs_task` 与 `tool_call_logs` 的时间窗聚合覆盖索引 `idx_tool_call_logs_stats` 是任务队列和概览聚合的查询护栏：两表行内均内嵌大 JSON 字段，缺索引的任务维度关联或时间窗聚合会退化为逐行回表并随数据量线性放大。修改这些查询必须同步评估索引，不得随意删除；护栏测试见 `tests/test_storage_query_indexes.py`。
 - 历史数据清理统一走 `system_config/data_retention.py` 的每日生命周期任务（`retention_detail_days`/`retention_history_days`/`retention_cleanup_time` 存于 `knowledge_sync_config`，默认 20/60/22:00）：不得恢复写入路径上的 runtime log prune，表写入处不得附带清理触发；清理必须分批 DELETE + `wal_checkpoint`，VACUUM 只允许出现在 `2026_09_data_retention_v1` marker 守卫的首启迁移（该迁移在应用 ready 前阻塞完成、只在真实清理成功后落 marker）；主库 `data_retention_meta` 表是该迁移的幂等凭据，只能由迁移逻辑维护。`running`/`pending` 活动任务不做 slim/delete，历史产物删除必须保留仍被 `workflow_run_artifacts` 引用的行（引用保护走 `idx_workflow_run_artifacts_artifact`）。业务台账、知识库/文档、权限、Script/Skill/Workflow 定义、当前工作流产物（`is_current=1`）与 `workflow_tasks` 永不按时间删除；清理历史工作流产物依赖 FTS 触发器与外键级联保持一致，护栏测试见 `tests/test_data_retention.py`。
 
+- 网页终端首版只支持个人范围：通过 `TERMINAL_ADAPTERS` 注册，复用 `WorkspaceRuntimeService`，不得为 Pi/DSH 写中心分支。Web/终端的配置、capability 与进程标记必须隔离。xterm 6.x 必须在 modern 和 legacy 构建中面向 Chrome 90 转译；不可把原包可下载误判为旧浏览器可运行。终端 WS 校验同源 Origin、登录与当前归属，只代理已登记的目标，不接受用户指定命令或端口。单会话单连接、重放有界、断线保留 120 秒、服务重启回收。DSH TUI 插件精确版本单独维护在 `dsh-tui-plugins.txt`，安装失败拒绝启动，不混装 Web 插件。
+
 ## 时间处理规范
 
 - 禁止新增 `datetime.utcnow()`、naive UTC 或散落的 `datetime.now(...).isoformat()`。

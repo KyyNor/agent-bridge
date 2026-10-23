@@ -125,10 +125,15 @@ def test_start_server_refuses_second_instance_when_old_process_alive(monkeypatch
     try:
         _write_pid(wm_paths, process.pid)
         monkeypatch.setattr(f"{_MODULE}.httpx.get", _unhealthy)
-        monkeypatch.setattr(
-            f"{_MODULE}.subprocess.Popen",
-            lambda *args, **kwargs: pytest.fail("must not spawn a second server"),
-        )
+        real_popen = subprocess.Popen
+
+        def no_second_server(command, *args, **kwargs):
+            # macOS 的 PID 身份检查通过 ps 子进程完成，不能被启动拦截替身误伤。
+            if command[:1] == ["ps"]:
+                return real_popen(command, *args, **kwargs)
+            pytest.fail("must not spawn a second server")
+
+        monkeypatch.setattr(f"{_MODULE}.subprocess.Popen", no_second_server)
 
         with pytest.raises(RuntimeError, match="refusing to start a second instance"):
             start_server(wm_paths)

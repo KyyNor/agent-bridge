@@ -75,6 +75,7 @@ def _service_module():
 class DshWorkspaceAdapter:
     """DSH Web 的 workspace adapter。"""
 
+    plugin_profile = plugins.PLUGIN_PROFILE
     slug = "dsh"
     display_name = "DeepSeek Harness"
     personal_proxy_prefix = WORKSPACE_PROXY_PREFIX
@@ -294,14 +295,14 @@ class DshWorkspaceAdapter:
         )
         env = self._plugin_env(identity, config_dir)
         cwd = identity.home if identity.home.is_dir() else config_dir
-        profile_dir = plugins.profile_dir_for(config_dir)
+        profile_dir = plugins.profile_dir_for(config_dir, self.plugin_profile)
         # profile 模板（package.json + pnpm-workspace.yaml）由 dsh 在首次插件
         # 命令时生成；先落初始化，才能在其上写构建声明。
         if not (profile_dir / "package.json").exists():
             init = self._run_dsh_plugin_command(
                 runner,
                 user_id=user_id,
-                command=plugins.build_profile_install_command(dsh_binary),
+                command=plugins.build_profile_install_command(dsh_binary, profile=self.plugin_profile),
                 env=env,
                 cwd=cwd,
                 identity=identity,
@@ -335,7 +336,7 @@ class DshWorkspaceAdapter:
             result = self._run_dsh_plugin_command(
                 runner,
                 user_id=user_id,
-                command=plugins.build_install_command(dsh_binary, spec),
+                command=plugins.build_install_command(dsh_binary, spec, profile=self.plugin_profile),
                 env=env,
                 cwd=cwd,
                 identity=identity,
@@ -427,7 +428,7 @@ class DshWorkspaceAdapter:
         entries = injection.resolve_model_overlay(
             dsh_home=config_dir,
             dsh_binary=dsh_binary,
-            profile=plugins.PLUGIN_PROFILE,
+            profile=self.plugin_profile,
             base_url=str(binding.get("base_url") or ""),
             models=[str(item) for item in binding.get("available_models") or []],
             default_model=str(binding.get("default_model") or ""),

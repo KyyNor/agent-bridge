@@ -540,11 +540,11 @@ export const api = {
     get<{ configs: DshGroupConfig[] }>('/agent-workspace/group-configs').then(payload => payload.configs),
   saveDshGroupConfig: (groupKey: string, config: DshGroupConfigUpdate) =>
     put<DshGroupConfig>(`/agent-workspace/group-configs/${encodeURIComponent(groupKey)}`, config),
-  getDshRuntimeStatus: (scope: DshWorkspaceScope = 'personal', agent: WorkspaceAgent = 'dsh') =>
-    get<DshRuntimeStatus>(`/agent-workspace/runtime?agent=${agent}&scope=${scope}`),
-  stopDshRuntime: (scope: DshWorkspaceScope = 'personal', agent: WorkspaceAgent = 'dsh') =>
+  getDshRuntimeStatus: (scope: DshWorkspaceScope = 'personal', agent: WorkspaceAgent = 'dsh', mode = 'web') =>
+    get<DshRuntimeStatus>(`/agent-workspace/runtime?agent=${agent}&scope=${scope}&mode=${mode}`),
+  stopDshRuntime: (scope: DshWorkspaceScope = 'personal', agent: WorkspaceAgent = 'dsh', mode = 'web') =>
     post<WorkspaceRuntimeStopResult>(
-      `/agent-workspace/runtime/stop?agent=${agent}&scope=${scope}`, {},
+      `/agent-workspace/runtime/stop?agent=${agent}&scope=${scope}&mode=${mode}`, {},
     ),
   // 管理端实例列表；`agent` 传空串表示两种 Agent 一起返回。
   listWorkspaceRuntimes: (agent: WorkspaceAgent | '' = '') =>
@@ -554,8 +554,9 @@ export const api = {
     profileKey: string | null,
     scope: DshWorkspaceScope = 'personal',
     agent: WorkspaceAgent = 'dsh',
+    mode = 'web',
   ) =>
-    post<DshWorkspaceAuthorization>(`/agent-workspace/workspace/authorize?agent=${agent}`, {
+    post<DshWorkspaceAuthorization>(`/agent-workspace/workspace/authorize?agent=${agent}&mode=${mode}`, {
       profile_key: profileKey || null,
       scope,
     }),

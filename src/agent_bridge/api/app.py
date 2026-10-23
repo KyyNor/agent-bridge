@@ -103,7 +103,7 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
         service.doc_sync_scheduler.start()
         service.workflow_scheduler.start()
         # data_retention_scheduler 已在首次升级迁移完成后启动（见上）。
-        for _slug, _runtime in service.workspace_agents.items():
+        for _slug, _runtime in service.workspace_runtimes.items():
             _runtime.start()
         asyncio.create_task(service.business_ledgers.load_all_async())
         logger.info(
@@ -130,7 +130,7 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
             ShutdownStep("model_evaluations", service.model_evaluations.stop_all),
             *(
                 ShutdownStep(f"workspace_{slug}", _stop_workspace_runtime(runtime))
-                for slug, runtime in service.workspace_agents.items()
+                for slug, runtime in service.workspace_runtimes.items()
             ),
             ShutdownStep("codegraph_scheduler", service.codegraph_scheduler.stop),
             ShutdownStep("understand_scheduler", service.understand_scheduler.stop),
@@ -408,6 +408,8 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
 
     # MCP streamable HTTP endpoint
     from agent_bridge.capability_hub.gateway.metamcp import setup_mcp_route
+    from agent_bridge.api.routes.workspace_terminal import create_terminal_routes
+    app.include_router(create_terminal_routes(service, identity_resolver), prefix="/api/v1")
     setup_mcp_route(app, service, identity_resolver)
 
     @app.get("/agent-bridge/{route_path:path}", response_class=HTMLResponse)
