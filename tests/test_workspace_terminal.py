@@ -170,3 +170,80 @@ def test_terminal_proxy_preserves_exclusive_close_code(monkeypatch):
             with pytest.raises(WebSocketDisconnect) as error:
                 socket.receive_bytes()
             assert error.value.code == 4009
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('parent_exits', [
+    False,
+    pytest.param(True, marks=pytest.mark.skipif(sys.platform != 'linux', reason='孤儿环境标记扫描依赖 /proc')),
+])
+async def test_terminal_stop_reaps_detached_children_and_keeps_other_sessions(tmp_path, parent_exits):
+    """主 Agent 存活/先退出时，均回收拒绝 SIGTERM 的 detached 工具进程。"""
+    import signal
+    import subprocess
+    import time
+    from agent_bridge.agent_workspace import process_tree
+    from agent_bridge.agent_workspace.terminal_server import PtySession, SESSION_MARK_ENV
+
+    pid_file = tmp_path / 'tool.pid'
+    child_script = (
+        'import os,signal,time; from pathlib import Path; '
+        'signal.signal(signal.SIGTERM,signal.SIG_IGN); '
+        f'Path({str(pid_file)!r}).write_text(str(os.getpid())); time.sleep(60)'
+    )
+    command = (
+        'import subprocess,sys,time; '
+        f'subprocess.Popen([sys.executable,"-c",{child_script!r}], start_new_session=True); '
+        + ('time.sleep(0.3)' if parent_exits else 'time.sleep(60)')
+    )
+    session = PtySession([sys.executable, '-u', '-c', command])
+    other = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'],
+                             start_new_session=True, env={**os.environ, SESSION_MARK_ENV: 'other-session'})
+    child_pid = None
+    try:
+        session.start()
+        deadline = time.monotonic() + 5
+        while not pid_file.exists() and time.monotonic() < deadline:
+            await asyncio.sleep(0.02)
+        assert pid_file.exists(), 'detached 工具进程未就绪'
+        child_pid = int(pid_file.read_text())
+        if parent_exits:
+            while session.process.poll() is None and time.monotonic() < deadline:
+                await asyncio.sleep(0.02)
+            assert session.process.poll() == 0
+        await session.stop()
+        assert session.process.poll() is not None
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            try:
+                os.kill(child_pid, 0)
+            except ProcessLookupError:
+                break
+            if process_tree.process_is_zombie(child_pid):
+                break
+            await asyncio.sleep(0.02)
+        else:
+            pytest.fail('detached 工具进程在终端停止后仍存活')
+        assert other.poll() is None, '其他终端会话不能被回收'
+    finally:
+        if session.master >= 0:
+            await session.stop()
+        for pid in [child_pid, other.pid]:
+            if pid is not None:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+        other.wait(timeout=5)
+
+
+def test_cleanup_before_setsid_never_signals_bridge_process_group(monkeypatch):
+    """PTY helper 尚未完成 setsid 就取消时，bridge 所在进程组不能被误杀。"""
+    import signal
+    from agent_bridge.agent_workspace.process_cleanup import RuntimeProcessController
+    signaled = []
+    monkeypatch.setattr(os, 'getpgid', lambda _pid: os.getpgrp())
+    monkeypatch.setattr(os, 'killpg', lambda *_args: pytest.fail('不能向 bridge 自己的进程组发信号'))
+    monkeypatch.setattr(os, 'kill', lambda pid, sig: signaled.append((pid, sig)))
+    RuntimeProcessController._signal_process(12345, signal.SIGTERM)
+    assert signaled == [(12345, signal.SIGTERM)]

@@ -30,7 +30,6 @@ import json
 import logging
 import os
 import re
-import signal
 import socket
 import threading
 import time
@@ -43,6 +42,7 @@ import httpx
 from agent_bridge.access_control.resources import ScopedResourceType
 from agent_bridge.agent_workspace import process_tree
 from agent_bridge.agent_workspace.adapter import WorkspaceAgentAdapter
+from agent_bridge.agent_workspace.process_cleanup import RuntimeProcessController
 from agent_bridge.agent_workspace.capability import (
     WorkspaceCapability,
     WorkspaceCapabilityRegistry,
@@ -81,7 +81,7 @@ def _epoch_to_iso(epoch: float | None) -> str | None:
     return utc_iso(datetime.fromtimestamp(float(epoch), tz=UTC))
 
 
-class WorkspaceRuntimeService:
+class WorkspaceRuntimeService(RuntimeProcessController):
     """按 (agent, scope, runtime key) 托管工作台实例。"""
 
     def __init__(
@@ -97,6 +97,7 @@ class WorkspaceRuntimeService:
         mcp_url: str | None = None,
         state_dir_name: str = "workspace-runtimes",
     ) -> None:
+        super().__init__(mark_env=adapter.mark_env, display_name=adapter.display_name)
         self.adapter = adapter
         self.paths = paths
         self.admins = admins
@@ -110,13 +111,6 @@ class WorkspaceRuntimeService:
         self._lock = threading.RLock()
         self._reaper_stop = threading.Event()
         self._reaper_thread: threading.Thread | None = None
-        # 本进程启动的子进程句柄；用于停止时 wait() 回收，避免僵尸进程被
-        # kill(pid, 0) 误判为存活而升级 SIGKILL。重启后经状态文件识别的
-        # 遗留 pid 不在此列，走信号回退路径。
-        self._processes: dict[int, Any] = {}
-        # 进程枚举与信号实现可由后端/测试替换（DSH 兼容层与既有测试在
-        # ``agent_bridge.dsh.process_tree`` 上 monkeypatch）。
-        self._process_tree = process_tree
 
     # -- 对外生命周期入口 --
 
@@ -989,115 +983,10 @@ class WorkspaceRuntimeService:
         return f"http://127.0.0.1:{port}"
 
     @staticmethod
-    def _pid_alive(pid: int) -> bool:
-        if pid <= 0:
-            return False
-        try:
-            os.kill(pid, 0)
-        except OSError:
-            return False
-        return True
-
-    @staticmethod
     def _port_in_use(port: int) -> bool:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.settimeout(0.2)
             return sock.connect_ex(("127.0.0.1", port)) == 0
-
-    def _terminate_pid(
-        self, pid: int, *, grace_seconds: float, mark: str | None = None
-    ) -> bool:
-        """终止一个 runtime：主进程、全部后代与带标记的孤儿一起回收。"""
-        targets = self._collect_runtime_pids(pid, mark)
-        if not targets:
-            return False
-        for target in sorted(targets):
-            self._signal_process(target, signal.SIGTERM)
-        self._wait_targets_exit(targets, grace_seconds=grace_seconds)
-        alive = self._alive_targets(targets)
-        if alive:
-            alive |= self._collect_runtime_pids(pid, mark)
-            logger.warning(
-                "%s Runtime 优雅退出超时，升级为 SIGKILL pid=%s 存活=%d pids=%s",
-                self.adapter.display_name,
-                pid,
-                len(alive),
-                sorted(alive),
-            )
-            for target in sorted(alive):
-                self._signal_process(target, signal.SIGKILL)
-            self._wait_targets_exit(alive, grace_seconds=grace_seconds)
-            remaining = self._alive_targets(alive)
-            if remaining:
-                logger.warning(
-                    "%s Runtime SIGKILL 后仍有存活进程 pid=%s pids=%s（请人工排查）",
-                    self.adapter.display_name,
-                    pid,
-                    sorted(remaining),
-                )
-        self._processes.pop(pid, None)
-        return True
-
-    def _collect_runtime_pids(self, pid: int, mark: str | None) -> set[int]:
-        """收集一个 runtime 的全部存活进程：主进程后代树 + 环境标记命中的孤儿。"""
-        targets: set[int] = set()
-        if pid > 0 and self._pid_alive(pid):
-            tree = self._process_tree.descendants(pid)
-            targets |= tree
-            if not tree:
-                targets.add(pid)
-        if mark:
-            # 必须传入该后端的标记环境变量名：各 Agent 的标记值格式相同
-            # （scope:runtime_key），用错变量名会误杀另一种 Agent 的进程，
-            # 且回收不到本 Agent 自己的 detached 孤儿。
-            targets |= self._process_tree.marked_pids(
-                mark, mark_env=self.adapter.mark_env
-            )
-        targets = self._process_tree.discard_own_process(targets)
-        return {target for target in targets if self._pid_alive(target)}
-
-    def _alive_targets(self, pids: set[int]) -> set[int]:
-        """仍在运行的目标；僵尸视为已退出，避免宽限期被僵尸进程拖满。"""
-        return {
-            pid
-            for pid in pids
-            if self._pid_alive(pid) and not self._process_tree.process_is_zombie(pid)
-        }
-
-    def _wait_targets_exit(self, pids: set[int], *, grace_seconds: float) -> None:
-        """等待目标集合退出：本进程启动的句柄先 wait() 收尸，其余轮询存活。"""
-        deadline = time.monotonic() + max(0.0, grace_seconds)
-        for pid in sorted(pids):
-            process = self._processes.get(pid)
-            if process is None:
-                continue
-            try:
-                process.wait(timeout=max(0.0, deadline - time.monotonic()))
-            except Exception:
-                pass
-        while time.monotonic() < deadline:
-            if not self._alive_targets(pids):
-                return
-            time.sleep(0.1)
-
-    @staticmethod
-    def _signal_process(pid: int, sig: int) -> None:
-        try:
-            process_group_id = os.getpgid(pid)
-        except OSError:
-            process_group_id = pid
-        try:
-            os.killpg(process_group_id, sig)
-        except ProcessLookupError:
-            try:
-                os.kill(pid, sig)
-            except ProcessLookupError:
-                pass
-        except OSError:
-            try:
-                os.kill(pid, sig)
-            except ProcessLookupError:
-                pass
 
     def _state_path(self, scope: str, runtime_key: str) -> Path:
         """runtime 状态文件：个人 ``<key>.json``，共享 ``shared/<key>.json``。"""

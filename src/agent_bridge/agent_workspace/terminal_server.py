@@ -10,7 +10,6 @@ import logging
 import os
 import pty
 import secrets
-import signal
 import struct
 import subprocess
 import sys
@@ -22,8 +21,11 @@ from contextlib import asynccontextmanager, suppress
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
+from agent_bridge.agent_workspace.process_cleanup import RuntimeProcessController
+
 logger = logging.getLogger(__name__)
 AUTH_ENV = "AGENT_BRIDGE_TERMINAL_AUTH"
+SESSION_MARK_ENV = "AGENT_BRIDGE_TERMINAL_SESSION"
 DISCONNECT_GRACE_SECONDS = 120
 REPLAY_BYTES = 512 * 1024
 MAX_INPUT_BYTES = 64 * 1024
@@ -34,6 +36,8 @@ class PtySession:
 
     def __init__(self, command: list[str]):
         self.command = command
+        self.session_mark = secrets.token_hex(16)
+        self.cleanup = RuntimeProcessController(mark_env=SESSION_MARK_ENV, display_name="网页终端")
         self.process: subprocess.Popen | None = None
         self.master = -1
         self.output: deque[bytes] = deque()
@@ -48,6 +52,7 @@ class PtySession:
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
         env = dict(os.environ)
         env.pop(AUTH_ENV, None)
+        env[SESSION_MARK_ENV] = self.session_mark
         try:
             self.process = subprocess.Popen(
                 [sys.executable, "-m", "agent_bridge.agent_workspace.terminal_server", "--child", *self.command],
@@ -59,6 +64,7 @@ class PtySession:
             raise
         finally:
             os.close(slave)
+        self.cleanup._processes[self.process.pid] = self.process
         os.set_blocking(self.master, False)
         asyncio.get_running_loop().add_reader(self.master, self.read_output)
         logger.info("终端 Agent 已启动 pid=%s", self.process.pid)
@@ -105,19 +111,20 @@ class PtySession:
     async def stop(self):
         if self.master >= 0:
             asyncio.get_running_loop().remove_reader(self.master)
-        if self.process and self.process.poll() is None:
-            # 子进程是独立会话；通用 runtime 另有后代树与环境标记完整回收兜底。
-            with suppress(ProcessLookupError):
-                os.killpg(self.process.pid, signal.SIGTERM)
-            try:
-                await asyncio.to_thread(self.process.wait, 3)
-            except subprocess.TimeoutExpired:
-                with suppress(ProcessLookupError):
-                    os.killpg(self.process.pid, signal.SIGKILL)
-                await asyncio.to_thread(self.process.wait, 3)
-        if self.master >= 0:
-            os.close(self.master)
-            self.master = -1
+        started = time.monotonic()
+        try:
+            if self.process is not None:
+                # 主 Agent 已退出也必须扫描标记：detached 后代可能已被 init 接管。
+                await asyncio.to_thread(
+                    self.cleanup._terminate_pid, self.process.pid,
+                    grace_seconds=3, mark=self.session_mark,
+                )
+                logger.info("终端进程集合回收完成 pid=%s 耗时=%.2fs",
+                            self.process.pid, time.monotonic() - started)
+        finally:
+            if self.master >= 0:
+                os.close(self.master)
+                self.master = -1
 
 
 def create_terminal_app(command: list[str], secret: str, *, grace_seconds: float = DISCONNECT_GRACE_SECONDS):

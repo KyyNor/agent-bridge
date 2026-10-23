@@ -227,6 +227,10 @@ setsid/TIOCSCTTY 在独立 Python helper 中完成，禁止 preexec_fn；本机 
 
 每个会话只有一个可写连接；输出队列与重放缓冲分别有界，慢连接主动断开。断线
 保留 120 秒，超时回收，运行退出由 UI 明确显示；服务重启时统一回收终端遗留实例。
+公共 `process_cleanup.RuntimeProcessController` 供 Web runtime 与 PTY bridge 共用，
+终端自动退出也必须执行后代树 + Linux 环境标记孤儿回收与 SIGKILL 升级。PTY 子进程
+额外继承随机 `AGENT_BRIDGE_TERMINAL_SESSION` 标记，只匹配本会话且排除 bridge 本身；
+主 Agent 已退出也不得跳过清理。
 默认 DOM renderer；xterm 6.0.0 + fit 0.11.0 固定版本，modernTargets/build target
 均为 chrome90，不依赖运行时注入 API 垫片。Web 入口单独执行浏览器门禁。
 

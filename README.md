@@ -107,6 +107,8 @@ Pi  个人：/agent-workspace-pi/        Pi  小组：/agent-workspace-pi-shared
 个人范围，每种 Agent 每人一个会话，同时只允许一个页面连接；关闭或断线后保留
 120 秒，期间刷新可连接原进程并重放最近最多 512 KiB 输出。超过宽限、Agent 退出、
 空闲回收或服务重启后需重新进入；不承诺服务重启后的终端续跑。
+终端自动退出也会回收完整后代树；Linux 下用每会话独立标记补收已脱离父链的孤儿，
+拒绝 SIGTERM 的进程会升级 SIGKILL，其他会话不受影响。
 
 前端固定 `@xterm/xterm@6.0.0` + `@xterm/addon-fit@0.11.0`，默认 DOM 渲染；
 modern 与 legacy 构建都明确面向 Chrome 90（6.x 原始包含旧内核不能解析的语法）。
