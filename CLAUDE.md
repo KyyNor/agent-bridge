@@ -213,6 +213,17 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
 
 ### 网页终端
 
+终端顶部“重新进入”左侧支持“深夜 / 海洋 / 暖纸”配色（默认深夜），即时切换且不重启会话；
+选择保存在浏览器 localStorage，Pi 与 DSH 共用，刷新后恢复，不上传服务端。
+
+终端进入后先选择启动目录，默认取所属小组映射 Linux 用户的 home（例如
+`/home/zhangsan`）；支持输入路径或逐级浏览，确认后才启动。选择原目录复用
+现有会话，切换目录重新启动当前个人终端。左侧文件栏可折叠，支持在所选目录
+内浏览、刷新、上传和下载；单文件最多 32 MiB，同名不覆盖，软链不可进入或下载。
+文件操作经统一 launcher 以对应 Linux 身份执行，不继承平台密钥环境；用目录 fd
+与设备/inode 快照防止软链、`..` 和根目录替换逃逸。文件根不会随 Agent 自行 cd 改变。
+
+
 `mode=terminal` 当前仅支持 personal。`TERMINAL_ADAPTERS` 注册 DSH/Pi TUI adapter，
 `TerminalRuntimeService` 复用公共 runtime 的身份、状态、端口、capability 与回收，
 `workspace_runtimes` 汇总 Web/终端生命周期，`workspace_agents` 保持原 Web 目录。

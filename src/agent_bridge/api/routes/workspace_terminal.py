@@ -4,19 +4,83 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import suppress
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
-from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Query, Request, Response, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel, Field
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed, WebSocketException
 
-from agent_bridge.core.domain import AgentBridgeError
+from agent_bridge.core.domain import AccessDenied, AgentBridgeError, ValidationError
+from agent_bridge.agent_workspace.file_worker import MAX_FILE_BYTES, valid_filename
 
 logger = logging.getLogger(__name__)
 
 
+class TerminalStartRequest(BaseModel):
+    directory: str = Field(min_length=1, max_length=4096)
+    profile_key: str | None = Field(default=None, max_length=255)
+
+
+def require_same_origin(request: Request):
+    origin = request.headers.get('origin')
+    if origin:
+        parsed = urlsplit(origin)
+        if parsed.scheme != request.url.scheme or parsed.netloc != request.headers.get('host'):
+            raise AccessDenied('拒绝跨站终端操作')
+    if request.headers.get('sec-fetch-site') == 'cross-site':
+        raise AccessDenied('拒绝跨站终端操作')
+
+
 def create_terminal_routes(service, identity_resolver):
     router = APIRouter(prefix="/agent-workspace")
+
+    def actor(request: Request):
+        return identity_resolver.resolve(request).user_id
+
+    @router.get('/terminal/{agent}/directories')
+    def directories(agent: str, path: str | None = Query(default=None, max_length=4096),
+                    user_id: str = Depends(actor)):
+        return service.workspace_runtime(agent, mode='terminal').browse_directories(user_id, path)
+
+    @router.post('/terminal/{agent}/start')
+    def start(agent: str, payload: TerminalStartRequest, request: Request, user_id: str = Depends(actor)):
+        require_same_origin(request)
+        return service.workspace_runtime(agent, mode='terminal').start_in_directory(
+            user_id, directory=payload.directory, profile_key=payload.profile_key,
+        )
+
+    @router.get('/terminal/{agent}/files')
+    def files(agent: str, path: str = Query(default='', max_length=4096), user_id: str = Depends(actor)):
+        return service.workspace_runtime(agent, mode='terminal').files(user_id, 'list', path=path)
+
+    @router.get('/terminal/{agent}/download')
+    def download(agent: str, path: str = Query(max_length=4096), user_id: str = Depends(actor)):
+        data = service.workspace_runtime(agent, mode='terminal').files(user_id, 'download', path=path)
+        filename = quote(path.rsplit('/', 1)[-1], safe='')
+        return Response(data, media_type='application/octet-stream', headers={
+            'Content-Disposition': "attachment; filename*=UTF-8''" + filename,
+            'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
+        })
+
+    @router.post('/terminal/{agent}/upload')
+    async def upload(agent: str, request: Request, name: str = Query(max_length=255),
+                     path: str = Query(default='', max_length=4096), user_id: str = Depends(actor)):
+        require_same_origin(request)
+        if request.headers.get('content-type', '').split(';')[0] != 'application/octet-stream':
+            raise ValidationError('上传必须使用二进制文件请求')
+        try:
+            valid_filename(name)
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+        runtime = service.workspace_runtime(agent, mode='terminal')
+        await asyncio.to_thread(runtime.terminal_target, user_id, touch=False)
+        data = bytearray()
+        async for chunk in request.stream():
+            if len(data) + len(chunk) > MAX_FILE_BYTES:
+                raise ValidationError('单个文件不能超过 32 MiB')
+            data.extend(chunk)
+        return await asyncio.to_thread(runtime.files, user_id, 'upload', path=path, name=name, data=bytes(data))
 
     @router.websocket("/terminal/{agent}")
     async def terminal(socket: WebSocket, agent: str):

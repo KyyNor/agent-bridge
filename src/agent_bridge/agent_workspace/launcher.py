@@ -224,3 +224,18 @@ class PopenDshLauncher:
     @staticmethod
     def _demotion_kwargs(identity: LinuxIdentity) -> dict[str, object]:
         return demotion_kwargs(identity)
+
+
+def run_identity_command(*, command: list[str], identity: LinuxIdentity, data: bytes = b'') -> subprocess.CompletedProcess:
+    """目标身份的一次性二进制 helper；不继承平台密钥环境，不使用 preexec_fn。"""
+    try:
+        return subprocess.run(
+            command, input=data, capture_output=True, timeout=30,
+            cwd=str(identity.home),
+            env={'PATH': os.defpath, 'HOME': str(identity.home), 'LANG': 'C.UTF-8',
+                 **({'PYTHONPATH': os.environ['PYTHONPATH']} if 'PYTHONPATH' in os.environ else {})},
+            **demotion_kwargs(identity),
+        )
+    except subprocess.TimeoutExpired as exc:
+        logger.warning('工作台文件操作超时 user=%s 阶段=helper timeout=30s', identity.user)
+        raise ValidationError('文件操作超时，请重试') from exc

@@ -1,0 +1,83 @@
+[
+  {
+    "id": "midnight",
+    "label": "深夜",
+    "colors": {
+      "black": "#17212b",
+      "red": "#f07178",
+      "green": "#a8cc8c",
+      "yellow": "#e6c884",
+      "blue": "#82aaff",
+      "magenta": "#c792ea",
+      "cyan": "#89ddeb",
+      "white": "#d9e2ef",
+      "brightBlack": "#708090",
+      "brightRed": "#ff8f96",
+      "brightGreen": "#c3e6a8",
+      "brightYellow": "#ffe0a3",
+      "brightBlue": "#a6c7ff",
+      "brightMagenta": "#e0b3ff",
+      "brightCyan": "#b3f2ff",
+      "brightWhite": "#ffffff",
+      "background": "#141b24",
+      "foreground": "#d9e2ef",
+      "cursor": "#a6c7ff",
+      "cursorAccent": "#141b24",
+      "selectionBackground": "#344963"
+    }
+  },
+  {
+    "id": "ocean",
+    "label": "海洋",
+    "colors": {
+      "black": "#17212b",
+      "red": "#f07178",
+      "green": "#a8cc8c",
+      "yellow": "#e6c884",
+      "blue": "#80bded",
+      "magenta": "#c792ea",
+      "cyan": "#7edcc7",
+      "white": "#d9e2ef",
+      "brightBlack": "#708090",
+      "brightRed": "#ff8f96",
+      "brightGreen": "#c3e6a8",
+      "brightYellow": "#ffe0a3",
+      "brightBlue": "#a6c7ff",
+      "brightMagenta": "#e0b3ff",
+      "brightCyan": "#b3f2ff",
+      "brightWhite": "#ffffff",
+      "background": "#0c2933",
+      "foreground": "#d3e9e8",
+      "cursor": "#7edcc7",
+      "cursorAccent": "#0c2933",
+      "selectionBackground": "#28545e"
+    }
+  },
+  {
+    "id": "paper",
+    "label": "暖纸",
+    "colors": {
+      "background": "#f6f0e4",
+      "foreground": "#403b33",
+      "cursor": "#9b4b20",
+      "cursorAccent": "#f6f0e4",
+      "selectionBackground": "#ded0b5",
+      "black": "#403b33",
+      "red": "#a83a32",
+      "green": "#4c662c",
+      "yellow": "#886000",
+      "blue": "#285f96",
+      "magenta": "#85437f",
+      "cyan": "#246e72",
+      "white": "#d9cfbc",
+      "brightBlack": "#756b5c",
+      "brightRed": "#bf493a",
+      "brightGreen": "#58782c",
+      "brightYellow": "#9c6a00",
+      "brightBlue": "#326da5",
+      "brightMagenta": "#96528e",
+      "brightCyan": "#287e82",
+      "brightWhite": "#fffaf0"
+    }
+  }
+]

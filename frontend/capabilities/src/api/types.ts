@@ -1531,6 +1531,7 @@ export interface DshRuntimeStatus {
 }
 
 export interface DshWorkspaceAuthorization {
+  working_directory?: string
   agent: WorkspaceAgent
   user_id: string
   scope: WorkspaceScope
@@ -1902,4 +1903,17 @@ export interface WorkflowImportResult extends WorkflowDefinition {
   import_id: string
   operation: 'create' | 'overwrite'
   revision_source: WorkflowRevisionSource
+}
+
+/** 终端目录视图；路径为所选工作目录内的相对路径。 */
+export interface TerminalFileEntry {
+  name: string
+  kind: 'directory' | 'file' | 'symlink' | 'other'
+  size: number
+}
+export interface TerminalDirectoryListing {
+  root: string
+  path: string
+  entries: TerminalFileEntry[]
+  truncated: boolean
 }

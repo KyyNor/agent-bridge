@@ -1,14 +1,17 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import type { WorkspaceAgent } from '../../api/types'
 import { Button } from '../ui/button'
+import { resolveTerminalTheme } from '../../lib/workspaceTerminalTheme'
 
-const props = defineProps<{ agent: WorkspaceAgent }>()
+const props = withDefaults(defineProps<{ agent: WorkspaceAgent; themeId?: string }>(), { themeId: 'midnight' })
 const emit = defineEmits<{ ended: [] }>()
 const container = ref<HTMLElement | null>(null)
+const theme = computed(() => resolveTerminalTheme(props.themeId))
+const terminalStyle = computed(() => ({ backgroundColor: theme.value.colors?.background, color: theme.value.colors?.foreground }))
 const status = ref('正在连接终端…')
 const canReconnect = ref(false)
 let terminal: Terminal | null = null
@@ -20,6 +23,12 @@ let retry: number | undefined
 let destroyed = false
 let retries = 0
 let hasConnected = false
+
+function applyTheme() {
+  if (!terminal || !container.value) return
+  terminal.options.theme = { ...theme.value.colors }
+}
+watch(theme, applyTheme, { flush: 'post' })
 
 function send(payload: object) {
   if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(payload))
@@ -79,8 +88,7 @@ function connect() {
 onMounted(() => {
   terminal = new Terminal({ cursorBlink: true, scrollback: 3000, fontSize: 14,
     fontFamily: 'Menlo, Consolas, monospace' })
-  const colors = getComputedStyle(container.value!)
-  terminal.options.theme = { background: colors.backgroundColor, foreground: colors.color }
+  applyTheme()
   fit = new FitAddon()
   terminal.loadAddon(fit)
   terminal.open(container.value!)
@@ -100,11 +108,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="flex min-h-0 flex-1 flex-col">
-    <div class="flex h-10 shrink-0 items-center justify-between border-b border-border bg-card px-4 text-xs text-muted-foreground">
+  <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+    <div class="flex min-h-10 shrink-0 flex-wrap items-center justify-between gap-2 py-2 border-b border-border bg-card px-4 text-xs text-muted-foreground">
       <span role="status">{{ status }}</span>
       <Button v-if="canReconnect" variant="outline" size="sm" @click="connect">重新连接</Button>
     </div>
-    <div ref="container" class="workspace-terminal min-h-0 flex-1 overflow-hidden p-2" />
+    <div ref="container" :style="terminalStyle" class="workspace-terminal min-h-0 flex-1 overflow-hidden p-2" />
   </div>
 </template>

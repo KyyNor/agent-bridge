@@ -19,14 +19,18 @@ TERMINAL_AUTH_ENV = "AGENT_BRIDGE_TERMINAL_AUTH"
 TUI_PLUGIN_LIST = Path(plugins.__file__).with_name("dsh-tui-plugins.txt")
 
 
-def bridge_plan(command, env, port, log_path, display_name):
+def bridge_plan(command, env, port, log_path, display_name, directory=None):
     """包裹 Agent 命令；秘密只经环境与 0600 runtime 状态传递。"""
     secret = secrets.token_urlsafe(32)
     env = dict(env)
     env.update({TERMINAL_AUTH_ENV: secret, "TERM": "xterm-256color", "COLORTERM": "truecolor"})
+    directory_args = []
+    if directory is not None:
+        directory_args = ['--directory', directory.path, '--directory-device', str(directory.device),
+                          '--directory-inode', str(directory.inode)]
     return WorkspaceLaunchPlan(
         command=[sys.executable, "-m", "agent_bridge.agent_workspace.terminal_server",
-                 "--port", str(port), "--", *command],
+                 "--port", str(port), *directory_args, "--", *command],
         env=env, log_path=log_path, startup_timeout_seconds=60,
         probe_path="/health", display_name=display_name, auth_secret=secret,
     )
@@ -90,7 +94,7 @@ class DshTerminalAdapter(TerminalAdapter, DshWorkspaceAdapter):
         for patch in (model_overlay, overlay):
             if patch is not None:
                 command.extend(["--patch", str(patch)])
-        return bridge_plan(command, env, port, log_path, self.display_name)
+        return bridge_plan(command, env, port, log_path, self.display_name, workspace.directory if workspace else None)
 
 
 class PiTerminalAdapter(TerminalAdapter, PiWorkspaceAdapter):
@@ -111,7 +115,8 @@ class PiTerminalAdapter(TerminalAdapter, PiWorkspaceAdapter):
         env = dict(plan.env)
         env.pop("AGENT_BRIDGE_PI_RUNTIME", None)
         env.pop("PI_WEB_PASSWORD", None)
-        return bridge_plan([command], env, kwargs["port"], kwargs["log_path"], self.display_name)
+        return bridge_plan([command], env, kwargs["port"], kwargs["log_path"], self.display_name,
+                           kwargs["workspace"].directory if kwargs.get("workspace") else None)
 
 
 TERMINAL_ADAPTERS = {"dsh": DshTerminalAdapter, "pi": PiTerminalAdapter}

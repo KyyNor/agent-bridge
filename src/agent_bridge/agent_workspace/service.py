@@ -42,6 +42,7 @@ import httpx
 from agent_bridge.access_control.resources import ScopedResourceType
 from agent_bridge.agent_workspace import process_tree
 from agent_bridge.agent_workspace.adapter import WorkspaceAgentAdapter
+from agent_bridge.agent_workspace.directory import WorkspaceDirectory
 from agent_bridge.agent_workspace.process_cleanup import RuntimeProcessController
 from agent_bridge.agent_workspace.capability import (
     WorkspaceCapability,
@@ -208,6 +209,7 @@ class WorkspaceRuntimeService(RuntimeProcessController):
         *,
         profile_key: str | None,
         scope: str = WORKSPACE_SCOPE_PERSONAL,
+        directory: WorkspaceDirectory | None = None,
     ) -> dict[str, Any]:
         """选定工作空间范围与能力平面（可不选）并确保工作台可用。"""
         normalized_user = self._require_user_id(user_id)
@@ -221,7 +223,7 @@ class WorkspaceRuntimeService(RuntimeProcessController):
         if not cleaned_profile:
             self.capabilities.revoke_for_user(normalized_user)
             status = self.ensure_running(
-                normalized_user, workspace=WorkspaceSelection(profile_key=None)
+                normalized_user, workspace=WorkspaceSelection(profile_key=None, directory=directory)
             )
             logger.info(
                 "%s 工作台进入（不注入能力平面）user=%s", self.adapter.display_name, normalized_user
@@ -252,7 +254,9 @@ class WorkspaceRuntimeService(RuntimeProcessController):
             )
             if reusable:
                 # 活进程已加载该 token，不改注入，避免触发后端配置重载。
-                status = self.ensure_running(normalized_user)
+                status = self.ensure_running(normalized_user, workspace=WorkspaceSelection(
+                    profile_key=cleaned_profile, capability=capability, directory=directory
+                ))
             else:
                 # 后端在启动时加载注入配置。旧进程即使看到磁盘上的新 token，
                 # MCP client 仍可能持有旧 token；重签前必须停止旧进程。
@@ -266,7 +270,7 @@ class WorkspaceRuntimeService(RuntimeProcessController):
                 status = self.ensure_running(
                     normalized_user,
                     workspace=WorkspaceSelection(
-                        profile_key=cleaned_profile, capability=capability
+                        profile_key=cleaned_profile, capability=capability, directory=directory
                     ),
                 )
         logger.info(
@@ -614,6 +618,7 @@ class WorkspaceRuntimeService(RuntimeProcessController):
                 if workspace is not None and workspace.capability is not None
                 else None
             ),
+            "directory": workspace.directory.payload() if workspace and workspace.directory else None,
             "started_at": now,
             "last_access_at": now,
         }
@@ -780,6 +785,7 @@ class WorkspaceRuntimeService(RuntimeProcessController):
             "config_dir": str(state.get("config_dir") or ""),
             "status": status,
             "profile_key": state.get("profile_key"),
+            "working_directory": (state.get("directory") or {}).get("path", ""),
             "started_at": _epoch_to_iso(started_at),
             "last_access_at": _epoch_to_iso(last_access_at),
             "idle_minutes": round(max(0.0, time.time() - last_access_at) / 60.0, 1),
@@ -838,6 +844,7 @@ class WorkspaceRuntimeService(RuntimeProcessController):
             "started_at",
             "last_access_at",
             "idle_minutes",
+            "working_directory",
         )
         return {key: status.get(key) for key in keys}
 

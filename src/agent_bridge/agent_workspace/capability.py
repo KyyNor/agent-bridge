@@ -26,6 +26,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from agent_bridge.agent_workspace.directory import WorkspaceDirectory
 from agent_bridge.core.domain import AccessDenied
 
 logger = logging.getLogger(__name__)
@@ -60,10 +61,11 @@ class WorkspaceCapability:
 
 @dataclass(frozen=True)
 class WorkspaceSelection:
-    """一次进入工作台时选定的能力平面；``profile_key=None`` 表示不注入任何 MCP。"""
+    """一次进入工作台时选定的能力平面与可选启动目录；``profile_key=None`` 表示不注入任何 MCP。"""
 
     profile_key: str | None
     capability: WorkspaceCapability | None = None
+    directory: WorkspaceDirectory | None = None
 
 
 class WorkspaceCapabilityRegistry:

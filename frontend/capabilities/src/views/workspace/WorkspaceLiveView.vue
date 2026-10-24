@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { currentWebWorkspaceSupport, normalizeWorkspaceMode } from '../../lib/workspaceBrowser'
 import WorkspaceTerminal from '../../components/dsh/WorkspaceTerminal.vue'
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import TerminalDirectoryPicker from '../../components/dsh/TerminalDirectoryPicker.vue'
+import WorkspaceFiles from '../../components/dsh/WorkspaceFiles.vue'
+import { TERMINAL_THEMES, readTerminalTheme, saveTerminalTheme } from '../../lib/workspaceTerminalTheme'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from '../../api/client'
 import type { WorkspaceAgent } from '../../api/types'
@@ -17,13 +20,16 @@ import { Button } from '../../components/ui/button'
 import { LoadingState } from '../../components/ui/feedback'
 import ErrorState from '../../components/ui/feedback/ErrorState.vue'
 
-type Phase = 'starting' | 'active' | 'error'
+type Phase = 'choosing' | 'starting' | 'active' | 'error'
 
 const route = useRoute()
 const phase = ref<Phase>('starting')
+const terminalTheme = ref(readTerminalTheme())
+watch(terminalTheme, saveTerminalTheme)
 const activeProfile = ref<string | null>(null)
 const errorMessage = ref('')
 const iframeKey = ref(0)
+const workingDirectory = ref('')
 const keepAliveTimer: { id: number | null } = { id: null }
 
 const requestedProfile = typeof route.query.profile === 'string' ? route.query.profile : ''
@@ -36,17 +42,31 @@ const title = computed(() => workspaceTitle(agent.value, scope.value))
 // 授权成功后改用后端返回的 workspace_url（权威值）。
 const iframeSrc = ref(workspaceEntryUrl(agent.value, scope.value))
 
-onMounted(enterWorkspace)
+onMounted(() => {
+  if (mode === 'terminal') phase.value = 'choosing'
+  else void enterWorkspace()
+})
 onUnmounted(stopKeepAlive)
 
-async function enterWorkspace() {
+function chooseDirectory() {
+  stopKeepAlive()
+  phase.value = 'choosing'
+  errorMessage.value = ''
+}
+
+async function enterWorkspace(directory?: string) {
+  if (directory) workingDirectory.value = directory
+  if (mode === 'terminal' && !workingDirectory.value) { chooseDirectory(); return }
   phase.value = 'starting'
   errorMessage.value = ''
   stopKeepAlive()
   try {
     if (mode === 'web' && !currentWebWorkspaceSupport()) throw new Error('当前浏览器不支持 Web 工作台，请返回入口选择网页终端。')
     if (mode === 'terminal' && scope.value !== 'personal') throw new Error('网页终端目前仅支持个人范围。')
-    const result = await api.authorizeDshWorkspace(requestedProfile || null, scope.value, agent.value, mode)
+    const result = mode === 'terminal'
+      ? await api.startTerminal(agent.value, workingDirectory.value, requestedProfile || null)
+      : await api.authorizeDshWorkspace(requestedProfile || null, scope.value, agent.value, mode)
+    if (mode === 'terminal') workingDirectory.value = result.working_directory || workingDirectory.value
     activeProfile.value = result.profile_key
     iframeSrc.value = result.workspace_url || workspaceEntryUrl(agent.value, scope.value)
     phase.value = 'active'
@@ -107,16 +127,27 @@ function stopKeepAlive() {
       </div>
       <div class="flex items-center gap-2">
         <Button v-if="phase === 'active' && mode === 'web'" variant="outline" size="sm" @click="reloadWorkspace()">刷新</Button>
-        <Button v-if="mode === 'terminal' && phase === 'active'" variant="outline" size="sm" @click="enterWorkspace()">重新进入</Button>
+        <label v-if="mode === 'terminal' && phase === 'active'" class="flex items-center gap-2 text-xs text-muted-foreground">
+          <span>配色</span>
+          <select v-model="terminalTheme" aria-label="终端配色" class="h-8 rounded-md border border-input bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <option v-for="item in TERMINAL_THEMES" :key="item.id" :value="item.id">{{ item.label }}</option>
+          </select>
+        </label>
+        <Button v-if="mode === 'terminal' && phase === 'active'" variant="outline" size="sm" @click="chooseDirectory()">重新进入</Button>
         <Button variant="outline" size="sm" @click="closeTab()">关闭工作台</Button>
       </div>
     </div>
 
-    <div v-if="phase === 'starting'" class="flex flex-1 flex-col items-center justify-center gap-3">
+    <TerminalDirectoryPicker v-if="phase === 'choosing'" :agent="agent" :initial-directory="workingDirectory || undefined" @start="enterWorkspace" @cancel="enterWorkspace()" />
+
+    <div v-else-if="phase === 'starting'" class="flex flex-1 flex-col items-center justify-center gap-3">
       <LoadingState :label="`正在启动 ${title}，首次启动可能需要约一分钟...`" />
     </div>
 
-    <WorkspaceTerminal v-else-if="phase === 'active' && mode === 'terminal'" :key="iframeKey" :agent="agent" @ended="stopKeepAlive" />
+    <div v-else-if="phase === 'active' && mode === 'terminal'" :key="iframeKey" class="flex min-h-0 flex-1 overflow-hidden">
+      <WorkspaceFiles :agent="agent" />
+      <WorkspaceTerminal :agent="agent" :theme-id="terminalTheme" @ended="stopKeepAlive" />
+    </div>
     <iframe
       v-else-if="phase === 'active'"
       :key="iframeKey"
@@ -128,7 +159,10 @@ function stopKeepAlive() {
 
     <div v-else class="flex flex-1 flex-col items-center justify-center gap-3 p-6">
       <ErrorState :title="`无法进入${title}`" :description="errorMessage || '请稍后重试。'" compact>
-        <Button size="sm" @click="enterWorkspace()">重试</Button>
+        <div class="flex gap-2">
+          <Button v-if="mode === 'terminal'" variant="outline" size="sm" @click="chooseDirectory()">重新选择目录</Button>
+          <Button size="sm" @click="enterWorkspace()">重试</Button>
+        </div>
       </ErrorState>
     </div>
   </div>

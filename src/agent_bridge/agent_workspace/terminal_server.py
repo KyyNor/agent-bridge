@@ -247,11 +247,23 @@ def main():
         os.execvpe(sys.argv[2], sys.argv[2:], os.environ)
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", required=True, type=int)
+    parser.add_argument('--directory')
+    parser.add_argument('--directory-device', type=int)
+    parser.add_argument('--directory-inode', type=int)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         parser.error("必须指定 Agent 命令")
+    if args.directory:
+        # launcher 已完成 uid/gid 切换；目录校验及 chdir 都在目标身份下执行。
+        from agent_bridge.agent_workspace.directory import WorkspaceDirectory, open_selected_directory
+        root = WorkspaceDirectory(args.directory, args.directory_device, args.directory_inode)
+        fd = open_selected_directory(root)
+        try:
+            os.fchdir(fd)
+        finally:
+            os.close(fd)
     import uvicorn
     logging.basicConfig(level=logging.INFO)
     app = create_terminal_app(command, os.environ.pop(AUTH_ENV))

@@ -125,6 +125,7 @@ import type {
   DshRuntimeConfig,
   DshRuntimeConfigUpdate,
   DshRuntimeStatus,
+  TerminalDirectoryListing,
   DshWorkspaceAuthorization,
   DshWorkspaceScope,
   PiVersions,
@@ -560,6 +561,21 @@ export const api = {
       profile_key: profileKey || null,
       scope,
     }),
+  browseTerminalDirectories: (agent: WorkspaceAgent, path?: string) =>
+    get<TerminalDirectoryListing>(`/agent-workspace/terminal/${agent}/directories${path ? `?path=${encodeURIComponent(path)}` : ''}`),
+  startTerminal: (agent: WorkspaceAgent, directory: string, profileKey: string | null) =>
+    post<DshWorkspaceAuthorization>(`/agent-workspace/terminal/${agent}/start`, { directory, profile_key: profileKey }),
+  listTerminalFiles: (agent: WorkspaceAgent, path = '') =>
+    get<TerminalDirectoryListing>(`/agent-workspace/terminal/${agent}/files?path=${encodeURIComponent(path)}`),
+  downloadTerminalFile: (agent: WorkspaceAgent, path: string) =>
+    getBlob(`/agent-workspace/terminal/${agent}/download?path=${encodeURIComponent(path)}`),
+  uploadTerminalFile: async (agent: WorkspaceAgent, path: string, file: File) => {
+    const response = await fetch(apiUrl(`/agent-workspace/terminal/${agent}/upload?path=${encodeURIComponent(path)}&name=${encodeURIComponent(file.name)}`), {
+      method: 'POST', headers: { ...headers(), 'Content-Type': 'application/octet-stream' }, body: file,
+    })
+    if (!response.ok) throw httpError(response.status, await response.text())
+    return response.json() as Promise<{ name: string; size: number }>
+  },
   listModelEvaluationDatasets: (options?: ApiRequestOptions) => get<ModelEvaluationDataset[]>('/model-evaluations/datasets', options),
   getModelEvaluationRuntime: (options?: ApiRequestOptions) => get<ModelEvaluationRuntimeStatus>('/model-evaluations/runtime', options),
   listEvaluationModels: (connection: { base_url?: string; api_key?: string }) =>
