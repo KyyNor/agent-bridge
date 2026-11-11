@@ -49,15 +49,18 @@ class KnowledgeRepository:
         owner_group_key: str = "",
         visibility: str = "group",
         sync_on_upload: bool = False,
+        sync_follows_default: bool = False,
     ) -> dict[str, Any]:
         with self._connect() as conn:
             cursor = conn.execute(
                 """
                 INSERT INTO knowledge_bases
-                  (slug, name, description, created_by, owner_group_key, visibility, sync_on_upload)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                  (slug, name, description, created_by, owner_group_key, visibility,
+                   sync_on_upload, sync_follows_default)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (slug, name, description, created_by, owner_group_key, visibility, int(sync_on_upload)),
+                (slug, name, description, created_by, owner_group_key, visibility,
+                 int(sync_on_upload), int(sync_follows_default)),
             )
             self._folders.ensure_root_folder(int(cursor.lastrowid), conn=conn)
             return self.get_kb_by_id(cursor.lastrowid, conn)
@@ -810,7 +813,11 @@ class KnowledgeRepository:
         actor: str | None,
         backend_slug: str | None = None,
         kb_id: int | None = None,
+        eligible_targets: list[tuple[int, str]] | None = None,
     ) -> list[dict[str, Any]]:
+        if eligible_targets == []:
+            return []
+        eligible_json = json.dumps(eligible_targets) if eligible_targets is not None else None
         with self._connect() as conn:
             rows = conn.execute(
                 """
@@ -844,6 +851,10 @@ class KnowledgeRepository:
                   )
                   AND (job.backend_slug = ? OR ? IS NULL)
                   AND (job.kb_id = ? OR ? IS NULL)
+                  AND (? IS NULL OR (job.kb_id, job.backend_slug) IN (
+                    SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]')
+                    FROM json_each(?)
+                  ))
                 ORDER BY job.created_at, job.id
                 """,
                 (
@@ -858,6 +869,8 @@ class KnowledgeRepository:
                     backend_slug,
                     kb_id,
                     kb_id,
+                    eligible_json,
+                    eligible_json,
                 ),
             ).fetchall()
             return [dict(row) for row in rows]
@@ -1042,25 +1055,29 @@ class KnowledgeRepository:
             ).fetchall()
             return [dict(row) for row in rows]
 
-    def list_synced_doc_ids(self, kb_id: int) -> list[int]:
-        """Doc ids in this KB that are synced to *any* backend.
-
-        Used to backfill existing documents into a newly-added backend. Keyed by
-        KB rather than by backend: sync_states are per-backend, so a brand-new
-        backend has no states yet and must be backfilled from docs already synced
-        elsewhere.
-        """
+    def backfill_backend_sync_jobs(self, kb_id: int, backend_slug: str) -> None:
+        """为启用的后端补齐仍在库、且没有同步状态或有效上传任务的文档。"""
         with self._connect() as conn:
-            rows = conn.execute(
+            conn.execute(
                 """
-                SELECT DISTINCT s.doc_id
-                FROM sync_states s
-                JOIN document_kbs dk ON dk.doc_id = s.doc_id AND dk.kb_id = s.kb_id
-                WHERE s.kb_id = ? AND s.status = ?
+                INSERT INTO sync_jobs (doc_id, kb_id, backend_slug, operation, version_id, status)
+                SELECT d.id, dk.kb_id, ?, 'create', d.current_version_id, 'pending'
+                FROM document_kbs dk
+                JOIN documents d ON d.id = dk.doc_id
+                LEFT JOIN sync_states s
+                  ON s.doc_id = d.id AND s.kb_id = dk.kb_id AND s.backend_slug = ?
+                WHERE dk.kb_id = ? AND dk.status = 'active'
+                  AND d.deleted_at IS NULL AND d.current_version_id IS NOT NULL
+                  AND (s.status IS NULL OR s.status != 'synced')
+                  AND d.id NOT IN (
+                    SELECT doc_id FROM sync_jobs
+                    WHERE kb_id = ? AND backend_slug = ?
+                      AND status IN ('pending', 'running', 'failed')
+                      AND operation IN ('create', 'update')
+                  )
                 """,
-                (kb_id, SyncStateStatus.synced.value),
-            ).fetchall()
-            return [row[0] for row in rows]
+                (backend_slug, backend_slug, kb_id, kb_id, backend_slug),
+            )
 
     def list_docs_for_kb(
         self,
@@ -1463,13 +1480,16 @@ class KnowledgeRepository:
                 (visibility, kb_id),
             )
 
-    def update_kb_sync_policy(self, kb_id: int, sync_on_upload: bool) -> None:
+    def update_kb_sync_policy(
+        self, kb_id: int, sync_on_upload: bool, *, sync_follows_default: bool | None = None
+    ) -> None:
         with self._connect() as conn:
             conn.execute(
                 """
                 UPDATE knowledge_bases
-                SET sync_on_upload = ?, updated_at = CURRENT_TIMESTAMP
+                SET sync_on_upload = ?, sync_follows_default = COALESCE(?, sync_follows_default),
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """,
-                (int(sync_on_upload), kb_id),
+                (int(sync_on_upload), sync_follows_default, kb_id),
             )

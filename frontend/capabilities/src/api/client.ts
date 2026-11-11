@@ -26,6 +26,7 @@ import type {
   ExecuteCapabilityResult,
   KnowledgeBase,
   KnowledgeBaseSummary,
+  KnowledgeSyncPolicy,
   KnowledgeBrowseResponse,
   KbRepoSource,
   KbRepoSourceSyncResult,
@@ -1002,7 +1003,7 @@ export const api = {
     put<KnowledgeBase>(`/kbs/${kbSlug}/defaults`, data),
   updateKbVisibility: (kbSlug: string, data: { visibility: ResourceVisibility; expected_edit_token?: string | null }) =>
     put<KnowledgeBaseSummary>(`/kbs/${kbSlug}/visibility`, data),
-  updateKbSyncPolicy: (kbSlug: string, data: { sync_on_upload?: boolean; backend_sync_on_upload?: Record<string, boolean>; expected_edit_token?: string | null }) =>
+  updateKbSyncPolicy: (kbSlug: string, data: { backend_sync_policies: Record<string, KnowledgeSyncPolicy>; expected_edit_token?: string | null }) =>
     put<KnowledgeBaseSummary>(`/kbs/${kbSlug}/sync-policy`, data),
   listKbRepoSources: (kbSlug: string) =>
     get<KbRepoSource[]>(`/kbs/${kbSlug}/repo-sources`),

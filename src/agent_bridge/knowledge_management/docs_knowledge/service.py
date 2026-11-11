@@ -14,14 +14,18 @@ from agent_bridge.core.domain import (
     BackendAdapter,
     ManagedResourcesBackend,
     NotFound,
-    Operation,
-    SyncJobStatus,
-    SyncStateStatus,
     ValidationError,
     require_admin_user,
 )
 from agent_bridge.core.editing import attach_edit_token, require_edit_token
 from agent_bridge.knowledge_management.docs_knowledge.backends.registry import BackendRegistry
+
+from agent_bridge.knowledge_management.docs_knowledge.sync_policy import (
+    SyncPolicy,
+    default_retrieval_backend,
+    resolve_sync_policy,
+    target_sync_config,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,33 +59,6 @@ class DocsKnowledgeService:
 
     def supports_folders(self, adapter: BackendAdapter) -> bool:
         return bool(adapter.capabilities().supports_folders)
-
-    def provision_kb(self, kb: dict[str, Any]) -> None:
-        """为已配置后端建立远端 KB；失败时保留可观测的未完成 target。"""
-        registry = self.registry
-        if not registry:
-            return
-        for backend_slug in registry.list_slugs():
-            backend = self.store.get_backend(backend_slug)
-            self.store.ensure_backend_target(
-                kb["id"],
-                slug=backend_slug,
-                backend_type=str((backend or {}).get("backend_type") or backend_slug),
-            )
-            adapter = self.get_adapter(backend_slug)
-            try:
-                backend_kb_id = adapter.create_kb(kb["slug"], kb["name"])
-            except Exception as exc:
-                self.store.mark_backend_target_error(kb["id"], backend_slug, str(exc))
-                logger.warning(
-                    "远端知识库创建失败，将在后续同步时重试 kb=%s backend=%s 原因=%s",
-                    kb["slug"],
-                    backend_slug,
-                    exc,
-                    exc_info=True,
-                )
-                continue
-            self.store.update_backend_target_kb_id(kb["id"], backend_slug, backend_kb_id)
 
     def delete_remote_kbs(self, kb: dict[str, Any]) -> None:
         registry = self.registry
@@ -228,44 +205,96 @@ class DocsKnowledgeService:
             "config": preset.get("config") or {},
         }
 
-    def align_backends(self, kb_id: int | None = None) -> None:
-        registry = self.registry
-        if not registry:
-            return
-        configured_slugs = set(registry.list_slugs())
-        if kb_id is None:
-            knowledge_bases = self.store.list_kbs()
-        else:
-            knowledge_bases = [self.store.get_kb_by_id(kb_id)]
-        for kb in knowledge_bases:
-            existing_targets = self.store.list_backend_targets(kb["id"])
-            for target in existing_targets:
-                if (
-                    target["slug"] not in configured_slugs
-                    and target["status"] == "active"
-                ):
-                    self.store.set_backend_target_status(kb["id"], target["slug"], "inactive")
+    def save_sync_policies(
+        self,
+        kb: dict[str, Any],
+        sync_on_upload: bool | None,
+        legacy_policies: dict[str, bool],
+        policies: dict[str, SyncPolicy],
+    ) -> None:
+        targets = self.store.list_backend_targets(kb["id"])
+        target_slugs = {target["slug"] for target in targets}
+        unknown = (legacy_policies.keys() | policies.keys()) - target_slugs
+        if unknown:
+            raise ValidationError(f"未知知识后端: {', '.join(sorted(unknown))}")
+        if sync_on_upload is None and not legacy_policies and not policies:
+            raise ValidationError("至少提供一个同步策略")
 
-            for backend_slug in configured_slugs:
-                adapter = self.get_adapter(backend_slug)
-                target = next(
-                    (item for item in existing_targets if item["slug"] == backend_slug),
-                    None,
+        retrieval_backend = default_retrieval_backend(
+            kb, [target["slug"] for target in targets if target["status"] == "active"]
+        )
+        effective = {}
+        for target in targets:
+            slug = target["slug"]
+            if slug in policies:
+                policy = policies[slug]
+                self.store.update_backend_target_config(
+                    kb["id"], slug, {"sync_policy": policy, "sync_on_upload": policy == "immediate"}
                 )
+            elif (enabled := legacy_policies.get(slug, sync_on_upload)) is not None:
+                policy = "immediate" if enabled else "scheduled"
+                config = {"sync_on_upload": enabled}
+                if "sync_policy" in target_sync_config(target):
+                    config["sync_policy"] = policy
+                self.store.update_backend_target_config(kb["id"], slug, config)
+            else:
+                policy = resolve_sync_policy(kb, target, retrieval_backend)
+            effective[slug] = policy
+
+        # 旧布尔摘要变化时，固定存量后端的继承值，避免修改一个后端影响其他后端。
+        immediate = "immediate" in effective.values() if targets else bool(sync_on_upload)
+        if not kb.get("sync_follows_default") and immediate != bool(kb.get("sync_on_upload")):
+            for target in targets:
+                slug = target["slug"]
+                if slug not in policies and slug not in legacy_policies and sync_on_upload is None:
+                    if "sync_on_upload" not in target_sync_config(target):
+                        self.store.update_backend_target_config(
+                            kb["id"], slug, {"sync_on_upload": effective[slug] == "immediate"}
+                        )
+        self.store.update_kb_sync_policy(
+            kb["id"], immediate, sync_follows_default=None if targets else False
+        )
+
+    def align_backends(
+        self, kb_id: int | None = None, backend: str | None = None
+    ) -> list[tuple[int, str]]:
+        """对齐本轮允许同步的目标，并返回供队列领取使用的范围。"""
+        registry = self.registry
+        configured_slugs = sorted(registry.list_slugs()) if registry else []
+        if not configured_slugs:
+            return []
+        if backend is not None and backend not in configured_slugs:
+            raise NotFound(f"知识后端 {backend!r} 未配置或不可用")
+
+        selected_slugs = [backend] if backend is not None else configured_slugs
+        configured_set = set(configured_slugs)
+        knowledge_bases = self.store.list_kbs() if kb_id is None else [self.store.get_kb_by_id(kb_id)]
+        eligible = []
+        for kb in knowledge_bases:
+            existing_targets = {target["slug"]: target for target in self.store.list_backend_targets(kb["id"])}
+            if backend is None:
+                for slug in existing_targets.keys() - configured_set:
+                    if existing_targets[slug]["status"] == "active":
+                        self.store.set_backend_target_status(kb["id"], slug, "inactive")
+
+            retrieval_backend = default_retrieval_backend(kb, configured_slugs)
+            for slug in selected_slugs:
+                target = existing_targets.get(slug)
                 if target is None:
-                    backend = self.store.get_backend(backend_slug)
+                    config = self.store.get_backend(slug)
                     self.store.ensure_backend_target(
-                        kb["id"],
-                        slug=backend_slug,
-                        backend_type=str((backend or {}).get("backend_type") or backend_slug),
+                        kb["id"], slug=slug, backend_type=str((config or {}).get("backend_type") or slug)
                     )
-                    self._repair_backend_kb(kb, backend_slug, adapter)
-                else:
-                    if not target.get("backend_kb_id"):
-                        self._repair_backend_kb(kb, backend_slug, adapter)
-                    if target["status"] == "inactive":
-                        self.store.set_backend_target_status(kb["id"], backend_slug, "active")
-                self._backfill_missing_backend_jobs(kb, backend_slug)
+                    target = {"slug": slug, "status": "active"}
+                if target["status"] == "inactive":
+                    self.store.set_backend_target_status(kb["id"], slug, "active")
+                if resolve_sync_policy(kb, target, retrieval_backend) == "paused":
+                    continue
+                if not target.get("backend_kb_id"):
+                    self._repair_backend_kb(kb, slug, self.get_adapter(slug))
+                self.store.backfill_backend_sync_jobs(kb["id"], slug)
+                eligible.append((kb["id"], slug))
+        return eligible
 
     def _repair_backend_kb(
         self, kb: dict[str, Any], backend_slug: str, adapter: BackendAdapter
@@ -281,35 +310,6 @@ class DocsKnowledgeService:
                 backend_slug,
                 exc,
                 exc_info=True,
-            )
-
-    def _backfill_missing_backend_jobs(self, kb: dict[str, Any], backend_slug: str) -> None:
-        runnable_statuses = {
-            SyncJobStatus.pending.value,
-            SyncJobStatus.running.value,
-            SyncJobStatus.failed.value,
-        }
-        runnable_doc_ids = {
-            job["doc_id"]
-            for job in self.store.list_all_jobs(backend_slug=backend_slug)
-            if job["kb_id"] == kb["id"]
-            and job["operation"] == Operation.create.value
-            and job["status"] in runnable_statuses
-        }
-        for doc_id in self.store.list_synced_doc_ids(kb["id"]):
-            sync_state = self.store.get_sync_state(doc_id, kb["id"], backend_slug)
-            if sync_state and sync_state["status"] == SyncStateStatus.synced.value:
-                continue
-            if doc_id in runnable_doc_ids:
-                continue
-            versions = self.store.list_versions(doc_id)
-            version_id = versions[-1]["id"] if versions else None
-            self.store.create_sync_job(
-                doc_id,
-                kb["id"],
-                Operation.create,
-                version_id,
-                backend_slug=backend_slug,
             )
 
     def list_backends(self, actor: str) -> list[dict[str, Any]]:

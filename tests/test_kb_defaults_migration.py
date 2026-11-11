@@ -33,6 +33,7 @@ def test_migrate_phase2_adds_kb_defaults_columns(tmp_path: Path) -> None:
         conn.execute("ALTER TABLE knowledge_bases DROP COLUMN default_backend_slug")
         conn.execute("ALTER TABLE knowledge_bases DROP COLUMN default_agent_id")
         conn.execute("ALTER TABLE knowledge_bases DROP COLUMN sync_on_upload")
+        conn.execute("ALTER TABLE knowledge_bases DROP COLUMN sync_follows_default")
         conn.execute("ALTER TABLE backend_targets DROP COLUMN last_error")
         assert "default_backend_slug" not in _columns(conn, "knowledge_bases")
         assert "sync_on_upload" not in _columns(conn, "knowledge_bases")
@@ -49,6 +50,7 @@ def test_migrate_phase2_adds_kb_defaults_columns(tmp_path: Path) -> None:
         assert "default_backend_slug" in cols
         assert "default_agent_id" in cols
         assert "sync_on_upload" in cols
+        assert "sync_follows_default" in cols
         assert "last_error" in _columns(conn, "backend_targets")
 
     # The previously-failing write now succeeds and persists.
@@ -58,6 +60,7 @@ def test_migrate_phase2_adds_kb_defaults_columns(tmp_path: Path) -> None:
     assert updated["default_backend_slug"] == "some-backend"
     assert updated["default_agent_id"] == "agent-1"
     assert updated["sync_on_upload"] == 0
+    assert updated["sync_follows_default"] == 0
 
     store.update_kb_sync_policy(kb["id"], True)
     assert store.get_kb_by_slug("test-kb")["sync_on_upload"] == 1

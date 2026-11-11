@@ -4,6 +4,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from agent_bridge.knowledge_management.docs_knowledge.sync_policy import SyncPolicy
+
 
 class CreateMemoryBlockRequest(BaseModel):
     block_key: str
@@ -101,7 +103,7 @@ class CreateKbRequest(BaseModel):
     name: str
     description: str = ""
     visibility: Literal["group", "shared"] | None = None
-    sync_on_upload: bool = False
+    sync_on_upload: bool | None = None
 
 
 class UpdateKbVisibilityRequest(BaseModel):
@@ -391,11 +393,12 @@ class UpdateKbDefaultsRequest(BaseModel):
 class UpdateKbSyncPolicyRequest(BaseModel):
     sync_on_upload: bool | None = None
     backend_sync_on_upload: dict[str, bool] = Field(default_factory=dict)
+    backend_sync_policies: dict[str, SyncPolicy] = Field(default_factory=dict)
     expected_edit_token: str | None = None
 
     @model_validator(mode="after")
     def _require_policy(self) -> "UpdateKbSyncPolicyRequest":
-        if self.sync_on_upload is None and not self.backend_sync_on_upload:
+        if self.sync_on_upload is None and not self.backend_sync_on_upload and not self.backend_sync_policies:
             raise ValueError("at least one sync policy must be provided")
         return self
 

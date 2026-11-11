@@ -507,7 +507,7 @@ Agent 运行事件以 `agent_runs` 为统一查询基准。前端通过 `RunEven
 
 ## 文档同步检查
 
-知识库的后端目标在 `backend_targets.config_json.sync_on_upload` 中分别控制管理后台上传完成后是否立即同步，默认 `false`；`knowledge_bases.sync_on_upload` 仅保留兼容旧调用。关闭时文档只入库并进入同步队列，由 `doc_sync_cron` 处理；上传队列只能对已启用的后端目标调用立即同步接口。HTTP 文档上传的 `later` 默认值必须保持为延后同步。
+知识库的后端目标在 `backend_targets.config_json.sync_policy` 保存显式策略（`immediate` / `scheduled` / `paused`）。新库未显式配置的目标随当前默认检索后端计算，默认后端定时同步，其余暂不同步。存量库沿用旧布尔值，`knowledge_bases.sync_on_upload` 保留兼容。同步前的远端建库、补排及领取任务共用同一后端范围，指定后端时不触碰其他目标，暂不同步时保留任务。上传队列只触发 `immediate`，HTTP 文档上传的 `later` 默认保持延后。
 
 以下变化必须在同一提交更新 README、CLAUDE、AGENTS 或示例：
 

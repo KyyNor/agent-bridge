@@ -23,6 +23,11 @@ from agent_bridge.knowledge_management.docs_knowledge.archive import ArchiveStor
 from agent_bridge.knowledge_management.docs_knowledge.ingest import DocumentIngestService
 from agent_bridge.knowledge_management.docs_knowledge.repo_sync import GitRepoSyncService
 from agent_bridge.knowledge_management.docs_knowledge.sync_runner import SyncJobRunner
+from agent_bridge.knowledge_management.docs_knowledge.sync_policy import (
+    SyncPolicy,
+    default_retrieval_backend,
+    resolve_sync_policy,
+)
 from agent_bridge.capability_hub.governance import CapabilityGovernanceService
 from agent_bridge.capability_hub.service import CapabilityService
 from agent_bridge.knowledge_management.code_knowledge.scheduler import CodeGraphScheduler
@@ -176,8 +181,10 @@ class _SyncRunnerFacade:
     def get_adapter(self, slug: str):
         return self._service._get_adapter(slug)
 
-    def align_backends(self, kb_id: int | None = None) -> None:
-        self._service.align_backends(kb_id=kb_id)
+    def align_backends(
+        self, kb_id: int | None = None, backend: str | None = None
+    ) -> list[tuple[int, str]]:
+        return self._service.align_backends(kb_id=kb_id, backend=backend)
 
 
 class _RepoSyncFacade:
@@ -565,7 +572,7 @@ class AgentBridgeService:
         description: str,
         *,
         visibility: str = "group",
-        sync_on_upload: bool = False,
+        sync_on_upload: bool | None = None,
     ) -> dict[str, Any]:
         scope = self.access.new_resource_scope(
             actor=actor,
@@ -579,9 +586,10 @@ class AgentBridgeService:
             created_by=actor,
             owner_group_key=scope.owner_group_key,
             visibility=scope.visibility.value,
-            sync_on_upload=sync_on_upload,
+            sync_on_upload=bool(sync_on_upload),
+            sync_follows_default=sync_on_upload is None,
         )
-        self.docs_knowledge.provision_kb(kb)
+        self.docs_knowledge.align_backends(kb_id=kb["id"])
         return self._serialize_kb(kb)
 
     def delete_kb(self, actor: str, kb_slug: str) -> dict[str, Any]:
@@ -637,13 +645,7 @@ class AgentBridgeService:
             summaries.append(
                 {
                     **kb,
-                    "backend_targets": [
-                        self._serialize_backend_target(
-                            target,
-                            default_sync_on_upload=bool(kb.get("sync_on_upload")),
-                        )
-                        for target in targets
-                    ],
+                    "backend_targets": self._serialize_backend_targets(kb, targets),
                     **counts,
                 }
             )
@@ -1743,17 +1745,18 @@ class AgentBridgeService:
                            default_backend_slug: str | None = None,
                            default_agent_id: str | None = None,
                            expected_edit_token: str | None = None) -> dict[str, Any]:
-        kb = self._require_kb_admin_visible(actor, kb_slug)
-        require_edit_token(
-            expected_edit_token,
-            self._kb_defaults_edit_snapshot(kb),
-            resource_type="文档知识库默认检索配置",
-            resource_key=kb_slug,
-            actor=actor,
-        )
-        self.store.update_kb_defaults(kb["id"], default_backend_slug, default_agent_id)
-        saved = self.store.get_kb_by_slug(kb_slug)
-        return attach_edit_token(self._serialize_kb(saved), self._kb_defaults_edit_snapshot(saved))
+        with self.store.transaction():
+            kb = self._require_kb_admin_visible(actor, kb_slug)
+            require_edit_token(
+                expected_edit_token,
+                self._kb_defaults_edit_snapshot(kb),
+                resource_type="文档知识库默认检索配置",
+                resource_key=kb_slug,
+                actor=actor,
+            )
+            self.store.update_kb_defaults(kb["id"], default_backend_slug, default_agent_id)
+            saved = self.store.get_kb_by_slug(kb_slug)
+            return attach_edit_token(self._serialize_kb(saved), self._kb_defaults_edit_snapshot(saved))
 
     def update_kb_visibility(self, actor: str, kb_slug: str, *,
                              visibility: str,
@@ -1795,42 +1798,25 @@ class AgentBridgeService:
     def _kb_defaults_edit_snapshot(self, kb: dict[str, Any] | None) -> dict[str, Any] | None:
         if kb is None:
             return None
+        targets = self._serialize_backend_targets(kb, self.store.list_backend_targets(kb["id"]))
         return {
             "default_backend_slug": kb.get("default_backend_slug"),
             "default_agent_id": kb.get("default_agent_id"),
             "sync_on_upload": bool(kb.get("sync_on_upload")),
-            "backend_sync_on_upload": {
-                target["slug"]: self._target_sync_on_upload(
-                    target,
-                    default_sync_on_upload=bool(kb.get("sync_on_upload")),
-                )
-                for target in self.store.list_backend_targets(kb["id"])
-            },
+            "backend_sync_policies": {target["slug"]: target["sync_policy"] for target in targets},
         }
 
     @staticmethod
-    def _target_sync_on_upload(
-        target: dict[str, Any], *, default_sync_on_upload: bool = False
-    ) -> bool:
-        config_json = target.get("config_json") or "{}"
-        try:
-            config = json.loads(config_json) if isinstance(config_json, str) else config_json
-        except (TypeError, json.JSONDecodeError):
-            config = {}
-        return bool(config.get("sync_on_upload", default_sync_on_upload)) if isinstance(config, dict) else default_sync_on_upload
-
-    @classmethod
-    def _serialize_backend_target(
-        cls,
-        target: dict[str, Any],
-        *,
-        default_sync_on_upload: bool = False,
-    ) -> dict[str, Any]:
-        payload = dict(target)
-        payload["sync_on_upload"] = cls._target_sync_on_upload(
-            target,
-            default_sync_on_upload=default_sync_on_upload,
+    def _serialize_backend_targets(
+        kb: dict[str, Any], targets: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        retrieval_backend = default_retrieval_backend(
+            kb, [target["slug"] for target in targets if target["status"] == "active"]
         )
+        payload = []
+        for target in targets:
+            policy = resolve_sync_policy(kb, target, retrieval_backend)
+            payload.append({**target, "sync_policy": policy, "sync_on_upload": policy == "immediate"})
         return payload
 
     def update_kb_sync_policy(
@@ -1840,56 +1826,27 @@ class AgentBridgeService:
         *,
         sync_on_upload: bool | None = None,
         backend_sync_on_upload: dict[str, bool] | None = None,
+        backend_sync_policies: dict[str, SyncPolicy] | None = None,
         expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
-        kb = self._require_kb_admin_visible(actor, kb_slug)
-        require_edit_token(
-            expected_edit_token,
-            self._kb_defaults_edit_snapshot(kb),
-            resource_type="文档知识库同步策略",
-            resource_key=kb_slug,
-            actor=actor,
-        )
-        targets = self.store.list_backend_targets(kb["id"])
-        requested_policies = backend_sync_on_upload or {}
-        unknown_targets = sorted(set(requested_policies) - {target["slug"] for target in targets})
-        if unknown_targets:
-            raise ValidationError(f"未知知识后端: {', '.join(unknown_targets)}")
-        if sync_on_upload is None and not requested_policies:
-            raise ValidationError("至少提供一个同步策略")
-
-        current_policies = {
-            target["slug"]: self._target_sync_on_upload(
-                target,
-                default_sync_on_upload=bool(kb.get("sync_on_upload")),
+        with self.store.transaction():
+            kb = self._require_kb_admin_visible(actor, kb_slug)
+            require_edit_token(
+                expected_edit_token,
+                self._kb_defaults_edit_snapshot(kb),
+                resource_type="文档知识库同步策略",
+                resource_key=kb_slug,
+                actor=actor,
             )
-            for target in targets
-        }
-        if sync_on_upload is not None:
-            current_policies = {slug: bool(sync_on_upload) for slug in current_policies}
-        current_policies.update({slug: bool(value) for slug, value in requested_policies.items()})
-        for backend_slug, value in current_policies.items():
-            self.store.update_backend_target_config(
-                kb["id"], backend_slug, {"sync_on_upload": value}
+            self.docs_knowledge.save_sync_policies(
+                kb, sync_on_upload, backend_sync_on_upload or {}, backend_sync_policies or {}
             )
-        # ``knowledge_bases.sync_on_upload`` 是旧 API 的兼容摘要。尚未配置
-        # 后端时仍需保留调用方提交的全局值，等后端补齐后再作为默认值继承。
-        effective_legacy_policy = (
-            any(current_policies.values())
-            if current_policies
-            else bool(sync_on_upload)
-        )
-        self.store.update_kb_sync_policy(kb["id"], effective_legacy_policy)
-        saved = self.store.get_kb_by_slug(kb_slug)
-        payload = attach_edit_token(self._serialize_kb(saved), self._kb_defaults_edit_snapshot(saved))
-        payload["backend_targets"] = [
-            self._serialize_backend_target(
-                target,
-                default_sync_on_upload=bool((saved or {}).get("sync_on_upload")),
+            saved = self.store.get_kb_by_id(kb["id"])
+            payload = attach_edit_token(self._serialize_kb(saved), self._kb_defaults_edit_snapshot(saved))
+            payload["backend_targets"] = self._serialize_backend_targets(
+                saved, self.store.list_backend_targets(kb["id"])
             )
-            for target in self.store.list_backend_targets(kb["id"])
-        ]
-        return payload
+            return payload
 
     def resolve_retrieval_strategy(self, kb_slug: str, profile_key: str | None) -> tuple[dict[str, Any], RetrievalStrategy]:
         kb = self.store.get_kb_by_slug(kb_slug)
@@ -1920,10 +1877,10 @@ class AgentBridgeService:
 
     def _first_active_backend(self, kb: dict[str, Any]) -> str:
         targets = self.store.list_backend_targets(kb["id"])
-        active = [t for t in targets if t["status"] == "active"]
-        if not active:
+        backend = default_retrieval_backend(kb, [t["slug"] for t in targets if t["status"] == "active"])
+        if backend is None:
             raise NotFound(f"no retrieval backend available for knowledge base '{kb['slug']}'")
-        return active[0]["slug"]
+        return backend
 
     def ask(self, actor: str, kb_slug: str, question: str, *,
             backend_slug: str | None = None,
@@ -1961,20 +1918,16 @@ class AgentBridgeService:
             target = next((t for t in active if t["slug"] == backend_slug), None)
             if target is None:
                 raise NotFound(f"backend '{backend_slug}' not found for knowledge base '{kb['slug']}'")
-            return target
-
-        if self.registry:
+        elif active and self.registry:
             from agent_bridge.core.config import load_server_config
-            config = load_server_config(self.paths)
-            if config.default_backend:
-                target = next((t for t in active if t["slug"] == config.default_backend), None)
-                if target:
-                    return target
+            system_default = load_server_config(self.paths).default_backend
+            target = next((t for t in active if t["slug"] == system_default), active[0])
+        else:
+            raise NotFound(f"no retrieval backend available for knowledge base '{kb['slug']}'")
 
-        if active and self.registry:
-            return active[0]
-
-        raise NotFound(f"no retrieval backend available for knowledge base '{kb['slug']}'")
+        if not target.get("backend_kb_id"):
+            raise NotFound(f"知识库 {kb['slug']!r} 的后端 {target['slug']!r} 尚未完成建库")
+        return target
 
     def _get_adapter(self, slug: str):
         return self.docs_knowledge.get_adapter(slug)
@@ -2048,8 +2001,10 @@ class AgentBridgeService:
             self.archive.remove(Path(archive_path))
         return {"slug": doc_slug, "status": "purged"}
 
-    def align_backends(self, kb_id: int | None = None) -> None:
-        self.docs_knowledge.align_backends(kb_id=kb_id)
+    def align_backends(
+        self, kb_id: int | None = None, backend: str | None = None
+    ) -> list[tuple[int, str]]:
+        return self.docs_knowledge.align_backends(kb_id=kb_id, backend=backend)
 
     def list_backends(self, actor: str) -> list[dict[str, Any]]:
         return self.docs_knowledge.list_backends(actor)

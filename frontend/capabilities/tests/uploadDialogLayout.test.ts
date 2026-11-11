@@ -76,7 +76,7 @@ test('upload dialog uses a shared queue index with at most three async workers',
 
 test('batch upload starts one pass per backend configured for immediate sync', () => {
   const uploadFunction = uploadQueue().slice(uploadQueue().indexOf('async function uploadDocuments'))
-  assert.match(uploadFunction, /kb\.backend_targets\.filter\(target => target\.status === 'active' && target\.sync_on_upload\)/)
+  assert.match(uploadFunction, /kb\.backend_targets\.filter\(target => target\.status === 'active' && target\.sync_policy === 'immediate'\)/)
   assert.match(uploadFunction, /api\.triggerKbSync\(kb\.slug, target\.slug\)/)
   assert.match(uploadFunction, /已入库，等待定时同步/)
 })

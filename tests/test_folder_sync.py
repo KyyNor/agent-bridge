@@ -103,6 +103,9 @@ def test_folder_sync_uses_capability_matrix_and_preserves_root_path(wm_paths, tm
     flat = RecordingBackend(supports_folders=False)
     service = _service(wm_paths, tmp_path, {"weknora": weknora, "flat": flat})
     kb = service.create_kb("root", "docs", "Docs", "")
+    service.update_kb_sync_policy(
+        "root", "docs", backend_sync_policies={"weknora": "scheduled", "flat": "scheduled"}
+    )
     root = service.store.get_root_folder(kb["id"])
     folder_a = service.create_folder("root", "docs", "A", root["id"])
     folder_b = service.create_folder("root", "docs", "B", folder_a["id"])
@@ -135,6 +138,9 @@ def test_folder_capable_sync_preserves_nested_archive_filename_but_flat_uses_bas
     flat = RecordingBackend(supports_folders=False)
     service = _service(wm_paths, tmp_path, {"weknora": weknora, "flat": flat})
     kb = service.create_kb("root", "docs", "Docs", "")
+    service.update_kb_sync_policy(
+        "root", "docs", backend_sync_policies={"weknora": "scheduled", "flat": "scheduled"}
+    )
     root = service.store.get_root_folder(kb["id"])
     selected = service.create_folder("root", "docs", "Selected", root["id"])
     archive = tmp_path / "nested.zip"
@@ -157,6 +163,9 @@ def test_folder_move_skips_flat_reupload_but_keeps_content_update_and_moves_wekn
     flat = RecordingBackend(supports_folders=False)
     service = _service(wm_paths, tmp_path, {"weknora": weknora, "flat": flat})
     kb = service.create_kb("root", "docs", "Docs", "")
+    service.update_kb_sync_policy(
+        "root", "docs", backend_sync_policies={"weknora": "scheduled", "flat": "scheduled"}
+    )
     root = service.store.get_root_folder(kb["id"])
     folder = service.create_folder("root", "docs", "A", root["id"])
     source = tmp_path / "guide.md"
@@ -190,6 +199,9 @@ def test_git_sync_moves_unchanged_document_when_repository_folder_changes(
     flat = RecordingBackend(supports_folders=False)
     service = _service(wm_paths, tmp_path, {"weknora": weknora, "flat": flat})
     kb = service.create_kb("root", "docs", "Docs", "")
+    service.update_kb_sync_policy(
+        "root", "docs", backend_sync_policies={"weknora": "scheduled", "flat": "scheduled"}
+    )
     repo_path = tmp_path / "repo"
     old_path = repo_path / "A" / "guide.md"
     old_path.parent.mkdir(parents=True)

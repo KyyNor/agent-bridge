@@ -724,7 +724,7 @@ function openPlaneDialog(k: KnowledgeBaseSummary) {
 async function updateKnowledgeDefaults(defaults: { default_backend_slug: string | null; default_agent_id: string | null }) {
   if (!detailKb.value) return
   detailKb.value = { ...detailKb.value, ...defaults }
-  await loadKbs({ fresh: true })
+  await refreshDetailKbSummary()
 }
 async function updateKnowledgeSyncPolicy() {
   if (!detailKb.value) return
