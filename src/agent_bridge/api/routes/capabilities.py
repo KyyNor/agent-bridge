@@ -52,6 +52,7 @@ def create_capability_routes(service, actor, catalog_sources):
             payload.description,
             payload.tags,
             visibility=payload.visibility,
+            header_updates=payload.header_updates,
             expected_edit_token=payload.expected_edit_token,
         )
 

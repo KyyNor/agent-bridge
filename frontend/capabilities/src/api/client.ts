@@ -412,7 +412,7 @@ export const api = {
     post<TopLevelMcpTool>(`/capabilities/top-level-mcp-tools/${name}/status`, { status }),
   listServices: (summary = false, options?: ApiRequestOptions) => get<McpService[]>(`/capabilities/mcp-services${summary ? '?summary=true' : ''}`, options),
   getService: (key: string) => get<McpService>(`/capabilities/mcp-services/${key}`),
-  registerService: (s: Partial<McpService> & { service_key: string; name: string; endpoint_url: string; expected_edit_token?: string | null }) =>
+  registerService: (s: Partial<McpService> & { service_key: string; name: string; endpoint_url: string; header_updates?: Record<string, string | null>; expected_edit_token?: string | null }) =>
     post<McpService>('/capabilities/mcp-services', s),
   updateServiceStatus: (key: string, status: string) =>
     post(`/capabilities/mcp-services/${key}/status`, { status }),

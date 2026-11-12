@@ -76,6 +76,8 @@ CLI 根命令只有 `server`、`profile`、`memory`。不要在文档中添加�
 
 能力失败使用 `capability_hub/errors.py` 的不可变 `CapabilityFailure` 与类型化领域错误。审计字段包括 status、stage、owner、error_type、resource 和 log_id。禁止恢复 `_tool_call_*` 动态属性或原地改写异常 `message/args`。
 
+MCP 服务的配置响应仅返回 Header 名称和掩码。注册接口接受逐项 `header_updates`，例如 `{"X-API-Key":"new-value","X-Old":null}`，省略的项保留，`null` 删除。旧客户端仍可通过 `headers` 整体替换。工具同步在 HTTP 传输层捕获上游状态，避免 SDK 任务组丢失原因。错误返回安全的 `detail`、`code`、`upstream_status`，上游鉴权失败通过 HTTP 502 返回，避免触发平台登录失效处理。
+
 `log_tool_call` 是统一审计出口。MetaMCP 的 search、execute、pinned tools、工作流辅助工具和脚本调用都必须可关联 log_id。
 
 MetaMCP `/mcp` 每个请求按 profile/workflow 上下文创建 request-scoped 工具集，底层 transport 使用 stateless 模式。不要缓存包含动态工具注册的 server 实例，避免跨请求上下文泄漏。

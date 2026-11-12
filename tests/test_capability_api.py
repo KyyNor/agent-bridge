@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import subprocess
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -175,9 +177,89 @@ def test_mcp_service_update_without_headers_preserves_existing_headers(wm_paths)
     listed = client.get("/api/v1/capabilities/mcp-services", headers={"X-Agent-Bridge-User": "root"})
 
     assert updated.status_code == 200
-    assert updated.json()["headers"] == {"Authorization": "Bearer secret"}
+    assert updated.json()["headers"] == {"Authorization": "***"}
+    assert "Bearer secret" not in updated.text
+    assert "Bearer secret" in app.state.agent_bridge_service.store.get_mcp_service("mysql")["headers_json"]
     assert listed.json()[0]["headers"] == {"Authorization": "***"}
     assert listed.json()[0]["tags"] == ["database", "reporting"]
+
+
+def test_mcp_headers_edit_preserves_and_redacts_secrets(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app, headers={"X-Agent-Bridge-User": "root"})
+    url = "/api/v1/capabilities/mcp-services"
+    form = {"service_key": "mysql", "name": "MySQL", "endpoint_url": "https://example.test/mcp"}
+    initial = client.post(url, json={**form, "headers": {
+        "Authorization": "keep-secret", "X-Old": "delete-secret", "X-API-Key": "original-secret",
+    }})
+    assert initial.status_code == 200
+    assert initial.json()["headers"] == {"Authorization": "***", "X-Old": "***", "X-API-Key": "***"}
+    assert "keep-secret" not in initial.text
+
+    updated = client.post(url, json={**form, "expected_edit_token": initial.json()["edit_token"], "header_updates": {
+        "x-old": None, "x-api-key": "replacement-secret", "X-New": "new-secret",
+    }})
+    assert updated.status_code == 200
+    assert updated.json()["headers"] == {"Authorization": "***", "x-api-key": "***", "X-New": "***"}
+    assert "replacement-secret" not in updated.text
+
+    store = app.state.agent_bridge_service.store
+    assert json.loads(store.get_mcp_service("mysql")["headers_json"]) == {
+        "Authorization": "keep-secret", "x-api-key": "replacement-secret", "X-New": "new-secret",
+    }
+    status = client.post(f"{url}/mysql/status", json={"status": "disabled"})
+    assert status.json()["headers"] == updated.json()["headers"]
+    stale = client.post(url, json={**form, "expected_edit_token": initial.json()["edit_token"], "header_updates": {
+        "Authorization": None,
+    }})
+    assert stale.status_code == 409
+    invalid = client.post(url, json={"header_updates": {"Authorization": "input-secret"}})
+    assert invalid.status_code == 422
+    assert "input-secret" not in invalid.text
+
+
+def test_mcp_sync_failure_is_safe_and_retry_restores_service(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app, headers={"X-Agent-Bridge-User": "root"})
+    url = "/api/v1/capabilities/mcp-services"
+    for key in ("mysql", "reports"):
+        assert client.post(url, json={
+            "service_key": key, "name": key, "endpoint_url": "https://example.test/mcp",
+            "headers": {"Authorization": "test-secret"},
+        }).status_code == 200
+
+    class Upstream:
+        failure = False
+
+        async def list_tools(self, endpoint_url, headers, *, timeout):
+            if self.failure:
+                request = httpx.Request("POST", endpoint_url)
+                response = httpx.Response(400, headers={"WWW-Authenticate": "Bearer"}, request=request)
+                error = httpx.HTTPStatusError("test-secret", request=request, response=response)
+                raise ExceptionGroup("taskgroup", [ExceptionGroup("nested", [error])])
+            return [{"name": "query"}]
+
+    upstream = Upstream()
+    app.state.agent_bridge_service.capabilities.mcp_client = upstream
+    sync_url = f"{url}/mysql/sync"
+    assert client.post(sync_url).json()["tool_count"] == 1
+    upstream.failure = True
+    failure = client.post(sync_url)
+    assert failure.status_code == 502
+    assert failure.json()["code"] == "upstream_auth"
+    assert failure.json()["upstream_status"] == 400
+    assert "鉴权失败" in failure.json()["detail"]
+    assert "taskgroup" not in failure.text and "test-secret" not in failure.text
+
+    listed = {item["service_key"]: item for item in client.get(f"{url}?summary=true").json()}
+    assert listed["mysql"]["tool_count"] == 1
+    assert listed["mysql"]["last_error"] == failure.json()["detail"]
+    assert listed["reports"]["status"] == "enabled"
+    upstream.failure = False
+    assert client.post(sync_url).json()["tool_count"] == 1
+    recovered = client.get(f"{url}/mysql").json()
+    assert recovered["status"] == "enabled"
+    assert recovered["last_error"] is None
 
 
 def test_agent_bridge_spa_serves_html(wm_paths) -> None:

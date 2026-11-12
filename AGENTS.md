@@ -14,6 +14,7 @@
 ## 后端与标识约束
 
 - 文档知识后端实现 `BackendAdapter`；可选能力通过独立 runtime-checkable Protocol 表达。
+- MCP 服务配置响应只返回 Header 名称和掩码。逐项编辑通过 `header_updates` 保留未提交的值，`null` 删除。同步失败记录安全分类与上游状态码，禁止把原始异常、响应正文或 Header 值写入用户可见错误。上游鉴权失败与平台登录失败使用不同的 HTTP 状态。
 - 能力来源实现 `CapabilitySourceAdapter` 并注册到来源 registry。
 - Coding Agent 的配置暂时要求 `slug == type`。在支持实例级差异配置之前，不创建同一 type 的多个无差异 slug。
 - 面向归属组普通用户的业务页面只能依赖登录即可读的接口。工作流编辑器（含新建）的表单首屏只可调用脚本/技能/能力平面列表与 `GET /api/v1/agent-runtime/backends`——后者由 `_available_agent_backends_payload` 投影，只下发默认后端与各后端 slug/展示名/能力/思考力度；管理员专用的 `GET /api/v1/agent-runtime/config`（含各后端命令与模型配置）不得再被业务页面引用。工作流写入权限仍由 `owner_group_key` 判定，测试见 `tests/test_workflow_editor_access.py`。

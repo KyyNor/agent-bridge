@@ -5,11 +5,17 @@ from dataclasses import asdict, is_dataclass
 from datetime import timedelta
 from typing import Any
 
+import httpx
+
 from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
+from mcp.shared._httpx_utils import create_mcp_http_client
 from mcp.types import Tool
 
 from agent_bridge.core.defaults import DEFAULT_MCP_TIMEOUT_SECONDS
+from agent_bridge.core.domain import ValidationError
+from agent_bridge.capability_hub.sources.mcp.headers import validate_header
+from agent_bridge.capability_hub.sources.mcp.sync_errors import McpToolSyncError
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +57,30 @@ class McpHttpClient:
         headers: dict[str, str],
         timeout: float = DEFAULT_MCP_TIMEOUT_SECONDS,
     ) -> list[dict[str, Any]]:
-        logger.info("MCP list_tools 开始 endpoint=%s timeout=%ss", endpoint_url, timeout)
         try:
-            async with streamablehttp_client(endpoint_url, headers=headers, timeout=timeout) as (
+            for name, value in headers.items():
+                validate_header(name, value)
+        except ValidationError as exc:
+            raise McpToolSyncError(exc.message, "invalid_headers") from exc
+
+        upstream_failure: McpToolSyncError | None = None
+
+        async def capture_response(response: httpx.Response) -> None:
+            nonlocal upstream_failure
+            # GET/SSE 和 DELETE 可能在关闭期间失败，工具请求的 HTTP 状态优先。
+            if response.request.method == "POST" and response.is_error:
+                upstream_failure = McpToolSyncError.from_response(response)
+                raise upstream_failure
+
+        def client_factory(**kwargs: Any) -> httpx.AsyncClient:
+            client = create_mcp_http_client(**kwargs)
+            client.event_hooks["response"].append(capture_response)
+            return client
+
+        try:
+            async with streamablehttp_client(
+                endpoint_url, headers=headers, timeout=timeout, httpx_client_factory=client_factory
+            ) as (
                 read_stream,
                 write_stream,
                 _get_session_id,
@@ -71,18 +98,14 @@ class McpHttpClient:
                         tools.extend(normalize_tool(tool) for tool in result.tools)
                         cursor = getattr(result, "nextCursor", None)
                         if cursor is None:
-                            logger.info("MCP list_tools 完成 endpoint=%s 工具数=%d", endpoint_url, len(tools))
                             return tools
-        except TimeoutError:
-            logger.warning("MCP list_tools 超时 endpoint=%s timeout=%ss", endpoint_url, timeout)
-            raise
         except Exception as exc:
-            logger.error(
-                "MCP list_tools 失败 endpoint=%s 原因=%s",
-                endpoint_url,
-                exc,
-                exc_info=True,
-            )
+            # MCP SDK 的写协程可能吞掉原异常，调用方只收到连接关闭。
+            if upstream_failure is not None:
+                raise McpToolSyncError(
+                    upstream_failure.message, upstream_failure.code,
+                    upstream_status=upstream_failure.upstream_status,
+                ) from exc
             raise
 
     async def call_tool(

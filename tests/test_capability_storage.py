@@ -102,7 +102,7 @@ def test_mark_mcp_service_sync_preserves_status_and_tracks_errors(wm_paths: Agen
 
     failed = store.get_mcp_service("mysql")
     assert failed is not None
-    assert failed["status"] == McpServiceStatus.error.value
+    assert failed["status"] == McpServiceStatus.disabled.value
     assert failed["last_synced_at"] is not None
     assert failed["last_error"] == "sync failed"
 

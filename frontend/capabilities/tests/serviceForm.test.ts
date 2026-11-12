@@ -28,7 +28,7 @@ test('parseHeadersJson rejects invalid JSON and non-object values', () => {
   assert.throws(() => parseHeadersJson('[]'), /Header 必须是 JSON 对象/)
 })
 
-test('buildServicePayload omits headers when editing and headers field is blank', () => {
+test('buildServicePayload omits updates when saved values remain blank', () => {
   const payload = buildServicePayload(
     {
       ...defaultServiceForm(),
@@ -37,9 +37,9 @@ test('buildServicePayload omits headers when editing and headers field is blank'
       endpoint_url: 'https://mysql.example.test/mcp',
       description: 'Reports',
       tags: 'database, reporting',
-      headers: '',
+      headers: [{ name: 'Authorization', value: '', saved: true }],
+      savedHeaderNames: ['Authorization'],
     },
-    'edit',
   )
 
   assert.deepEqual(payload, {
@@ -59,9 +59,8 @@ test('buildServicePayload includes headers when provided', () => {
       service_key: 'mysql',
       name: 'MySQL MCP',
       endpoint_url: 'https://mysql.example.test/mcp',
-      headers: '{"Authorization":"Bearer token"}',
+      headers: [{ name: 'Authorization', value: 'Bearer token', saved: false }],
     },
-    'create',
   )
 
   assert.deepEqual(payload, {
@@ -71,7 +70,7 @@ test('buildServicePayload includes headers when provided', () => {
     description: '',
     tags: [],
     visibility: 'group',
-    headers: { Authorization: 'Bearer token' },
+    header_updates: { Authorization: 'Bearer token' },
   })
 })
 
@@ -93,8 +92,25 @@ test('serviceToForm keeps redacted headers out of the editable secret field', ()
     visibility: 'shared',
   })
 
-  assert.equal(form.headers, '')
+  assert.deepEqual(form.headers, [{ name: 'Authorization', value: '', saved: true }])
   assert.equal(form.tags, 'database')
+})
+
+test('buildServicePayload updates, adds and deletes headers without resending kept values', () => {
+  const form = defaultServiceForm()
+  form.savedHeaderNames = ['Authorization', 'X-Tenant', 'X-Old']
+  form.headers = [
+    { name: 'Authorization', value: 'Bearer rotated', saved: true },
+    { name: 'X-Tenant', value: '', saved: true },
+    { name: 'X-New', value: 'new', saved: false },
+  ]
+  assert.deepEqual(buildServicePayload(form).header_updates, {
+    Authorization: 'Bearer rotated',
+    'X-New': 'new',
+    'X-Old': null,
+  })
+  form.headers.push({ name: 'authorization', value: 'duplicate', saved: false })
+  assert.throws(() => buildServicePayload(form), /Header 名称不能重复/)
 })
 
 test('parseJsonObject accepts blank and object JSON values with custom labels', () => {

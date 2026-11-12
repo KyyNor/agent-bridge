@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, UploadFile
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -19,6 +21,7 @@ from agent_bridge.api.workspace_proxy import AgentWorkspaceProxyMiddleware
 from agent_bridge.access_control.identity import RequestIdentityResolver
 from agent_bridge.access_control.admin_access import AdminAccessService
 from agent_bridge.api.schemas import AdminLoginRequest, ChangeAdminPasswordRequest
+from agent_bridge.capability_hub.sources.mcp.sync_errors import McpToolSyncError
 from agent_bridge.core.config import (
     AgentBridgePaths,
     load_identity_config,
@@ -262,6 +265,20 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
     @app.exception_handler(AgentBridgeError)
     async def _handle_agent_bridge_error(request: Request, exc: AgentBridgeError) -> JSONResponse:
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+
+    @app.exception_handler(McpToolSyncError)
+    async def _handle_mcp_sync_error(request: Request, exc: McpToolSyncError) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.message, "code": exc.code, "upstream_status": exc.upstream_status},
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def _handle_request_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+        if getattr(request.scope.get("route"), "name", None) == "register_mcp_service":
+            # 默认 422 会包含原始 input，缺字段时可能回显整份含凭据的配置。
+            return JSONResponse(status_code=422, content={"detail": "MCP 服务配置格式无效，请检查表单字段"})
+        return await request_validation_exception_handler(request, exc)
 
     @app.exception_handler(WorkflowDefinitionValidationError)
     async def _handle_workflow_validation_error(request: Request, exc: WorkflowDefinitionValidationError) -> JSONResponse:

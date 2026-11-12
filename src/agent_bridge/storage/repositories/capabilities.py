@@ -168,29 +168,18 @@ class CapabilitiesRepository:
 
     def mark_mcp_service_sync(self, service_key: str, *, success: bool, error: str | None = None) -> None:
         with self._connect() as conn:
-            if success:
-                conn.execute(
-                    """
-                    UPDATE mcp_services
-                    SET last_synced_at = CURRENT_TIMESTAMP,
-                        last_error = ?,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE service_key = ?
-                    """,
-                    (error, service_key),
-                )
-            else:
-                conn.execute(
-                    """
-                    UPDATE mcp_services
-                    SET status = ?,
-                        last_synced_at = CURRENT_TIMESTAMP,
-                        last_error = ?,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE service_key = ?
-                    """,
-                    (McpServiceStatus.error.value, error, service_key),
-                )
+            conn.execute(
+                """
+                UPDATE mcp_services
+                SET status = CASE WHEN status = 'disabled' THEN status
+                                  WHEN ? THEN 'enabled' ELSE 'error' END,
+                    last_synced_at = CURRENT_TIMESTAMP,
+                    last_error = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE service_key = ?
+                """,
+                (success, error, service_key),
+            )
 
     def upsert_mcp_tool(
         self,
