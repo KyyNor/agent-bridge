@@ -29,6 +29,9 @@ SESSION_MARK_ENV = "AGENT_BRIDGE_TERMINAL_SESSION"
 DISCONNECT_GRACE_SECONDS = 120
 REPLAY_BYTES = 512 * 1024
 MAX_INPUT_BYTES = 64 * 1024
+INPUT_WRITE_TIMEOUT_SECONDS = 2
+# 结束帧发出后再让 uvicorn 退出，避免重连落进关机窗口。
+EXIT_FLUSH_SECONDS = 1
 
 
 class PtySession:
@@ -94,14 +97,37 @@ class PtySession:
                 self.queue = None
                 self.disconnected_at = time.monotonic()
 
+    def exit_status(self) -> int | None:
+        if self.process is not None:
+            code = self.process.poll()
+            if code is not None:
+                return code
+        return self.exit_code
+
     async def write_input(self, data: bytes):
         view = memoryview(data)
+        deadline = time.monotonic() + INPUT_WRITE_TIMEOUT_SECONDS
         while view:
+            if self.master < 0:
+                return
             try:
                 written = os.write(self.master, view)
                 view = view[written:]
             except BlockingIOError:
+                # Agent 长时间不读 stdin 时不能无限自旋；超出预算就丢弃本批输入。
+                if time.monotonic() >= deadline:
+                    logger.warning("终端输入写入超时，丢弃剩余 %s 字节 pid=%s",
+                                   len(view), getattr(self.process, "pid", None))
+                    return
                 await asyncio.sleep(0.01)
+            except OSError as exc:
+                if exc.errno in (errno.EIO, errno.EBADF):
+                    # slave 已全部关闭：Agent 已退出，由输出任务发送结束帧。
+                    logger.info("终端 PTY 已关闭，标记会话结束 pid=%s 原因=%s",
+                                getattr(self.process, "pid", None), exc)
+                    self.finished.set()
+                    return
+                raise
 
     def resize(self, cols: int, rows: int):
         if not (2 <= cols <= 500 and 2 <= rows <= 300):
@@ -136,14 +162,16 @@ def create_terminal_app(command: list[str], secret: str, *, grace_seconds: float
         async def monitor():
             while True:
                 await asyncio.sleep(1)
-                exited = session.process.poll() is not None
+                exited = session.process is not None and session.process.poll() is not None
                 expired = session.queue is None and time.monotonic() - session.disconnected_at >= grace_seconds
                 if exited or expired:
-                    session.exit_code = session.process.poll()
+                    session.exit_code = session.exit_status()
                     session.finished.set()
                     if expired:
-                        logger.info("终端断线宽限到期，回收 pid=%s", session.process.pid)
-                    # 让 uvicorn 正常结束，服务侧状态探测即可识别退出。
+                        logger.info("终端断线宽限到期，回收 pid=%s", getattr(session.process, "pid", None))
+                    # 先让连接把结束帧和 4000 发完，再让 uvicorn 正常结束；
+                    # 否则这段时间的重连会落进关机窗口，被当成一次新会话。
+                    await asyncio.sleep(EXIT_FLUSH_SECONDS)
                     server = getattr(app.state, "server", None)
                     if server is not None:
                         server.should_exit = True
@@ -162,6 +190,11 @@ def create_terminal_app(command: list[str], secret: str, *, grace_seconds: float
 
     def authorized(headers):
         return bool(secret) and secrets.compare_digest(headers.get("authorization", ""), "Bearer " + secret)
+
+    async def close_socket(socket: WebSocket, code: int, reason: str = ""):
+        # 所有退出路径都必须带明确关闭码，1000/1006 会被浏览器当成可重连的网络抖动。
+        with suppress(RuntimeError, OSError):
+            await socket.close(code=code, reason=reason)
 
     @app.get("/health")
     def health(request: Request):
@@ -195,8 +228,8 @@ def create_terminal_app(command: list[str], secret: str, *, grace_seconds: float
                     await socket.send_bytes(data)
                 while not queue.empty():
                     await socket.send_bytes(queue.get_nowait())
-                await socket.send_text(json.dumps({"type": "exit", "code": session.process.poll()}))
-                await socket.close(code=4000, reason="Agent 已退出")
+                await socket.send_text(json.dumps({"type": "exit", "code": session.exit_status()}))
+                await close_socket(socket, 4000, "Agent 已退出")
             async def input_():
                 while True:
                     message = await socket.receive_json()
@@ -226,11 +259,19 @@ def create_terminal_app(command: list[str], secret: str, *, grace_seconds: float
                 await asyncio.gather(*tasks, return_exceptions=True)
         except asyncio.CancelledError:
             # ASGI 连接取消只释放订阅，PTY 由断线宽限或 runtime 回收。
-            logger.info("终端订阅已取消 pid=%s", session.process.pid)
-        except (WebSocketDisconnect, OSError, RuntimeError):
-            logger.info("终端连接已断开 pid=%s", session.process.pid)
+            logger.info("终端订阅已取消 pid=%s", getattr(session.process, "pid", None))
+            await close_socket(socket, 4000 if session.finished.is_set() else 4001, "终端连接已取消")
+        except (WebSocketDisconnect, OSError, RuntimeError) as exc:
+            # 典型来源是 Agent 退出后的 PTY EIO：必须回结束码，而不是让 uvicorn 按 1000 收尾。
+            logger.info("终端连接已断开 pid=%s 已退出=%s 原因=%s",
+                        getattr(session.process, "pid", None), session.finished.is_set(),
+                        type(exc).__name__)
+            if session.finished.is_set():
+                await close_socket(socket, 4000, "Agent 已退出")
+            else:
+                await close_socket(socket, 1011, "终端连接异常")
         except (ValueError, TypeError):
-            await socket.close(code=1008, reason="终端消息格式错误")
+            await close_socket(socket, 1008, "终端消息格式错误")
         finally:
             if session.queue is queue:
                 session.queue = None

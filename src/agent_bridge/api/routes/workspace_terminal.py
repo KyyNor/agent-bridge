@@ -22,6 +22,12 @@ class TerminalStartRequest(BaseModel):
     profile_key: str | None = Field(default=None, max_length=255)
 
 
+def upstream_close_code(upstream) -> int:
+    """上游关闭码归一到浏览器可判定的取值；1005/1006/1015 视为链路异常（1011）。"""
+    code = upstream.close_code or 1011
+    return 1011 if code in {1005, 1006, 1015} else code
+
+
 def require_same_origin(request: Request):
     origin = request.headers.get('origin')
     if origin:
@@ -93,10 +99,17 @@ def create_terminal_routes(service, identity_resolver):
         try:
             request = Request({**socket.scope, "type": "http", "method": "GET"})
             user_id = identity_resolver.resolve(request).user_id
-            runtime = service.workspace_runtime(agent, mode="terminal")
-            target, secret = await asyncio.to_thread(runtime.terminal_target, user_id)
         except AgentBridgeError:
             await socket.close(code=1008)
+            return
+        try:
+            runtime = service.workspace_runtime(agent, mode="terminal")
+            target, secret = await asyncio.to_thread(runtime.terminal_target, user_id)
+        except AgentBridgeError as exc:
+            # 终端已结束/已被回收/归属或能力平面变化：与登录失效区分开，
+            # 前端据此提示“关闭页面”而不是“检查登录状态”。
+            logger.info("终端代理目标不可用 agent=%s user=%s 原因=%s", agent, user_id, exc)
+            await socket.close(code=4001, reason="终端已结束，请重新进入")
             return
         await socket.accept()
         url = target.replace("http://", "ws://", 1) + "/terminal"
@@ -114,27 +127,37 @@ def create_terminal_routes(service, identity_resolver):
                         # 4009（连接独占）与 4000（Agent 退出）必须原样到浏览器，
                         # 不能一律转为 1011 触发无意义的自动重连。
                         pass
-                    code = upstream.close_code or 1011
-                    if code in {1005, 1006, 1015}:
-                        code = 1011
-                    await socket.close(code=code, reason=upstream.close_reason or "")
+                    code = upstream_close_code(upstream)
+                    if code not in {4000, 4009}:
+                        logger.info("终端代理上游关闭 agent=%s user=%s code=%s reason=%s",
+                                    agent, user_id, code, upstream.close_reason or "")
+                    with suppress(RuntimeError):
+                        await socket.close(code=code, reason=upstream.close_reason or "")
 
                 async def to_agent():
-                    while True:
-                        data = await socket.receive_text()
-                        if len(data.encode()) > 128 * 1024:
-                            await socket.close(code=1009)
-                            return
-                        # 每次输入重新校验组归属与 Profile；地址和秘密从不接受客户端指定。
-                        import json
-                        try:
-                            message = json.loads(data)
-                        except ValueError:
-                            await socket.close(code=1008)
-                            return
-                        touch = isinstance(message, dict) and message.get("type") == "input"
-                        await asyncio.to_thread(runtime.terminal_target, user_id, touch=touch)
-                        await upstream.send(data)
+                    import json
+                    try:
+                        while True:
+                            data = await socket.receive_text()
+                            if len(data.encode()) > 128 * 1024:
+                                await socket.close(code=1009)
+                                return
+                            # 每次输入重新校验组归属与 Profile；地址和秘密从不接受客户端指定。
+                            try:
+                                message = json.loads(data)
+                            except ValueError:
+                                await socket.close(code=1008)
+                                return
+                            touch = isinstance(message, dict) and message.get("type") == "input"
+                            await asyncio.to_thread(runtime.terminal_target, user_id, touch=touch)
+                            await upstream.send(data)
+                    except ConnectionClosed:
+                        # 上游已关闭：用真实关闭码收尾，避免 1011/1000 抢先被当成网络抖动。
+                        code = upstream_close_code(upstream)
+                        logger.info("终端代理上游关闭 agent=%s user=%s code=%s", agent, user_id, code)
+                        with suppress(RuntimeError):
+                            await socket.close(code=code, reason=upstream.close_reason or "")
+                        return
 
                 async def guard():
                     while True:
@@ -151,8 +174,11 @@ def create_terminal_routes(service, identity_resolver):
                         task.cancel()
                     await asyncio.gather(*tasks, return_exceptions=True)
         except (WebSocketDisconnect, WebSocketException, OSError, RuntimeError, AgentBridgeError) as exc:
-            logger.info("终端代理连接结束 agent=%s user=%s 状态=%s", agent, user_id, type(exc).__name__)
-            with suppress(RuntimeError, WebSocketDisconnect):
-                await socket.close(code=1008 if isinstance(exc, AgentBridgeError) else 1011)
+            # 归属/能力平面在会话中途失效时终端已不可继续，按“已结束”处理而不是登录失效。
+            code = 4001 if isinstance(exc, AgentBridgeError) else 1011
+            logger.info("终端代理连接结束 agent=%s user=%s 状态=%s code=%s",
+                        agent, user_id, type(exc).__name__, code)
+            with suppress(RuntimeError, WebSocketDisconnect, OSError):
+                await socket.close(code=code)
 
     return router

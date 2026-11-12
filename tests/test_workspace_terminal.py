@@ -29,6 +29,49 @@ def receive_until(socket, expected):
     raise AssertionError(collected)
 
 
+def collect_messages(socket):
+    """读到关闭帧为止，返回全部消息与关闭帧。"""
+    messages = []
+    while True:
+        message = socket.receive()
+        messages.append(message)
+        if message['type'] == 'websocket.close':
+            return messages, message
+
+
+def test_agent_exit_sends_exit_frame_and_terminal_close_code():
+    """Agent 退出必须给出结束码；结束后重连也不能挂回死会话。"""
+    app = create_terminal_app([sys.executable, "-u", "-c", "import time; time.sleep(0.2)"], "s")
+    with TestClient(app) as client:
+        headers = {'Authorization': 'Bearer s'}
+        with client.websocket_connect('/terminal', headers=headers) as socket:
+            messages, closed = collect_messages(socket)
+        assert closed['code'] == 4000
+        assert any(m['type'] == 'websocket.send' and 'exit' in str(m.get('text')) for m in messages)
+        # 已结束的会话再次连接：立刻回结束帧与 4000，不进入重连循环。
+        with client.websocket_connect('/terminal', headers=headers) as again:
+            _, closed_again = collect_messages(again)
+        assert closed_again['code'] == 4000
+
+
+@pytest.mark.asyncio
+async def test_write_input_after_agent_exit_marks_session_finished():
+    """Agent 退出后写 PTY 遇到 EIO：标记会话结束，而不是抛出未处理的 OSError。"""
+    import time
+    from agent_bridge.agent_workspace.terminal_server import PtySession
+    session = PtySession([sys.executable, '-c', 'pass'])
+    session.start()
+    try:
+        deadline = time.monotonic() + 5
+        while session.process.poll() is None and time.monotonic() < deadline:
+            await asyncio.sleep(0.02)
+        assert session.process.poll() is not None
+        await session.write_input(b'hello')
+        assert session.finished.is_set()
+    finally:
+        await session.stop()
+
+
 def test_pty_tty_input_exclusivity_and_reconnect(terminal_app):
     with TestClient(terminal_app) as client:
         assert client.get('/health').status_code == 401
@@ -137,6 +180,40 @@ async def test_disconnect_grace_stops_process_and_output_replay_is_bounded(monke
         session.read_output()
     assert session.output_bytes <= REPLAY_BYTES
     assert sum(map(len, session.output)) == session.output_bytes
+
+
+def test_terminal_close_code_mapping():
+    """链路异常归一到 1011，业务关闭码原样保留，前端才能区分结束与抖动。"""
+    from types import SimpleNamespace
+    from agent_bridge.api.routes.workspace_terminal import upstream_close_code
+    cases = {4000: 4000, 4001: 4001, 4009: 4009, 1013: 1013,
+             1000: 1000, 1005: 1011, 1006: 1011, 1015: 1011, None: 1011}
+    for code, expected in cases.items():
+        assert upstream_close_code(SimpleNamespace(close_code=code)) == expected
+
+
+def test_terminal_proxy_reports_ended_session_with_business_code():
+    """终端已结束不能被报成登录失效：代理用 4001 让前端提示关闭页面。"""
+    from fastapi import FastAPI
+    from types import SimpleNamespace
+    from agent_bridge.core.domain import AccessDenied
+    from agent_bridge.api.routes.workspace_terminal import create_terminal_routes
+    from agent_bridge.access_control.identity import IdentityConfig, RequestIdentityResolver
+
+    def unavailable(*_args, **_kwargs):
+        raise AccessDenied('终端进程已结束')
+
+    runtime = SimpleNamespace(terminal_target=unavailable)
+    service = SimpleNamespace(workspace_runtime=lambda *_args, **_kwargs: runtime)
+    app = FastAPI()
+    app.include_router(create_terminal_routes(service, RequestIdentityResolver(IdentityConfig())))
+    with TestClient(app) as client:
+        with pytest.raises(WebSocketDisconnect) as error:
+            with client.websocket_connect('/agent-workspace/terminal/pi', headers={
+                'origin': 'http://testserver', 'X-Agent-Bridge-User': 'user',
+            }):
+                pass
+        assert error.value.code == 4001
 
 
 def test_terminal_proxy_preserves_exclusive_close_code(monkeypatch):
