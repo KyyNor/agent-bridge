@@ -22,6 +22,7 @@
 - DSH 作为 Coding Agent 后端走标准 Agent Client Protocol：每次 run 启动独立、短生命周期的 `dsh --profile acp --patch <模型路由>` 进程（JSON-RPC over stdio），不解析 TUI 文本、不与 DSH Web Runtime 共享进程。模型路由必须经 run 目录中的 `--patch` 覆盖 `dsh-acp` 行（acp profile shipped 行钉死 deepseek-official，默认模型配置不会覆盖它）；组级模型接入与 Linux 身份由 `dsh/agent_runtime.py` 统一解析，模型接入条目与路由行写入同一份 run patch，后台 run 不依赖 Web Runtime。全新 DSH_HOME 必须预创建标准子目录（sessions/storages/change-ledger/task-board），否则 provider 注册失败；DSH 侧 LLM provider 注册可能晚于 ACP 应答开始，adapter 对 `no adapter registered` 做退避重试。`.mcp.json` 在 adapter 内转换为 ACP `session/new` 的 stdio/HTTP MCP 声明（Profile 能力平面照常经 MetaMCP 网关），不得把 Profile 规则复制进 DSH。权限请求按无人值守语义自动放行（优先 allow_* 选项，沙箱仍由 DSH 执行）；取消走 `session/cancel` + stdin EOF 优雅退出。effort 为空集合（托管供应商路由不暴露 reasoning effort，配置即拒绝）；原始 ACP update 全量进 `messages.jsonl` 供诊断。
 - Mock 后端只能由显式 `type = "mock"` 使用，不得作为未知或缺失配置的静默回退。
 - CodeGraph CLI/MCP 是同一正式后端的两种调用通道，统一通过 `CodeGraphBackend` 使用。
+- 文档知识库上传同步策略按后端分为 `immediate` / `scheduled` / `paused`。新库未显式设置的目标随当前默认检索后端计算，默认后端为 `scheduled`、其余为 `paused`。切换默认后端时保留显式策略，存量库继承旧布尔配置。手动与定时同步跳过 `paused` 目标并保留待办；指定后端时建库、补排、领取和恢复均限定在该后端。
 - 禁止为 CodeGraph 恢复 SQLite 隐式文本索引降级；后端缺失或索引未就绪必须明确失败。
 - 仓库文件读取和文件列表基于 Git 镜像，不应依赖 CodeGraph 后端。
 - 工作流产物的文本检索使用 jieba 预分词与 SQLite FTS5；结构化范围条件（Profile、current/history、标签、格式和路径前缀）必须继续在 `workflow_artifacts` 主表上过滤。中文查询按分词后的关键词组合匹配，长度至少 3 的 ASCII 标识符支持前缀匹配，短 token 和带分隔符的路径/标识符保持字面匹配。

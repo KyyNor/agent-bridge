@@ -553,7 +553,16 @@ def apply_followup_schema(store: Any, conn: sqlite3.Connection) -> None:
             "default_backend_slug": "TEXT",
             "default_agent_id": "TEXT",
             "sync_on_upload": "INTEGER NOT NULL DEFAULT 0",
+            "sync_follows_default": "INTEGER NOT NULL DEFAULT 0",
         },
+    )
+    ensure_query_index(
+        conn,
+        "idx_sync_jobs_target_status",
+        """
+        CREATE INDEX IF NOT EXISTS idx_sync_jobs_target_status
+        ON sync_jobs(kb_id, backend_slug, status, operation, doc_id)
+        """,
     )
     store._ensure_columns(
         conn,

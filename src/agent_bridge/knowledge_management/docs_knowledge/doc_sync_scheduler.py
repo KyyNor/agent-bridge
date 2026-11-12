@@ -49,7 +49,7 @@ class DocSyncScheduler(BaseCronScheduler):
         logger.debug("已调度文档同步 cron: %s", self._current_cron)
 
     def _run_sync(self) -> None:
-        """cron 触发的同步入口:扇出到所有检索后端(具体扇出在 service.sync 内完成)。"""
+        """cron 触发的同步入口，由同步服务筛选可执行目标并重试失败任务。"""
         admin = next(iter(self._admins), "root")
         logger.info("DocSync 定时同步开始 actor=%s", admin)
         self._current_run = {

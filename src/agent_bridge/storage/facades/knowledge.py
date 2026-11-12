@@ -16,6 +16,7 @@ class KnowledgeFacadeMixin:
         owner_group_key: str = "",
         visibility: str = "group",
         sync_on_upload: bool = False,
+        sync_follows_default: bool = False,
     ) -> dict[str, Any]:
         return self.knowledge.create_kb(
             slug=slug,
@@ -25,6 +26,7 @@ class KnowledgeFacadeMixin:
             owner_group_key=owner_group_key,
             visibility=visibility,
             sync_on_upload=sync_on_upload,
+            sync_follows_default=sync_follows_default,
         )
 
     def ensure_root_folder(self, kb_id: int) -> dict[str, Any]:
@@ -98,8 +100,12 @@ class KnowledgeFacadeMixin:
     def update_kb_visibility(self, kb_id: int, visibility: str) -> None:
         return self.knowledge.update_kb_visibility(kb_id=kb_id, visibility=visibility)
 
-    def update_kb_sync_policy(self, kb_id: int, sync_on_upload: bool) -> None:
-        return self.knowledge.update_kb_sync_policy(kb_id=kb_id, sync_on_upload=sync_on_upload)
+    def update_kb_sync_policy(
+        self, kb_id: int, sync_on_upload: bool, *, sync_follows_default: bool | None = None
+    ) -> None:
+        self.knowledge.update_kb_sync_policy(
+            kb_id, sync_on_upload, sync_follows_default=sync_follows_default
+        )
 
     def ensure_backend_target(self, kb_id: int, slug: str, backend_type: str) -> None:
         return self.knowledge.ensure_backend_target(kb_id=kb_id, slug=slug, backend_type=backend_type)
@@ -120,7 +126,8 @@ class KnowledgeFacadeMixin:
         return self.knowledge.rebuild_backend_target(kb_id=kb_id, backend_slug=backend_slug, new_backend_kb_id=new_backend_kb_id)
 
     def update_backend_target_config(self, kb_id: int, slug: str, config_updates: dict[str, Any]) -> None:
-        return self.knowledge.update_backend_target_config(kb_id=kb_id, slug=slug, config_updates=config_updates)
+        with self.transaction():
+            self.knowledge.update_backend_target_config(kb_id, slug, config_updates)
 
     def list_backends(self) -> list[dict[str, Any]]:
         return self.knowledge.list_backends()
@@ -168,8 +175,8 @@ class KnowledgeFacadeMixin:
     def list_sync_states_for_doc(self, doc_id: int) -> list[dict[str, Any]]:
         return self.knowledge.list_sync_states_for_doc(doc_id=doc_id)
 
-    def list_synced_doc_ids(self, kb_id: int) -> list[int]:
-        return self.knowledge.list_synced_doc_ids(kb_id=kb_id)
+    def backfill_backend_sync_jobs(self, kb_id: int, backend_slug: str) -> None:
+        self.knowledge.backfill_backend_sync_jobs(kb_id, backend_slug)
 
     def list_kbs(self) -> list[dict[str, Any]]:
         return self.knowledge.list_kbs()
@@ -341,11 +348,13 @@ class KnowledgeFacadeMixin:
         actor: str | None,
         backend_slug: str | None = None,
         kb_id: int | None = None,
+        eligible_targets: list[tuple[int, str]] | None = None,
     ) -> list[dict[str, Any]]:
         return self.knowledge.list_runnable_jobs(
             actor=actor,
             backend_slug=backend_slug,
             kb_id=kb_id,
+            eligible_targets=eligible_targets,
         )
 
     def list_all_jobs(

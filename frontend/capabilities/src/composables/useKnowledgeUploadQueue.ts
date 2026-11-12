@@ -226,7 +226,7 @@ export function useKnowledgeUploadQueue({
         return
       }
       let syncStartError = ''
-      const immediateTargets = kb.backend_targets.filter(target => target.status === 'active' && target.sync_on_upload)
+      const immediateTargets = kb.backend_targets.filter(target => target.status === 'active' && target.sync_policy === 'immediate')
       if (uploadedCount > 0 && immediateTargets.length > 0) {
         uploadIndexes.forEach(index => {
           if (uploadFiles.value[index]?.status === 'success') updateUploadItem(index, { stage: `正在同步：${immediateTargets.map(target => target.slug).join('、')}` })
@@ -238,8 +238,11 @@ export function useKnowledgeUploadQueue({
           syncStartError = '文件已入库，但部分后端同步未启动，请稍后点击“立即同步”。'
         }
       } else if (uploadedCount > 0) {
+        const scheduled = kb.backend_targets.some(target => target.status === 'active' && target.sync_policy === 'scheduled')
         uploadIndexes.forEach(index => {
-          if (uploadFiles.value[index]?.status === 'success') updateUploadItem(index, { stage: '已入库，等待定时同步' })
+          if (uploadFiles.value[index]?.status === 'success') {
+            updateUploadItem(index, { stage: scheduled ? '已入库，等待定时同步' : '已入库' })
+          }
         })
       }
       if (skippedCount > 0) {

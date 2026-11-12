@@ -1018,6 +1018,8 @@ export interface TestCloneResult {
   message: string
 }
 
+export type KnowledgeSyncPolicy = 'immediate' | 'scheduled' | 'paused'
+
 export interface KnowledgeBackendTarget {
   id: number
   kb_id: number
@@ -1026,6 +1028,7 @@ export interface KnowledgeBackendTarget {
   backend_kb_id: string | null
   config_json: string
   sync_on_upload: boolean
+  sync_policy: KnowledgeSyncPolicy
   last_error: string | null
   status: string
   created_at: string

@@ -47,7 +47,7 @@ async function triggerSync() {
   <div class="space-y-4">
     <div class="flex items-center gap-3">
       <Button size="sm" @click="triggerSync" :disabled="syncing || readOnly" :title="readOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">{{ syncing ? '同步中...' : '立即同步' }}</Button>
-      <span class="text-sm text-muted-foreground">处理当前知识库待处理和失败的同步任务</span>
+      <span class="text-sm text-muted-foreground">处理当前知识库已启用同步的后端任务</span>
     </div>
     <div v-if="jobs.length === 0" class="py-6 text-center text-sm text-muted-foreground">暂无同步任务</div>
     <table v-else class="w-full">
