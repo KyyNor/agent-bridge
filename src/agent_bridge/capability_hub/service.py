@@ -29,7 +29,9 @@ from agent_bridge.access_control.resources import (
 from agent_bridge.access_control.service import AccessControlService, ResourceScope
 from agent_bridge.core.editing import attach_edit_token, require_edit_token
 from agent_bridge.core.json_util import json_loads as _json_loads
+from agent_bridge.capability_hub.sources.mcp.headers import apply_header_updates
 from agent_bridge.capability_hub.sources.mcp.http_client import McpHttpClient
+from agent_bridge.capability_hub.sources.mcp.sync_errors import McpToolSyncError, exception_leaves
 from agent_bridge.capability_hub.sources.openapi.http_client import OpenApiHttpClient
 from agent_bridge.capability_hub.sources.openapi.parser import parse_openapi_operations
 from agent_bridge.capability_hub.sources.adapters import (
@@ -62,18 +64,7 @@ def _root_cause_message(exc: BaseException) -> str:
     taskgroup (N sub-exceptions)") on connection/transport failures, and ``str()``
     on the group hides the leaf exception. Unwrap to the leaf cause(s).
     """
-    leaves: list[str] = []
-    stack: list[BaseException] = [exc]
-    seen: set[int] = set()
-    while stack:
-        current = stack.pop()
-        if id(current) in seen:
-            continue
-        seen.add(id(current))
-        if isinstance(current, BaseExceptionGroup):
-            stack.extend(current.exceptions)
-        else:
-            leaves.append(f"{type(current).__name__}: {current}")
+    leaves = [f"{type(leaf).__name__}: {leaf}" for leaf in exception_leaves(exc)]
     if not leaves:
         return str(exc)
     if len(leaves) == 1:
@@ -369,6 +360,7 @@ class CapabilityService:
         tags: list[str],
         *,
         visibility: str | None = None,
+        header_updates: dict[str, str | None] | None = None,
         expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
         self._validate_service_key(service_key)
@@ -376,48 +368,54 @@ class CapabilityService:
             raise ValidationError("service_key is reserved for built-in capability")
         if self.store.get_openapi_service(service_key) is not None:
             raise ValidationError("service_key is already used by an OpenAPI service")
-        existing = self.store.get_mcp_service(service_key)
-        if existing is not None:
-            self.access.require_resource_write(
-                actor=actor,
-                resource_type=ScopedResourceType.mcp_service,
+        with self.store.transaction():
+            existing = self.store.get_mcp_service(service_key)
+            if existing is not None:
+                self.access.require_resource_write(
+                    actor=actor,
+                    resource_type=ScopedResourceType.mcp_service,
+                    resource_key=service_key,
+                )
+            require_edit_token(
+                expected=expected_edit_token,
+                current_snapshot=self._service_edit_snapshot(existing) if existing else None,
+                resource_type="mcp_service",
                 resource_key=service_key,
-            )
-        require_edit_token(
-            expected=expected_edit_token,
-            current_snapshot=self._service_edit_snapshot(existing) if existing else None,
-            resource_type="mcp_service",
-            resource_key=service_key,
-            actor=actor,
-        )
-        if headers is None:
-            headers = _json_loads(existing.get("headers_json"), {}) if existing is not None else {}
-        if existing is None:
-            scope = self.access.new_resource_scope(
                 actor=actor,
-                visibility=visibility or self._default_visibility,
             )
-            service = self.store.create_mcp_service(
-                service_key=service_key,
-                name=name,
-                endpoint_url=endpoint_url,
-                headers=headers,
-                description=description,
-                tags=tags,
-                created_by=actor,
-                owner_group_key=scope.owner_group_key,
-                visibility=scope.visibility.value,
-            )
-        else:
-            service = self.store.update_mcp_service(
-                service_key,
-                name=name,
-                endpoint_url=endpoint_url,
-                headers=headers,
-                description=description,
-                tags=tags,
-                visibility=visibility,
-            )
+            if header_updates is not None:
+                if headers is not None:
+                    raise ValidationError("headers 和 header_updates 只能提交其中一个")
+                stored_headers = _json_loads(existing.get("headers_json"), {}) if existing else {}
+                headers = apply_header_updates(stored_headers, header_updates)
+            elif headers is None:
+                headers = _json_loads(existing.get("headers_json"), {}) if existing else {}
+            if existing is None:
+                scope = self.access.new_resource_scope(
+                    actor=actor,
+                    visibility=visibility or self._default_visibility,
+                )
+                service = self.store.create_mcp_service(
+                    service_key=service_key,
+                    name=name,
+                    endpoint_url=endpoint_url,
+                    headers=headers,
+                    description=description,
+                    tags=tags,
+                    created_by=actor,
+                    owner_group_key=scope.owner_group_key,
+                    visibility=scope.visibility.value,
+                )
+            else:
+                service = self.store.update_mcp_service(
+                    service_key,
+                    name=name,
+                    endpoint_url=endpoint_url,
+                    headers=headers,
+                    description=description,
+                    tags=tags,
+                    visibility=visibility,
+                )
         return self._service_payload(service)
 
     def register_openapi_service(
@@ -629,7 +627,7 @@ class CapabilityService:
         self.store.delete_pin_rules_by_service(service_key=service_key)
 
     def list_services(self, actor: str) -> list[dict[str, Any]]:
-        return [self._service_payload(service, redact_headers=True) for service in self.access.visible_resources(actor=actor, resource_type=ScopedResourceType.mcp_service)]
+        return [self._service_payload(service) for service in self.access.visible_resources(actor=actor, resource_type=ScopedResourceType.mcp_service)]
 
     def list_service_summaries(self, actor: str) -> list[dict[str, Any]]:
         visible = {item["service_key"] for item in self.access.visible_resources(actor=actor, resource_type=ScopedResourceType.mcp_service)}
@@ -637,7 +635,7 @@ class CapabilityService:
 
     def get_service(self, actor: str, service_key: str) -> dict[str, Any]:
         service = self.access.require_resource_read(actor=actor, resource_type=ScopedResourceType.mcp_service, resource_key=service_key)
-        return self._service_payload(service, redact_headers=True)
+        return self._service_payload(service)
 
     def set_service_status(self, actor: str, service_key: str, status: McpServiceStatus | str) -> dict[str, Any]:
         try:
@@ -670,32 +668,35 @@ class CapabilityService:
     async def sync_tools(self, actor: str, service_key: str) -> dict[str, Any]:
         service = self.access.require_resource_write(actor=actor, resource_type=ScopedResourceType.mcp_service, resource_key=service_key)
         headers = _json_loads(service.get("headers_json"), {})
+        started = monotonic_ms()
         try:
             tools = await self.mcp_client.list_tools(
                 service["endpoint_url"],
                 headers,
                 timeout=self._mcp_timeout_seconds(),
             )
+            normalized_tools = [self._normalize_synced_tool(tool) for tool in tools]
+        except Exception as exc:
+            failure = McpToolSyncError.from_exception(exc)
+            self.store.mark_mcp_service_sync(service_key, success=False, error=failure.message)
+            logger.warning(
+                "MCP 工具同步失败 service=%s code=%s upstream_status=%s 耗时=%dms 异常类型=%s",
+                service_key,
+                failure.code,
+                failure.upstream_status,
+                monotonic_ms() - started,
+                ",".join(type(leaf).__name__ for leaf in exception_leaves(exc)),
+            )
+            raise failure from exc
+
+        with self.store.transaction():
             active_tool_names: set[str] = set()
-            for tool in tools:
-                normalized = self._normalize_synced_tool(tool)
+            for normalized in normalized_tools:
                 active_tool_names.add(normalized["tool_name"])
-                self.store.upsert_mcp_tool(
-                    service_key=service_key,
-                    tool_name=normalized["tool_name"],
-                    display_name=normalized["display_name"],
-                    description=normalized["description"],
-                    input_schema=normalized["input_schema"],
-                    tool_type=normalized["tool_type"],
-                    tags=normalized["tags"],
-                    examples=normalized["examples"],
-                )
+                self.store.upsert_mcp_tool(service_key=service_key, **normalized)
             self.store.deactivate_missing_mcp_tools(service_key, active_tool_names)
             self.store.mark_mcp_service_sync(service_key, success=True)
-            return {"service_key": service_key, "tool_count": len(tools)}
-        except Exception as exc:
-            self.store.mark_mcp_service_sync(service_key, success=False, error=str(exc))
-            raise ValidationError(f"MCP tool sync failed: {exc}") from exc
+        return {"service_key": service_key, "tool_count": len(tools)}
 
     def list_tools(self, actor: str, service_key: str) -> list[dict[str, Any]]:
         self._require_enabled_service(service_key, actor=actor)
@@ -1209,12 +1210,10 @@ class CapabilityService:
     def _active_openapi_tools(self, service_key: str) -> list[dict[str, Any]]:
         return [tool for tool in self.store.list_openapi_tools(service_key) if tool.get("status") == "active"]
 
-    def _service_payload(self, service: dict[str, Any], *, redact_headers: bool = False) -> dict[str, Any]:
+    def _service_payload(self, service: dict[str, Any]) -> dict[str, Any]:
         payload = attach_edit_token(dict(service), self._service_edit_snapshot(service))
         headers = _json_loads(payload.pop("headers_json", None), {})
-        if redact_headers:
-            headers = {key: "***" if value else value for key, value in headers.items()}
-        payload["headers"] = headers
+        payload["headers"] = {key: "***" if value else "" for key, value in headers.items()}
         payload["tags"] = _json_loads(payload.pop("tags_json", None), [])
         return payload
 

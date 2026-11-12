@@ -223,6 +223,7 @@ class RegisterMcpServiceRequest(BaseModel):
     name: str
     endpoint_url: str
     headers: dict[str, Any] | None = None
+    header_updates: dict[str, str | None] | None = None
     description: str = ""
     tags: list[str] = Field(default_factory=list)
     visibility: Literal["group", "shared"] | None = None

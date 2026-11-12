@@ -2,9 +2,10 @@
 import { ArrowLeft, Bug, Plus, RotateCw, Save, Search, Trash2, Wrench } from '@lucide/vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { api } from '../../api/client'
+import { api, HttpRequestError } from '../../api/client'
 import type { AccessActorContext, CapabilityServiceSource, McpService, OpenApiService, OpenApiTool } from '../../api/types'
 import { Card, CardContent } from '../../components/ui/card'
+import McpHeadersEditor from '../../components/capabilities/McpHeadersEditor.vue'
 import EditorActionBar from '../../components/EditorActionBar.vue'
 import { timeAgo } from '../../lib/time'
 import { Badge } from '../../components/ui/badge'
@@ -50,6 +51,8 @@ const { maybeStartTour } = useOnboardingTour()
 const mcpServices = ref<McpService[]>([])
 const openApiServices = ref<OpenApiService[]>([])
 const toolCounts = ref<Record<string, number>>({})
+const syncingMcp = ref(new Set<string>())
+const mcpSyncErrors = ref(new Map<string, string>())
 const loading = ref(true)
 const search = ref('')
 const statusFilter = ref('all')
@@ -279,7 +282,7 @@ async function saveService() {
       })
     } else {
       await api.registerService({
-        ...buildServicePayload(mcpForm.value, formMode.value),
+        ...buildServicePayload(mcpForm.value),
         expected_edit_token: expectedEditToken.value,
       })
     }
@@ -312,8 +315,20 @@ async function deleteService(svc: CapabilityServiceSource) {
 }
 
 async function syncMcpTools(key: string) {
-  await api.syncServiceTools(key)
-  await loadServices({ fresh: true })
+  if (syncingMcp.value.has(key)) return
+  syncingMcp.value.add(key)
+  mcpSyncErrors.value.delete(key)
+  try {
+    await api.syncServiceTools(key)
+  } catch (error: unknown) {
+    const message = error instanceof HttpRequestError
+      ? `同步失败（HTTP ${error.status}）。${error.message}`
+      : '同步请求失败，请检查网络后重试。'
+    mcpSyncErrors.value.set(key, message)
+  } finally {
+    await loadServices({ fresh: true })
+    syncingMcp.value.delete(key)
+  }
 }
 
 async function openImportDialog(service: OpenApiService) {
@@ -432,10 +447,7 @@ const toolTypeOptions = [
             <label class="text-sm font-medium">标签</label>
             <Input v-model="mcpForm.tags" placeholder="数据库, 查询" />
           </div>
-          <div class="space-y-2">
-            <label class="text-sm font-medium">请求 Header</label>
-            <textarea v-model="mcpForm.headers" placeholder='{"Authorization":"Bearer token"}' rows="5" class="w-full rounded-lg border border-input px-3 py-2 font-mono text-xs outline-none focus:border-primary focus:ring-2 focus:ring-primary/10" />
-          </div>
+          <McpHeadersEditor v-model="mcpForm.headers" />
           <ResourceVisibilitySelect v-model="mcpForm.visibility" hint="共享后所有用户都可调用，修改和删除仍只允许归属小组。" />
         </template>
 
@@ -559,9 +571,9 @@ const toolTypeOptions = [
                     <RotateCw :size="14" />
                     同步接口
                   </Button>
-                  <Button v-else variant="ghost" size="sm" @click="syncMcpTools(s.service_key)" :disabled="serviceReadOnly(s)" :title="serviceReadOnly(s) ? SHARED_RESOURCE_READ_ONLY_HINT : undefined" class="h-8 gap-1.5 text-xs">
+                  <Button v-else variant="ghost" size="sm" @click="syncMcpTools(s.service_key)" :disabled="serviceReadOnly(s) || syncingMcp.has(s.service_key)" :title="serviceReadOnly(s) ? SHARED_RESOURCE_READ_ONLY_HINT : undefined" class="h-8 gap-1.5 text-xs">
                     <RotateCw :size="14" />
-                    同步
+                    {{ syncingMcp.has(s.service_key) ? '同步中…' : '同步' }}
                   </Button>
                   <Button variant="ghost" size="sm" @click="openEdit(s)" :disabled="serviceReadOnly(s)" :title="serviceReadOnly(s) ? SHARED_RESOURCE_READ_ONLY_HINT : undefined" class="h-8 text-xs">编辑</Button>
                   <Button variant="ghost" size="sm" @click="toggleStatus(s)" :disabled="serviceReadOnly(s)" :title="serviceReadOnly(s) ? SHARED_RESOURCE_READ_ONLY_HINT : undefined" class="h-8 text-xs">
@@ -572,6 +584,9 @@ const toolTypeOptions = [
                     删除
                   </Button>
                 </div>
+                <p v-if="s.source_type === 'mcp_service' && mcpSyncErrors.has(s.service_key)" role="alert" class="mt-1 max-w-xs break-words text-xs text-destructive">
+                  {{ mcpSyncErrors.get(s.service_key) }}
+                </p>
               </td>
             </tr>
           </tbody>

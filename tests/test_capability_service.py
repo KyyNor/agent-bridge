@@ -6,6 +6,7 @@ import json
 import pytest
 
 from agent_bridge.capability_hub.models import CallLogStatus, McpServiceStatus, ToolType
+from agent_bridge.capability_hub.sources.mcp.sync_errors import McpToolSyncError
 from agent_bridge.capability_hub.service import CapabilityService
 from agent_bridge.core.config import AgentBridgePaths
 from agent_bridge.core.domain import AccessDenied, NotFound, ValidationError
@@ -221,12 +222,12 @@ def test_sync_tools_marks_failure(wm_paths: AgentBridgePaths) -> None:
     service = CapabilityService(store=store, mcp_client=FailingMcpClient(), admins={"root"})
     service.register_service("root", "docs-api", "Docs API", "https://example.test/mcp", {}, "", [])
 
-    with pytest.raises(ValidationError, match="MCP tool sync failed: mcp unavailable"):
+    with pytest.raises(McpToolSyncError, match="无法读取 MCP 工具列表"):
         asyncio.run(service.sync_tools("root", "docs-api"))
 
     listed = service.list_services("root")
     assert listed[0]["status"] == McpServiceStatus.error.value
-    assert listed[0]["last_error"] == "mcp unavailable"
+    assert listed[0]["last_error"] == "无法读取 MCP 工具列表，请检查服务状态和配置"
 
 
 def test_search_root_and_service_path_filters_by_query(wm_paths: AgentBridgePaths) -> None:

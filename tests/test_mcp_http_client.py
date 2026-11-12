@@ -3,6 +3,9 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+import httpx
+import pytest
+
 from mcp.types import TextContent, Tool
 
 from agent_bridge.capability_hub.sources.mcp.http_client import (
@@ -10,6 +13,9 @@ from agent_bridge.capability_hub.sources.mcp.http_client import (
     normalize_call_tool_result,
     normalize_tool,
 )
+
+
+from agent_bridge.capability_hub.sources.mcp.sync_errors import McpToolSyncError
 
 
 def test_normalize_tool_returns_plain_dict() -> None:
@@ -115,7 +121,7 @@ def test_mcp_http_client_list_tools_handles_pagination(monkeypatch) -> None:
                 nextCursor=None,
             )
 
-    def fake_streamablehttp_client(endpoint_url, *, headers, timeout):
+    def fake_streamablehttp_client(endpoint_url, *, headers, timeout, httpx_client_factory):
         session_state["timeouts"].append(timeout)
         return FakeStreamContext()
 
@@ -205,3 +211,26 @@ def test_normalize_call_tool_result_handles_text_content() -> None:
         "structured": None,
         "content": [{"type": "text", "text": '{"rows": [{"id": 1}]}'}],
     }
+
+@pytest.mark.parametrize("status", [400, 401, 403])
+def test_list_tools_preserves_http_status_when_sdk_closes_stream(monkeypatch, caplog, status) -> None:
+    def reply(request: httpx.Request) -> httpx.Response:
+        assert request.headers["Authorization"] == "Bearer private-test-value"
+        return httpx.Response(status, text="Bearer private-test-value")
+
+    monkeypatch.setattr(
+        "agent_bridge.capability_hub.sources.mcp.http_client.create_mcp_http_client",
+        lambda **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(reply), **kwargs),
+    )
+
+    with pytest.raises(McpToolSyncError) as raised:
+        asyncio.run(
+            McpHttpClient().list_tools(
+                "https://example.test/mcp", {"Authorization": "Bearer private-test-value"}, timeout=1
+            )
+        )
+
+    assert raised.value.upstream_status == status
+    assert raised.value.code == ("upstream_http" if status == 400 else "upstream_auth")
+    assert "private-test-value" not in str(raised.value)
+    assert "private-test-value" not in caplog.text

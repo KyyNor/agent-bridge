@@ -3,13 +3,20 @@ import type { McpService, OpenApiService, ResourceVisibility } from '../../api/t
 export type ServiceFormMode = 'create' | 'edit'
 export type ServiceSourceType = 'mcp_service' | 'openapi_service'
 
+export interface McpHeaderRow {
+  name: string
+  value: string
+  saved: boolean
+}
+
 export interface ServiceForm {
   service_key: string
   name: string
   endpoint_url: string
   description: string
   tags: string
-  headers: string
+  headers: McpHeaderRow[]
+  savedHeaderNames: string[]
   visibility: ResourceVisibility
 }
 
@@ -19,7 +26,7 @@ export interface ServicePayload {
   endpoint_url: string
   description: string
   tags: string[]
-  headers?: Record<string, unknown>
+  header_updates?: Record<string, string | null>
   visibility: ResourceVisibility
 }
 
@@ -56,7 +63,8 @@ export function defaultServiceForm(): ServiceForm {
     endpoint_url: '',
     description: '',
     tags: '',
-    headers: '',
+    headers: [],
+    savedHeaderNames: [],
     visibility: 'group',
   }
 }
@@ -77,13 +85,15 @@ export function defaultOpenApiServiceForm(): OpenApiServiceForm {
 }
 
 export function serviceToForm(service: McpService): ServiceForm {
+  const savedHeaderNames = Object.keys(service.headers ?? {})
   return {
     service_key: service.service_key,
     name: service.name,
     endpoint_url: service.endpoint_url,
     description: service.description || '',
     tags: service.tags.join(', '),
-    headers: '',
+    headers: savedHeaderNames.map(name => ({ name, value: '', saved: true })),
+    savedHeaderNames,
     visibility: service.visibility,
   }
 }
@@ -125,7 +135,7 @@ export function parseJsonObject(value: string, label: string): Record<string, un
   return parsed as Record<string, unknown>
 }
 
-export function buildServicePayload(form: ServiceForm, mode: ServiceFormMode): ServicePayload {
+export function buildServicePayload(form: ServiceForm): ServicePayload {
   const payload: ServicePayload = {
     service_key: form.service_key.trim(),
     name: form.name.trim(),
@@ -134,10 +144,20 @@ export function buildServicePayload(form: ServiceForm, mode: ServiceFormMode): S
     tags: form.tags.split(',').map(tag => tag.trim()).filter(Boolean),
     visibility: form.visibility,
   }
-  const headers = parseHeadersJson(form.headers)
-  if (headers !== undefined || mode === 'create') {
-    if (headers !== undefined) payload.headers = headers
+  const names = new Set<string>()
+  const updates = new Map<string, string | null>()
+  for (const header of form.headers) {
+    const name = header.name.trim()
+    const key = name.toLowerCase()
+    if (!name) throw new Error('请输入 Header 名称')
+    if (names.has(key)) throw new Error('Header 名称不能重复（不区分大小写）')
+    names.add(key)
+    if (!header.saved || header.value !== '') updates.set(name, header.value)
   }
+  for (const name of form.savedHeaderNames) {
+    if (!names.has(name.toLowerCase())) updates.set(name, null)
+  }
+  if (updates.size) payload.header_updates = Object.fromEntries(updates)
   return payload
 }
 
