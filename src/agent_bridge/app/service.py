@@ -2006,6 +2006,9 @@ class AgentBridgeService:
     ) -> list[tuple[int, str]]:
         return self.docs_knowledge.align_backends(kb_id=kb_id, backend=backend)
 
+    def list_backend_catalog(self) -> list[dict[str, Any]]:
+        return self.docs_knowledge.list_backend_catalog()
+
     def list_backends(self, actor: str) -> list[dict[str, Any]]:
         return self.docs_knowledge.list_backends(actor)
 

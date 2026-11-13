@@ -518,6 +518,8 @@ Agent 运行事件以 `agent_runs` 为统一查询基准。前端通过 `RunEven
 
 知识库的后端目标在 `backend_targets.config_json.sync_policy` 保存显式策略（`immediate` / `scheduled` / `paused`）。新库未显式配置的目标随当前默认检索后端计算，默认后端定时同步，其余暂不同步。存量库沿用旧布尔值，`knowledge_bases.sync_on_upload` 保留兼容。同步前的远端建库、补排及领取任务共用同一后端范围，指定后端时不触碰其他目标，暂不同步时保留任务。上传队列只触发 `immediate`，HTTP 文档上传的 `later` 默认保持延后。
 
+知识库默认检索配置（默认后端 + Weknora 默认 Agent）对归属组普通用户开放编辑。后端选项使用登录可读的 `GET /api/v1/backends-catalog` 投影，Agent 选项使用登录可读的 `GET /api/v1/backends/{slug}/agents`（响应只含 agent_id/name/agent_type/is_builtin）；`GET /backends` 管理 payload、agent-types 与创建 Agent 仍要求管理员。前端 `resolveDefaultAgentId`（`src/lib/knowledgeAgentSelection.ts`）决定保存值：仅已知非 Weknora 后端或显式清空才置 null，后端类型无法判定时保留已保存的 Agent。
+
 以下变化必须在同一提交更新 README、CLAUDE、AGENTS 或示例：
 
 - CLI 命令、配置副作用或部署步骤；

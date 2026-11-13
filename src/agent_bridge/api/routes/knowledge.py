@@ -33,6 +33,10 @@ def create_knowledge_routes(service, actor, save_upload, upload_filename):
     def list_backends(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
         return service.list_backends(current_actor)
 
+    @router.get("/backends-catalog")
+    def list_backend_catalog(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
+        return service.list_backend_catalog()
+
     @router.post("/backends")
     def add_backend(payload: UpsertBackendRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
         return service.add_backend(

@@ -1275,6 +1275,13 @@ export interface BackendInfo {
   edit_token?: string
 }
 
+export interface BackendCatalogEntry {
+  slug: string
+  backend_type: string
+  runtime_status: string
+  supports_agents: boolean
+}
+
 export interface BackendAgent {
   agent_id: string
   name: string
