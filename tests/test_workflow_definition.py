@@ -18,8 +18,8 @@ def test_normalize_summary_graph_converts_single_ordinary_markdown_output_and_ad
     graph = WorkflowGraph.model_validate({
         "nodes": [
             {"id": "task", "type": "get_task", "name": "Task", "position": {"x": 0, "y": 0}},
-            {"id": "analysis", "type": "agent", "name": "Analysis", "position": {"x": 160, "y": 0}, "config": {"prompt": "分析", "backend_key": "claude"}},
-            {"id": "report", "type": "output", "name": "Report", "position": {"x": 320, "y": 0}, "config": {"format": "markdown", "title": "Report", "path": "report.md", "prompt": "总结", "backend_key": "claude"}},
+            {"id": "analysis", "type": "agent", "name": "Analysis", "position": {"x": 160, "y": 0}, "config": {"prompt": "分析", "backend_key": "dsh"}},
+            {"id": "report", "type": "output", "name": "Report", "position": {"x": 320, "y": 0}, "config": {"format": "markdown", "title": "Report", "path": "report.md", "prompt": "总结", "backend_key": "dsh"}},
         ],
         "edges": [
             {"id": "task-analysis", "source": "task", "target": "analysis"},
@@ -27,7 +27,7 @@ def test_normalize_summary_graph_converts_single_ordinary_markdown_output_and_ad
         ],
     })
 
-    normalized = normalize_summary_graph(graph, "claude")
+    normalized = normalize_summary_graph(graph, "dsh")
 
     assert [node.id for node in normalized.nodes[-2:]] == ["report", "html-output"]
     assert normalized.nodes[-2].config.system_role == "summary_markdown"
@@ -49,19 +49,19 @@ def test_normalize_summary_graph_generates_both_system_outputs_when_missing():
 
 
 def test_normalize_summary_graph_preserves_existing_system_pair():
-    graph = default_workflow_graph(WorkflowType.summary, "claude")
+    graph = default_workflow_graph(WorkflowType.summary, "dsh")
     normalized = normalize_summary_graph(graph, "codex")
 
     assert [node.id for node in normalized.nodes] == ["markdown-output", "html-output"]
-    assert [node.config.backend_key for node in normalized.nodes] == ["claude", "claude"]
+    assert [node.config.backend_key for node in normalized.nodes] == ["dsh", "dsh"]
 
 
 def test_normalize_summary_graph_rejects_extra_ordinary_output_with_system_pair():
-    payload = default_workflow_graph(WorkflowType.summary, "claude").model_dump(mode="json")
-    payload["nodes"].insert(0, {"id": "extra", "type": "output", "name": "Extra", "position": {"x": 0, "y": 0}, "config": {"format": "markdown", "title": "Extra", "path": "extra.md", "prompt": "extra", "backend_key": "claude"}})
+    payload = default_workflow_graph(WorkflowType.summary, "dsh").model_dump(mode="json")
+    payload["nodes"].insert(0, {"id": "extra", "type": "output", "name": "Extra", "position": {"x": 0, "y": 0}, "config": {"format": "markdown", "title": "Extra", "path": "extra.md", "prompt": "extra", "backend_key": "dsh"}})
 
     try:
-        normalize_summary_graph(WorkflowGraph.model_validate(payload), "claude")
+        normalize_summary_graph(WorkflowGraph.model_validate(payload), "dsh")
     except ValidationError as exc:
         assert "普通输出节点" in str(exc)
     else:
@@ -70,18 +70,18 @@ def test_normalize_summary_graph_rejects_extra_ordinary_output_with_system_pair(
 
 def test_normalize_summary_graph_avoids_generated_id_collisions():
     graph = WorkflowGraph.model_validate({
-        "nodes": [{"id": "markdown-output", "type": "agent", "name": "User", "position": {"x": 0, "y": 0}, "config": {"prompt": "x", "backend_key": "claude"}}],
+        "nodes": [{"id": "markdown-output", "type": "agent", "name": "User", "position": {"x": 0, "y": 0}, "config": {"prompt": "x", "backend_key": "dsh"}}],
         "edges": [],
     })
 
-    normalized = normalize_summary_graph(graph, "claude")
+    normalized = normalize_summary_graph(graph, "dsh")
 
     assert len({node.id for node in normalized.nodes}) == len(normalized.nodes)
     assert [node.config.system_role for node in normalized.nodes[-2:]] == ["summary_markdown", "summary_html"]
 
 
 def test_summary_validation_uses_markers_without_rejecting_ordinary_output_nodes():
-    default = default_workflow_graph(WorkflowType.summary, "claude").model_dump(mode="json")
+    default = default_workflow_graph(WorkflowType.summary, "dsh").model_dump(mode="json")
     default["nodes"].insert(
         0,
         {
@@ -94,7 +94,7 @@ def test_summary_validation_uses_markers_without_rejecting_ordinary_output_nodes
                 "title": "Ordinary",
                 "path": "ordinary.md",
                 "prompt": "ordinary",
-                "backend_key": "claude",
+                "backend_key": "dsh",
             },
         },
     )
@@ -129,8 +129,8 @@ def test_summary_output_pair_requires_one_unconditional_direct_edge():
 def test_validate_graph_rejects_cycle():
     graph = WorkflowGraph.model_validate({
         "nodes": [
-            {"id": "a", "type": "agent", "name": "A", "position": {"x": 0, "y": 0}, "config": {"prompt": "a", "backend_key": "claude"}},
-            {"id": "b", "type": "agent", "name": "B", "position": {"x": 1, "y": 0}, "config": {"prompt": "b", "backend_key": "claude"}},
+            {"id": "a", "type": "agent", "name": "A", "position": {"x": 0, "y": 0}, "config": {"prompt": "a", "backend_key": "dsh"}},
+            {"id": "b", "type": "agent", "name": "B", "position": {"x": 1, "y": 0}, "config": {"prompt": "b", "backend_key": "dsh"}},
         ], "edges": [{"id": "ab", "source": "a", "target": "b"}, {"id": "ba", "source": "b", "target": "a"}],
     })
     try:
@@ -154,7 +154,7 @@ def test_summary_constraints_apply_when_type_originates_as_string():
 def test_get_task_must_be_the_only_root_node():
     graph = WorkflowGraph.model_validate({"nodes": [
         {"id": "task", "type": "get_task", "name": "Task", "position": {"x": 0, "y": 0}},
-        {"id": "other", "type": "agent", "name": "Other", "position": {"x": 1, "y": 0}, "config": {"prompt": "x", "backend_key": "claude"}},
+        {"id": "other", "type": "agent", "name": "Other", "position": {"x": 1, "y": 0}, "config": {"prompt": "x", "backend_key": "dsh"}},
     ]})
     try:
         validate_graph(graph, WorkflowType.operation)
@@ -166,7 +166,7 @@ def test_get_task_must_be_the_only_root_node():
 
 def test_edge_condition_cannot_read_parallel_node_output():
     graph = WorkflowGraph.model_validate({"nodes": [
-        {"id": item, "type": "agent", "name": item, "position": {"x": 0, "y": 0}, "config": {"prompt": item, "backend_key": "claude"}}
+        {"id": item, "type": "agent", "name": item, "position": {"x": 0, "y": 0}, "config": {"prompt": item, "backend_key": "dsh"}}
         for item in ("start", "left", "right", "end")
     ], "edges": [
         {"id": "start-left", "source": "start", "target": "left"},

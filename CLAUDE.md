@@ -82,9 +82,9 @@ MCP 服务的配置响应仅返回 Header 名称和掩码。注册接口接受�
 
 MetaMCP `/mcp` 每个请求按 profile/workflow 上下文创建 request-scoped 工具集，底层 transport 使用 stateless 模式。不要缓存包含动态工具注册的 server 实例，避免跨请求上下文泄漏。
 
-`profile use` 写入的 Agent Bridge HTTP MCP server 必须携带 300 秒工具调用超时（`timeout: 300000`，单位为毫秒），避免 Claude Code 远程 MCP 的默认短请求超时截断长耗时知识库问答。
+Claude 执行适配和 SDK 已移除；新安装默认 DSH，遗留 Claude 配置只读隔离并返回迁移提示，不能启动新 run，也不静默切换后端。新配置保存严格拒绝 Claude。
 
-`profile use` 同时安装 `SessionEnd` 配置同步 Hook。Hook 对实际生成的 Agent Bridge MCP、托管 Hook 和 `CLAUDE.md` 说明块计算 hash，仅在 hash 变化时写入；用户自有配置不参与托管投影，也不使用额外的 schema/version 文件。`profile sync` 是同一同步逻辑的手动入口。
+`profile use` / `profile sync` 不再写入 Claude 接入配置；保留 `profile unuse` 清理旧 MCP、Hook 与说明块，保留用户配置和历史数据。受管 Agent 的 Profile 正文写入 `AGENTS.md`。
 
 `profile unuse` 交互列出当前项目和用户级已接入的 Profile，选择后只删除对应范围的 Agent Bridge MCP、托管 Hook 和说明块，保留用户自有配置；脚本调用使用 `--scope project|user --yes`。
 
@@ -108,7 +108,7 @@ MetaMCP `/mcp` 每个请求按 profile/workflow 上下文创建 request-scoped �
 
 旧 `codegraph_index_items` SQLite 文本索引已移除。启动迁移会删除这类可重建派生数据，并要求受影响仓库重新同步。仓库文件列表和文件内容直接读取 Git 镜像，不依赖 CodeGraph。
 
-Memory 与文档/代码知识平级，但由 Claude Code hooks 实时写入。claude-mem worker 是按需进程池；插件更新由独立多 job 的 `PluginUpdateScheduler` 管理。它与单 cron 的 `BaseCronScheduler` 语义不同，不要为了继承而继承。
+Memory 与文档/代码知识平级。旧 Claude Code Hook 接收接口保留兼容，不再安装新 Hook；claude-mem 替换由 #38 单独处理。claude-mem worker 是按需进程池；插件更新由独立多 job 的 `PluginUpdateScheduler` 管理。它与单 cron 的 `BaseCronScheduler` 语义不同，不要为了继承而继承。
 
 `RetrievalProbeService` 为弱模型提供 Profile 范围的轻量路由探测。来源通过
 `RetrievalProbeAdapter` 注册，领域服务只负责模型短句、并发 deadline、状态聚合和审计，
@@ -118,17 +118,16 @@ Memory 与文档/代码知识平级，但由 Claude Code hooks 实时写入。cl
 服务端使用系统配置的 OpenAI Chat 小模型提取 0–8 个短句，并按 Profile/session 结合最近 3 轮
 历史去重（最多缓存 12 轮、30 天滑动 TTL），仅检索 current 工作流产出物；
 抽取失败不得回退 Jieba 短词检索。服务端负责生成标准 `additionalContext` 输出并写入通用
-Hook 审计（审计保留原始 prompt）。`profile use` 会自动、幂等安装该 Hook，并保留用户已有 Hook；
+Hook 审计（审计保留原始 prompt）。不再通过 `profile use` 安装 Hook；已有兼容 Hook 保留接收能力。
 全量探测的 `UserPromptSubmit` Hook 必须保持同步（`async: false`），以便将
 `additionalContext` 注入当前轮，不能改为后台异步执行。
-`CLAUDE.md` 托管块只补充
-`<system-reminder>` 是系统补充信息的语义说明。
+旧 `CLAUDE.md` 托管块只由 `profile unuse` 清理，不再写入。
 
 ## Coding Agent
 
-`CodingAgent` / `CodingAgentRun` 是统一契约，Claude、Codex、OpenCode、Pi、DSH 在 `agent_runtime/adapters/` 实现。`AgentService` 负责工作目录、Profile/MCP 配置、运行记录和事件持久化。
+`CodingAgent` / `CodingAgentRun` 是统一契约，Codex、OpenCode、Pi、DSH 在 `agent_runtime/adapters/` 实现。`AgentService` 负责工作目录、Profile/MCP 配置、运行记录和事件持久化。
 
-思考力度按后端配置（`server.toml` `[agents.<slug>]` 的 `effort`，管理后台 Coding Agent 配置区可编辑），各实现声明 `supported_efforts` 并由 registry 落盘前统一校验：Claude 走 SDK `effort`（low/medium/high/xhigh/max）、Codex 走 `-c model_reasoning_effort`（minimal~xhigh）、Pi 走 `--thinking`（off~xhigh）、OpenCode 走 message payload 的 `variant`（取值由 provider 决定，不做枚举校验）、DSH 声明空集合（托管供应商路由不暴露 reasoning effort，配置即拒绝）。留空时完全不传参，保持各 CLI 默认行为。
+思考力度按后端配置（`server.toml` `[agents.<slug>]` 的 `effort`，管理后台 Coding Agent 配置区可编辑），各实现声明 `supported_efforts` 并由 registry 落盘前统一校验：Codex 走 `-c model_reasoning_effort`（minimal~xhigh）、Pi 走 `--thinking`（off~xhigh）、OpenCode 走 message payload 的 `variant`（取值由 provider 决定，不做枚举校验）、DSH 声明空集合（托管供应商路由不暴露 reasoning effort，配置即拒绝）。留空时完全不传参，保持各 CLI 默认行为。
 
 Agent 运行观测也走统一规范化事件流：工具事件包含 `input`/`output`（短内容内联，超过阈值落到运行目录 `payloads/` 并返回安全相对引用），工具结果包含 `started_at`、`finished_at` 和 `duration_ms`；运行准备、后端执行、收尾和总耗时以 `stage` 事件记录。SQLite 保存可查询的摘要和完整事件列表，JSONL 负责运行中的实时追加和原始消息留档。
 

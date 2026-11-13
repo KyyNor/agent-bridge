@@ -76,8 +76,8 @@ const actorContext = ref<AccessActorContext | null>(null)
 const profiles = ref<ProjectProfile[]>([])
 const scripts = ref<ManagedScript[]>([])
 const skills = ref<SkillPrompt[]>([])
-const defaultBackend = ref('codex')
-const agentBackends = ref<AgentBackendCatalog>({ default_backend: 'claude' })
+const defaultBackend = ref('dsh')
+const agentBackends = ref<AgentBackendCatalog>({ default_backend: 'dsh' })
 const selectedKey = ref('')
 const loading = ref(true)
 const workflowPage = ref(1)
@@ -649,7 +649,8 @@ async function loadEditorResources() {
   scripts.value = scriptList
   skills.value = skillList
   agentBackends.value = backendCatalog
-  defaultBackend.value = backendCatalog.default_backend || defaultBackend.value
+  defaultBackend.value = deriveWorkflowBackendKeys(backendCatalog).includes(backendCatalog.default_backend)
+    ? backendCatalog.default_backend : ''
   editorResourcesLoaded = true
 }
 
@@ -1906,6 +1907,7 @@ async function confirmClearWorkflow() {
     </section>
 
     <section v-if="isWorkflowFormPage && !routeError" class="space-y-5">
+      <p v-for="warning in agentBackends.migration_warnings" :key="warning" class="text-sm text-destructive">{{ warning }}</p>
       <!-- Header：对齐 detail 页 text-xl font-semibold tracking-tight -->
       <EditorActionBar class="-mx-7 px-7">
         <div class="flex flex-wrap items-center justify-between gap-3">

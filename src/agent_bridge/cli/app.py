@@ -11,7 +11,6 @@ import httpx
 import typer
 
 from agent_bridge.client import AgentBridgeClient
-from agent_bridge.core.defaults import DEFAULT_CLAUDE_CODE_MCP_TOOL_TIMEOUT_MS
 from agent_bridge.server_runtime.server_process import server_status, start_server, stop_server
 
 app = typer.Typer(
@@ -68,12 +67,6 @@ def _claude_config_path(scope: str) -> Path:
     raise ValueError("scope 必须是 project 或 user")
 
 
-def _server_url_from_mcp_url(mcp_url: str) -> str:
-    if mcp_url.endswith("/mcp"):
-        return mcp_url[:-4].rstrip("/")
-    return mcp_url.rstrip("/")
-
-
 def _load_json_file(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
@@ -86,64 +79,8 @@ def _load_json_file(path: Path) -> dict[str, Any]:
     return loaded
 
 
-def _with_metamcp_config(
-    existing: dict[str, Any], url: str, profile: str, linux_user: str | None = None
-) -> dict[str, Any]:
-    config = dict(existing)
-    servers = config.get("mcpServers")
-    if not isinstance(servers, dict):
-        servers = {}
-    else:
-        servers = dict(servers)
-    servers.pop("agent-capability-hub", None)
-    servers["agent-bridge"] = {
-        "type": "http",
-        "url": url,
-        "headers": {
-            "X-Agent-Bridge-MetaMCP-Profile": profile,
-            "X-Agent-Bridge-User": linux_user or getpass.getuser(),
-        },
-        "timeout": DEFAULT_CLAUDE_CODE_MCP_TOOL_TIMEOUT_MS,
-    }
-    config["mcpServers"] = servers
-    return config
-
-
 def _stdin_is_interactive() -> bool:
     return sys.stdin.isatty()
-
-
-def _resolve_metamcp_scope(scope: str | None) -> str:
-    if scope:
-        if scope not in {"project", "user"}:
-            raise ValueError("scope 必须是 project 或 user")
-        return scope
-    if not _stdin_is_interactive():
-        raise ValueError("非交互模式下必须指定 scope")
-    import questionary
-    selected = questionary.select(
-        "选择配置范围",
-        choices=[
-            {"name": "project  当前项目 (.mcp.json)", "value": "project"},
-            {"name": "user  全局 (~/.mcp.json)", "value": "user"},
-        ],
-    ).ask()
-    if selected is None:
-        raise typer.Abort()
-    return selected
-
-
-def _confirm_overwrite(existing: dict[str, Any], yes: bool) -> None:
-    servers = existing.get("mcpServers")
-    if not isinstance(servers, dict):
-        return
-    existing_names = [name for name in ("agent-bridge", "agent-capability-hub") if name in servers]
-    if not existing_names:
-        return
-    if yes:
-        return
-    if not typer.confirm(f"{' / '.join(existing_names)} 已存在，是否覆盖/迁移？", default=False):
-        raise RuntimeError("已取消")
 
 
 @app.callback()

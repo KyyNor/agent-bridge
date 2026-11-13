@@ -4,7 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from claude_agent_sdk import ResultMessage
+from types import SimpleNamespace
 
 from agent_bridge.agent_runtime.service import _extract_json, _extract_result
 from agent_bridge.agent_runtime.support import build_agent_bridge_server_config, write_run_mcp_json
@@ -17,7 +17,7 @@ class _FakeOptions:
         self.kwargs = kwargs
 
 
-def _result(**overrides) -> ResultMessage:
+def _result(**overrides) -> SimpleNamespace:
     base = dict(
         subtype="success",
         duration_ms=1,
@@ -27,17 +27,57 @@ def _result(**overrides) -> ResultMessage:
         session_id="session_1",
         result="done",
         total_cost_usd=0.001,
+        structured_output=None,
     )
     base.update(overrides)
-    return ResultMessage(**base)
+    return SimpleNamespace(**base)
 
 
 def _patch_sdk(monkeypatch, fake_query, env=None) -> None:
-    from agent_bridge.agent_runtime.adapters import claude as claude_agent
+    """使用统一 CodingAgent 契约替身，验证 service 的实际编排与持久化。"""
+    from agent_bridge.agent_runtime.registry import CodingAgentRegistry
+    from agent_bridge.agent_runtime.types import CodingAgentCapabilities, CodingAgentFinal, CodingAgentUpdate
 
-    monkeypatch.setattr(claude_agent, "ClaudeAgentOptions", _FakeOptions)
-    monkeypatch.setattr(claude_agent, "claude_query", fake_query)
-    monkeypatch.setattr(claude_agent, "claude_settings_env", lambda: env or {})
+    class FakeRun:
+        def __init__(self, request):
+            self.request = request
+
+        async def updates(self):
+            request = self.request
+            options = _FakeOptions(**vars(request), output_format={"type": "json_schema", "schema": request.output_schema})
+            async for message in fake_query(prompt=request.prompt, options=options):
+                if request.on_native_message:
+                    request.on_native_message(message)
+                yield CodingAgentUpdate(
+                    raw=vars(message),
+                    events=[{"kind": "result", "result": message.result}],
+                    final=CodingAgentFinal(
+                        is_error=message.is_error, result=message.result,
+                        structured_output=getattr(message, "structured_output", None),
+                        subtype=message.subtype, session_id=message.session_id,
+                        cost_usd=message.total_cost_usd, num_turns=message.num_turns,
+                    ),
+                )
+
+        async def abort(self):
+            pass
+
+    class FakeAgent:
+        backend_key = "dsh"
+        display_name = "Test"
+        source = "test_agent"
+        supported_efforts = frozenset()
+        capabilities = CodingAgentCapabilities(supports_mcp=True)
+
+        def start(self, request):
+            return FakeRun(request)
+
+    original = CodingAgentRegistry.get
+    def get(registry, backend_key=None):
+        if (backend_key or registry.default_backend) == "dsh":
+            return FakeAgent()
+        return original(registry, backend_key)
+    monkeypatch.setattr(CodingAgentRegistry, "get", get)
 
 
 # --- agent_support: MCP config ---
@@ -92,17 +132,16 @@ def test_install_profile_to_cwd_writes_doc_and_pointer(tmp_path: Path) -> None:
     doc = install_profile_to_cwd(tmp_path, "safe-profile", "# guidance")
     assert doc.is_file()
     assert doc.read_text(encoding="utf-8") == "# guidance"
-    claude_md = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
-    assert f"@{doc.resolve()}" in claude_md
-    assert "`<system-reminder>` 是补充的系统信息。" in claude_md
-    assert POINTER_START in claude_md
+    agents_md = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
+    assert "# guidance" in agents_md
+    assert POINTER_START in agents_md
 
 
 def test_install_profile_to_cwd_is_idempotent(tmp_path: Path) -> None:
     install_profile_to_cwd(tmp_path, "p", "v1")
     install_profile_to_cwd(tmp_path, "p", "v2")
-    claude_md = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
-    assert claude_md.count(POINTER_START) == 1
+    agents_md = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
+    assert agents_md.count(POINTER_START) == 1
     assert (tmp_path / ".agent-bridge" / "profiles" / "p.md").read_text(encoding="utf-8") == "v2"
 
 
@@ -129,7 +168,7 @@ def test_extract_json_returns_none_for_non_json() -> None:
     assert _extract_json("") is None
 
 
-# --- AgentService.run (monkeypatched claude_query; async via asyncio.run) ---
+# --- AgentService.run (Coding Agent fake; async via asyncio.run) ---
 
 
 def test_run_success_text_result(wm_paths, monkeypatch) -> None:
@@ -326,7 +365,7 @@ def test_run_success_structured_result(wm_paths, monkeypatch) -> None:
     assert res.result == {"answer": 42}
 
 
-def test_run_normalizes_draft_2020_defs_for_claude(wm_paths, monkeypatch) -> None:
+def test_run_normalizes_draft_2020_defs_for_agents(wm_paths, monkeypatch) -> None:
     schema = {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -569,7 +608,7 @@ def test_run_copies_files_into_work_dir(wm_paths, monkeypatch, tmp_path) -> None
     assert (Path(res.run_dir) / "data.txt").read_text(encoding="utf-8") == "payload"
 
 
-def test_run_installs_profile_claude_md_and_mcp_config(wm_paths, monkeypatch) -> None:
+def test_run_installs_profile_agents_md_and_mcp_config(wm_paths, monkeypatch) -> None:
     service_bundle = AgentBridgeService.create(wm_paths, {"root"})
     service_bundle.governance.upsert_profile(
         actor="root", profile_key="safe", name="Safe", description="", status="active"
@@ -586,8 +625,8 @@ def test_run_installs_profile_claude_md_and_mcp_config(wm_paths, monkeypatch) ->
 
     assert res.ok is True
     run_dir = Path(res.run_dir)
-    claude_md = (run_dir / "CLAUDE.md").read_text(encoding="utf-8")
-    assert "@" in claude_md and "profile-pointer" in claude_md
+    agents_md = (run_dir / "AGENTS.md").read_text(encoding="utf-8")
+    assert "Agent Bridge Profile" in agents_md and "profile-pointer" in agents_md
     assert (run_dir / ".agent-bridge" / "profiles" / "safe.md").is_file()
     mcp = json.loads((run_dir / ".mcp.json").read_text(encoding="utf-8"))
     assert mcp["mcpServers"]["agent-bridge"]["headers"]["X-Agent-Bridge-MetaMCP-Profile"] == "safe"
@@ -663,7 +702,7 @@ def test_run_opencode_writes_native_mcp_config(wm_paths) -> None:
     assert captured["config"]["mcp"]["agent-bridge"]["headers"]["X-Agent-Bridge-MetaMCP-Profile"] == "safe"
 
 
-def test_run_no_profile_skips_mcp_and_claude_md(wm_paths, monkeypatch) -> None:
+def test_run_no_profile_skips_mcp_and_agents_md(wm_paths, monkeypatch) -> None:
     captured = {}
 
     async def fake_query(*, prompt, options):
@@ -681,7 +720,7 @@ def test_run_no_profile_skips_mcp_and_claude_md(wm_paths, monkeypatch) -> None:
     assert res.ok is True
     assert captured["setting_sources"] == []
     assert captured["mcp_config"] == {"mcpServers": {}}
-    assert not (Path(res.run_dir) / "CLAUDE.md").exists()
+    assert not (Path(res.run_dir) / "AGENTS.md").exists()
 
 
 def test_run_workflow_headers_passed_to_mcp_config(wm_paths, monkeypatch) -> None:
@@ -752,13 +791,13 @@ def test_run_logs_success_to_agent_runs(wm_paths, monkeypatch) -> None:
     assert len(rows) == 1
     assert rows[0]["ok"] is True
     assert rows[0]["agent_name"] == "greeter"
-    assert rows[0]["backend_key"] == "claude"
+    assert rows[0]["backend_key"] == "dsh"
     # list view drops heavy columns
     assert "prompt" not in rows[0]
     assert "events" not in rows[0]
 
     full = bundle.store.agent_runs.get(rows[0]["run_key"])
-    assert full["backend_key"] == "claude"
+    assert full["backend_key"] == "dsh"
     assert full["prompt"] == "hi there"
     assert full["result"] == "hello"
     assert full["ok"] is True

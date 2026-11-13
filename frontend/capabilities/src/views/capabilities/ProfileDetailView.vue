@@ -355,7 +355,7 @@ function applyProfileDoc(doc: ProfileDocRender) {
 }
 
 function getProfileCommand(profile: ProjectProfile) {
-  return `agent-bridge profile use ${profile.profile_key}`
+  return `agent-bridge profile show ${profile.profile_key}`
 }
 
 async function copyCommand(profile: ProjectProfile) {
@@ -579,7 +579,7 @@ async function refreshProfileDoc(raiseError = false) {
       <div v-else class="space-y-5 pb-4">
         <!-- Copy Command -->
         <div data-tour="profile-command">
-          <div class="mb-2 text-sm font-medium">接入命令</div>
+          <div class="mb-2 text-sm font-medium">查看命令</div>
           <div class="flex min-w-0 items-center gap-2 rounded-lg bg-secondary px-4 py-2.5">
             <code class="min-w-0 flex-1 break-all font-mono text-sm text-foreground">{{ configProfile ? getProfileCommand(configProfile) : '' }}</code>
             <Button variant="ghost" size="sm" @click="configProfile && copyCommand(configProfile)">
@@ -614,7 +614,7 @@ async function refreshProfileDoc(raiseError = false) {
             </option>
           </select>
           <p class="break-all text-xs text-muted-foreground">
-            运行 agent-bridge profile use {{ configProfile?.profile_key }} --scope project --url http://127.0.0.1:8765/mcp 安装或刷新 Claude Code hooks。
+            在 Agent 工作台选择此能力平面并启动 DSH 或 Pi。旧客户端配置可用 agent-bridge profile unuse 卸载。
           </p>
         </section>
 

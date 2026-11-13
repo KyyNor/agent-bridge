@@ -116,6 +116,7 @@ def _available_agent_backends_payload(registry: Any) -> list[dict[str, Any]]:
 def _agent_runtime_config_payload(config: AgentRuntimeConfig, registry: Any = None) -> dict[str, Any]:
     payload = {
         "default_backend": config.default_backend,
+        "migration_warnings": list(config.migration_warnings),
         "backends": [
             {
                 "slug": backend.slug,
@@ -136,6 +137,7 @@ def _agent_backend_catalog_payload(config: AgentRuntimeConfig, registry: Any) ->
     """工作流节点选择后端所需的只读目录（默认后端 + 已注册后端清单）。"""
     return {
         "default_backend": config.default_backend,
+        "migration_warnings": list(config.migration_warnings),
         "available_backends": _available_agent_backends_payload(registry),
     }
 
@@ -1544,7 +1546,7 @@ class AgentBridgeService:
             if isinstance(item, dict)
         ]
         config = AgentRuntimeConfig(
-            default_backend=str(payload.get("default_backend") or "claude"),
+            default_backend=str(payload.get("default_backend", "dsh")),
             backends=tuple(backends),
         )
         try:

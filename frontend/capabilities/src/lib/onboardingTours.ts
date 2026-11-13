@@ -89,7 +89,7 @@ export const toolDebugFirstUseTour: ProductTourDefinition = {
 export const profileConfigFirstUseTour: ProductTourDefinition = {
   key: 'profile-config-first-use', version: 1, name: '能力平面配置新手指南',
   steps: [
-    { element: '[data-tour="profile-command"]', popover: { title: '先完成接入', description: '复制此命令并在目标项目执行，将该能力平面安装到 Claude Code。', side: 'bottom', align: 'start' } },
+    { element: '[data-tour="profile-command"]', popover: { title: '先完成接入', description: '在 Agent 工作台选择此能力平面，接入 DSH 或 Pi。', side: 'bottom', align: 'start' } },
     { element: '[data-tour="profile-services"]', popover: { title: '授权服务', description: '仅选择这个能力平面可发现和调用的服务；工具调试也会遵循这里的授权。', side: 'bottom', align: 'start' } },
     { element: '[data-tour="profile-resources"]', popover: { title: '授权资料范围', description: '按需授予文档知识、代码仓库和业务台账，避免把不相关资源带入上下文。', side: 'bottom', align: 'start' } },
     { element: '[data-tour="profile-save"]', popover: { title: '确认保存', description: '所有修改在这里一次保存；高级 Pin 和提示词配置可按需展开。', side: 'top', align: 'end' } },

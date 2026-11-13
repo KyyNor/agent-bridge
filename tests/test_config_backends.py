@@ -150,7 +150,7 @@ def test_load_mcp_config_reads_values(tmp_path):
     assert config.transport == "sse"
 
 
-def test_load_agent_runtime_config_defaults_to_claude(tmp_path: Path):
+def test_load_agent_runtime_config_defaults_to_dsh(tmp_path: Path):
     paths = AgentBridgePaths.from_root(tmp_path)
     paths.config_dir.mkdir(parents=True, exist_ok=True)
 
@@ -188,8 +188,8 @@ def test_load_agent_runtime_config_rejects_slug_type_mismatch(tmp_path: Path):
         paths.config_dir,
         (
             '[agents]\n'
-            'default = "claude"\n\n'
-            '[agents.claude]\n'
+            'default = "codex"\n\n'
+            '[agents.pi]\n'
             'type = "codex"\n'
         ),
     )
@@ -222,7 +222,7 @@ def test_save_agent_runtime_config_replaces_only_agents_section(tmp_path: Path):
         (
             'host = "127.0.0.1"\nport = 8765\nadmins = ["root"]\n\n'
             '[agents]\ndefault = "old"\n\n'
-            '[agents.old]\ntype = "claude"\n\n'
+            '[agents.old]\ntype = "codex"\n\n'
             '[logging]\nlevel = "DEBUG"\n'
         ),
     )
@@ -268,7 +268,7 @@ def test_save_agent_runtime_config_rejects_slug_type_mismatch(tmp_path: Path):
         save_agent_runtime_config(
             paths,
             AgentRuntimeConfig(
-                backends=(AgentBackendConfig(slug="claude", agent_type="codex"),),
+                backends=(AgentBackendConfig(slug="pi", agent_type="codex"),),
             ),
         )
 
@@ -307,16 +307,16 @@ def test_load_agent_runtime_config_reads_effort(tmp_path: Path):
         paths.config_dir,
         (
             '[agents]\n'
-            'default = "claude"\n\n'
-            '[agents.claude]\n'
-            'type = "claude"\n'
+            'default = "codex"\n\n'
+            '[agents.codex]\n'
+            'type = "codex"\n'
             'effort = "xhigh"\n'
         ),
     )
 
     config = load_agent_runtime_config(paths)
 
-    assert config.backends[0].slug == "claude"
+    assert config.backends[0].slug == "codex"
     assert config.backends[0].effort == "xhigh"
 
 
@@ -326,8 +326,8 @@ def test_agent_runtime_config_roundtrips_effort(tmp_path: Path):
     save_agent_runtime_config(
         paths,
         AgentRuntimeConfig(
-            default_backend="claude",
-            backends=(AgentBackendConfig(slug="claude", agent_type="claude", effort="medium"),),
+            default_backend="codex",
+            backends=(AgentBackendConfig(slug="codex", agent_type="codex", effort="medium"),),
         ),
     )
 
@@ -343,7 +343,7 @@ def test_agent_runtime_config_rejects_invalid_effort_characters(tmp_path: Path):
         save_agent_runtime_config(
             paths,
             AgentRuntimeConfig(
-                default_backend="claude",
-                backends=(AgentBackendConfig(slug="claude", agent_type="claude", effort="high;rm"),),
+                default_backend="codex",
+                backends=(AgentBackendConfig(slug="codex", agent_type="codex", effort="high;rm"),),
             ),
         )

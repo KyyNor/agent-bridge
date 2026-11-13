@@ -149,7 +149,7 @@ class AgentBackendConfig:
     agent_type: str
     model: str | None = None
     command: str | None = None
-    # 思考力度按后端透传给具体 Coding Agent（claude --effort / opencode variant /
+    # 思考力度按后端透传给具体 Coding Agent（opencode variant /
     # codex model_reasoning_effort / pi --thinking）；留空表示完全使用各 CLI 默认。
     # dsh 的托管供应商路由当前不暴露 reasoning effort，配置该字段会被拒绝。
     effort: str | None = None
@@ -157,8 +157,10 @@ class AgentBackendConfig:
 
 @dataclass(frozen=True)
 class AgentRuntimeConfig:
-    default_backend: str = "claude"
+    default_backend: str = "dsh"
     backends: tuple[AgentBackendConfig, ...] = ()
+    migration_warnings: tuple[str, ...] = ()
+    retired_backends: tuple[str, ...] = ()
 
 
 def ensure_directories(paths: AgentBridgePaths) -> None:
@@ -335,8 +337,7 @@ def load_backend_configs(paths: AgentBridgePaths) -> list[BackendConfig]:
 def load_agent_runtime_config(paths: AgentBridgePaths) -> AgentRuntimeConfig:
     """读取通用 Coding Agent 运行时配置。
 
-    ``[agents]`` 只控制通用 AgentService 运行。当前工作流等仅支持 Claude
-    的运行时仍可固定使用 ``backend_key="claude"``。
+    遗留 Claude 配置只在读取时隔离并报告迁移提示，不改写原文件或默认选择。
     """
     if not paths.server_config_path.exists():
         return AgentRuntimeConfig()
@@ -346,7 +347,7 @@ def load_agent_runtime_config(paths: AgentBridgePaths) -> AgentRuntimeConfig:
         return AgentRuntimeConfig()
     if not isinstance(agents_raw, dict):
         raise ValueError("[agents] 必须是 TOML 表")
-    default_backend = str(agents_raw.get("default", "claude"))
+    default_backend = str(agents_raw.get("default", "dsh"))
     configs: list[AgentBackendConfig] = []
     for slug, section in agents_raw.items():
         if slug == "default":
@@ -365,12 +366,14 @@ def load_agent_runtime_config(paths: AgentBridgePaths) -> AgentRuntimeConfig:
             )
         )
     return normalize_agent_runtime_config(
-        AgentRuntimeConfig(default_backend=default_backend, backends=tuple(configs))
+        AgentRuntimeConfig(default_backend=default_backend, backends=tuple(configs)),
+        allow_retired=True,
     )
 
 
 _AGENT_BACKEND_SLUG_RE = re.compile(r"^[A-Za-z0-9_-]+$")
-_SUPPORTED_AGENT_TYPES = {"claude", "codex", "opencode", "pi", "dsh"}
+_SUPPORTED_AGENT_TYPES = {"codex", "opencode", "pi", "dsh"}
+RETIRED_AGENT_MESSAGE = "Claude 后端已停用，请明确迁移到 DSH、Pi、Codex 或 OpenCode 后再运行"
 
 
 def save_agent_runtime_config(paths: AgentBridgePaths, config: AgentRuntimeConfig) -> AgentRuntimeConfig:
@@ -388,9 +391,22 @@ def save_agent_runtime_config(paths: AgentBridgePaths, config: AgentRuntimeConfi
     return normalized
 
 
-def normalize_agent_runtime_config(config: AgentRuntimeConfig) -> AgentRuntimeConfig:
+def normalize_agent_runtime_config(
+    config: AgentRuntimeConfig, *, allow_retired: bool = False
+) -> AgentRuntimeConfig:
     """归一化 Agent 后端配置并执行所有入口共享的契约校验。"""
-    default_backend = str(config.default_backend or "claude").strip() or "claude"
+    default_backend = str(config.default_backend).strip()
+    if not default_backend:
+        raise ValueError("请选择支持的默认 Agent 后端")
+    warnings = list(config.migration_warnings) if allow_retired else []
+    retired = set(config.retired_backends) if allow_retired else set()
+    if not allow_retired and default_backend in config.retired_backends:
+        raise ValueError(RETIRED_AGENT_MESSAGE)
+    if default_backend == "claude":
+        if not allow_retired:
+            raise ValueError(RETIRED_AGENT_MESSAGE)
+        if RETIRED_AGENT_MESSAGE not in warnings:
+            warnings.append(RETIRED_AGENT_MESSAGE)
     if not _AGENT_BACKEND_SLUG_RE.fullmatch(default_backend):
         raise ValueError(f"默认 Agent 后端名称不合法：{default_backend!r}")
     backends: list[AgentBackendConfig] = []
@@ -400,6 +416,14 @@ def normalize_agent_runtime_config(config: AgentRuntimeConfig) -> AgentRuntimeCo
         agent_type = str(backend.agent_type or "").strip()
         if not _AGENT_BACKEND_SLUG_RE.fullmatch(slug):
             raise ValueError(f"Agent 后端 slug 不合法：{slug!r}")
+        if slug == "claude" or agent_type == "claude":
+            if not allow_retired:
+                raise ValueError(RETIRED_AGENT_MESSAGE)
+            retired.add(slug)
+            message = f"旧配置 agents.{slug} 已隔离：{RETIRED_AGENT_MESSAGE}"
+            if message not in warnings:
+                warnings.append(message)
+            continue
         if agent_type not in _SUPPORTED_AGENT_TYPES:
             raise ValueError(f"不支持的 Agent 后端 type：{agent_type!r}")
         if slug != agent_type:
@@ -424,9 +448,12 @@ def normalize_agent_runtime_config(config: AgentRuntimeConfig) -> AgentRuntimeCo
                 effort=effort,
             )
         )
-    if default_backend != "claude" and default_backend not in seen:
+    if default_backend not in {"dsh", "claude", *retired} and default_backend not in seen:
         raise ValueError(f"默认 Agent 后端 '{default_backend}' 尚未配置")
-    return AgentRuntimeConfig(default_backend=default_backend, backends=tuple(backends))
+    return AgentRuntimeConfig(
+        default_backend=default_backend, backends=tuple(backends), migration_warnings=tuple(warnings),
+        retired_backends=tuple(sorted(retired)),
+    )
 
 
 def _strip_agents_toml_section(text: str) -> str:

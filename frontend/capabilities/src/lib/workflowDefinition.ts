@@ -127,7 +127,7 @@ export function deriveWorkflowBackendKeys(catalog: AgentBackendCatalog): string[
   const registered = catalog.available_backends?.map(item => item.slug) || []
   const configured = catalog.backends?.map(item => item.slug) || []
   const candidates = registered.length ? registered : [catalog.default_backend, ...configured]
-  return candidates.filter((item, index, all) => Boolean(item) && all.indexOf(item) === index)
+  return candidates.filter((item, index, all) => Boolean(item) && item !== 'claude' && all.indexOf(item) === index)
 }
 
 export function toVueFlowElements(graph: WorkflowGraph): { nodes: Node[]; edges: Edge[] } {

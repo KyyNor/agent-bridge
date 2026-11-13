@@ -267,11 +267,12 @@ class WorkflowValidator:
                             )
                         )
                 backend = None
+                backend_error = f"未知后端: {config.backend_key}"
                 try:
                     if self.agent_service is not None:
                         backend = self.agent_service.coding_agents.get(config.backend_key)
-                except Exception:
-                    backend = None
+                except ValueError as exc:
+                    backend_error = str(exc)
                 if backend is None:
                     issues.append(
                         WorkflowValidationIssue(
@@ -279,7 +280,7 @@ class WorkflowValidator:
                             id=node.id,
                             field="config.backend_key",
                             code="unknown_backend",
-                            message=f"未知后端: {config.backend_key}",
+                            message=backend_error,
                         )
                     )
                 elif config.mcp_enabled and not bool(

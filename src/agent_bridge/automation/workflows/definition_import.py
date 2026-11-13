@@ -197,7 +197,7 @@ class DefinitionImportService:
                     for node in source_graph.nodes
                     if node.type in {"agent", "output"} and node.config.backend_key
                 ),
-                "claude",
+                self.validator.agent_service.coding_agents.default_backend,
             )
             imported["definition"] = normalize_summary_graph(source_graph, default_backend).model_dump(mode="json")
         graph = self.validator.require_valid(actor=actor, workflow=imported)

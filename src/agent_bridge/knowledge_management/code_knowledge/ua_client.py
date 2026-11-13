@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from agent_bridge.agent_runtime.events import message_log_record
+from agent_bridge.agent_runtime.events import json_safe
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,8 @@ UA_DIR_NEW = ".ua"
 UA_DIR_LEGACY = ".understand-anything"
 GRAPH_FILE = "knowledge-graph.json"
 META_FILE = "meta.json"
-SKILL_DIR_NAME = ".claude/skills"
+SKILL_DIR_NAME = ".agents/skills"
+LEGACY_SKILL_DIR_NAME = ".claude/skills"  # 只读兼容旧技能资源，不安装 Claude 接入
 UA_SKILLS = [
     "understand",
     "understand-chat",
@@ -36,7 +37,7 @@ UA_SKILLS = [
 ]
 
 ANALYZE_PROMPT = """\
-Analyze this repository using the loaded `understand` skill: {project_dir}
+Analyze this repository using the `understand` skill: {project_dir}
 
 Requirements:
 - Generate knowledge-graph.json in the understand skill's default output directory
@@ -48,14 +49,15 @@ Requirements:
 
 UA_SYSTEM_PROMPT = """\
 You are running an Agent Bridge knowledge-graph analysis.
-The `understand` skill is already loaded — invoke it directly by that exact name (do not look for a skill named "understand-anything").
+Read the skill instructions at {skill_path} and follow them for this analysis.
+Resolve relative skill resources from the directory containing that file.
 Do not modify repository source code.
 """
 
 
 @dataclass
 class UAAvailability:
-    claude_installed: bool
+    agent_available: bool
     ua_skill_available: bool
     message: str | None = None
 
@@ -235,16 +237,28 @@ class UnderstandAnythingClient:
     def _ua_skills_src_dir(self) -> Path:
         return self._ua_repo_dir() / "understand-anything-plugin" / "skills"
 
+    @staticmethod
+    def _skill_path(project_dir: Path, skill: str) -> Path:
+        """优先公共技能目录，保留旧安装资源的读取能力。"""
+        for directory in (SKILL_DIR_NAME, LEGACY_SKILL_DIR_NAME):
+            path = project_dir / directory / skill
+            if path.exists():
+                return path
+        return project_dir / SKILL_DIR_NAME / skill
+
     def check_availability(self, *, project_dir: Path | None = None) -> UAAvailability:
-        """检测 claude 与 UA 技能是否就绪（按项目 ``.claude/skills/understand`` 是否存在判定）。"""
+        """检测默认 Coding Agent 与 UA 技能是否就绪（按项目 ``.agents/skills/understand`` 是否存在判定）。"""
+        try:
+            self._agent_service.coding_agents.get()
+        except (AttributeError, ValueError) as exc:
+            return UAAvailability(agent_available=False, ua_skill_available=False, message=str(exc))
         if project_dir:
-            skill_dir = project_dir / SKILL_DIR_NAME
-            understand_link = skill_dir / "understand"
+            understand_link = self._skill_path(project_dir, "understand")
             if understand_link.exists() or understand_link.is_symlink():
-                return UAAvailability(claude_installed=True, ua_skill_available=True)
+                return UAAvailability(agent_available=True, ua_skill_available=True)
 
         return UAAvailability(
-            claude_installed=True,
+            agent_available=True,
             ua_skill_available=False,
             message="Understand Anything 技能未安装，且未配置自动安装地址。请在「系统配置」中填写 UA Git URL。",
         )
@@ -253,18 +267,18 @@ class UnderstandAnythingClient:
         self, *, project_dir: Path, ua_git_url: str,
     ) -> UAAvailability:
         avail = self.check_availability(project_dir=project_dir)
-        if avail.ua_skill_available:
+        if avail.ua_skill_available or not avail.agent_available:
             return avail
         if not ua_git_url:
             return avail
         return UAAvailability(
-            claude_installed=True,
+            agent_available=True,
             ua_skill_available=False,
             message=None,
         )
 
     def ensure_skills(self, project_dir: Path, ua_git_url: str) -> str | None:
-        """克隆 UA 仓库并把各 skill 符号链接到项目 ``.claude/skills`` 下。
+        """克隆 UA 仓库并把各 skill 符号链接到项目 ``.agents/skills`` 下。
 
         已克隆则尝试 ``git pull --ff-only`` 更新（失败容忍，沿用旧版本）。
         成功返回 ``None``，失败返回中文错误串。
@@ -299,7 +313,7 @@ class UnderstandAnythingClient:
         if not skills_src.is_dir():
             return f"UA 仓库已 clone 但未找到 skills 目录: {skills_src}"
 
-        # Create .claude/skill/ and symlink each skill
+        # 将公共技能安装到 .agents/skills 下
         skill_dir = project_dir / SKILL_DIR_NAME
         skill_dir.mkdir(parents=True, exist_ok=True)
 
@@ -326,7 +340,7 @@ class UnderstandAnythingClient:
     ) -> UAAnalyzeResult:
         """驱动 Understand Anything 知识图谱分析。
 
-        流程：检测 claude + UA 技能可用性 → 必要时按 ua_git_url 自动克隆安装技能 →
+        流程：检测默认 Coding Agent + UA 技能可用性 → 必要时按 ua_git_url 自动克隆安装技能 →
         把整个 agent 循环委托给 ``AgentService.run`` → 读取产出的 knowledge-graph.json。
         返回的 ``UAAnalyzeResult`` 带节点/边数与耗时。
         """
@@ -335,10 +349,10 @@ class UnderstandAnythingClient:
 
         # Step 1: Check if skills are already available
         avail = self.check_availability(project_dir=project_dir)
-        if not avail.claude_installed:
+        if not avail.agent_available:
             logger.error(
                 "UA 解析错误 repo=%s 原因=%s",
-                repo_dir_name, avail.message or "claude 未安装",
+                repo_dir_name, avail.message or "默认 Coding Agent 不可用",
             )
             return UAAnalyzeResult(success=False, error=avail.message)
 
@@ -372,19 +386,19 @@ class UnderstandAnythingClient:
         output_lines: list[str] = []
 
         def on_message(message: Any) -> None:
-            output_lines.append(json.dumps(message_log_record(message), ensure_ascii=False))
+            output_lines.append(json.dumps(json_safe(message), ensure_ascii=False))
 
         res = asyncio.run(
             self._agent_service.run(
                 prompt=prompt,
                 agent_name="understand-anything",
                 cwd=project_dir,
-                system_prompt_append=UA_SYSTEM_PROMPT,
-                skills=["understand"],
+                system_prompt_append=UA_SYSTEM_PROMPT.format(
+                    skill_path=self._skill_path(project_dir, "understand") / "SKILL.md"
+                ),
                 setting_sources=["user", "project"],
                 on_message=on_message,
                 include_partial_messages=True,
-                backend_key="claude",
                 timeout=float(timeout),
             )
         )
@@ -625,8 +639,8 @@ class UnderstandAnythingClient:
         return {"success": True, "pid": proc.pid, "url": url}
 
     def _find_dashboard_dir(self, project_dir: Path) -> Path | None:
-        """Resolve dashboard dir from .claude/skills/understand-dashboard symlink."""
-        skill_link = project_dir / SKILL_DIR_NAME / "understand-dashboard"
+        """Resolve dashboard dir from .agents/skills/understand-dashboard symlink."""
+        skill_link = self._skill_path(project_dir, "understand-dashboard")
         logger.debug("查找 Dashboard 目录: 检查 %s", skill_link)
         if not skill_link.exists():
             logger.debug("查找 Dashboard 目录: %s 不存在 (is_symlink=%s)", skill_link, skill_link.is_symlink())

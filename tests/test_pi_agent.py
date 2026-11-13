@@ -405,4 +405,4 @@ def test_registry_can_create_pi_backend() -> None:
     assert agent.command == "/usr/local/bin/pi"
     assert agent.model == "glm-5.1"
     # Claude is always registered alongside configured backends.
-    assert registry.keys() == ["claude", "pi"]
+    assert registry.keys() == ["pi"]

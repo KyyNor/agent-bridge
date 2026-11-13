@@ -11,10 +11,7 @@ import typer
 from agent_bridge.capability_hub.profiles.docs import (
     POINTER_END,
     POINTER_START,
-    SYSTEM_REMINDER_GUIDANCE,
-    pointer_block,
     remove_agent_bridge_blocks,
-    replace_agent_bridge_block,
     stable_hash,
 )
 from agent_bridge.cli.profile_hooks import profile_hook_app
@@ -32,9 +29,6 @@ AGENT_BRIDGE_HOOK_MARKERS = (
     AGENT_BRIDGE_RETRIEVAL_HOOK_MARKER,
     AGENT_BRIDGE_PROFILE_SYNC_HOOK_MARKER,
 )
-RETRIEVAL_PROBE_TIMEOUT_SECONDS = 20
-RETRIEVAL_PROBE_COMMAND_TIMEOUT_SECONDS = 25
-PROFILE_SYNC_HOOK_TIMEOUT_SECONDS = 5
 
 
 @dataclass(frozen=True)
@@ -56,28 +50,6 @@ class _ProfileInstallation:
         scope_label = "当前项目" if self.scope == "project" else "用户级"
         return f"{scope_label} | {self.profile_label} | {'、'.join(self.components)}"
 
-CLAUDE_MEM_COMPATIBLE_HOOKS = {
-    "Setup": [
-        {"matcher": "*", "actions": [("version-check", 300)]},
-    ],
-    "SessionStart": [
-        {"matcher": "startup|resume|clear|compact", "actions": [("session-start", 60)]},
-    ],
-    "UserPromptSubmit": [
-        {"matcher": None, "actions": [("session-init", 60)]},
-    ],
-    "PostToolUse": [
-        {"matcher": "*", "actions": [("observation", 120)]},
-    ],
-    "PreToolUse": [
-        {"matcher": "Read", "actions": [("file-context", 60)]},
-    ],
-    "Stop": [
-        {"matcher": None, "actions": [("summarize", 120)]},
-    ],
-}
-
-
 def _echo_mapping(data: dict[str, Any], keys: tuple[str, ...]) -> None:
     parts = [f"{key}: {data[key]}" for key in keys if key in data]
     typer.echo(", ".join(parts) if parts else data)
@@ -89,86 +61,6 @@ def _claude_settings_path(scope: str) -> Path:
     if scope == "user":
         return Path.home() / ".claude" / "settings.json"
     raise ValueError("scope 必须是 project 或 user")
-
-
-def _agent_bridge_hook_command(
-    action: str,
-    *,
-    profile: str,
-    server_url: str,
-    scope: str,
-    event: str,
-    matcher: str | None,
-    timeout: int,
-) -> str:
-    parts = [
-        "agent-bridge",
-        "memory",
-        "hook",
-        "claude-code",
-        action,
-        "--profile",
-        profile,
-        "--server-url",
-        server_url,
-        "--scope",
-        scope,
-        "--event",
-        event,
-        "--timeout",
-        str(timeout),
-        "--agent-bridge-hook-id",
-        "agent-bridge-memory",
-    ]
-    if matcher is not None:
-        parts.extend(["--matcher", matcher])
-    return " ".join(shlex.quote(part) for part in parts)
-
-
-def _agent_bridge_retrieval_hook_command(
-    *,
-    profile: str,
-    server_url: str,
-    timeout: int,
-) -> str:
-    parts = [
-        "agent-bridge",
-        "profile",
-        "hook",
-        "claude-code",
-        "retrieval-probe",
-        "--profile",
-        profile,
-        "--server-url",
-        server_url,
-        "--timeout",
-        str(timeout),
-        "--agent-bridge-hook-id",
-        "agent-bridge-retrieval-probe",
-    ]
-    return " ".join(shlex.quote(part) for part in parts)
-
-
-def _agent_bridge_profile_sync_hook_command(
-    *,
-    profile: str,
-    url: str,
-    scope: str,
-) -> str:
-    parts = [
-        "agent-bridge",
-        "profile",
-        "sync",
-        profile,
-        "--url",
-        url,
-        "--scope",
-        scope,
-        "--quiet",
-        "--agent-bridge-hook-id",
-        "agent-bridge-profile-sync",
-    ]
-    return " ".join(shlex.quote(part) for part in parts)
 
 
 def _load_claude_settings(path: Path) -> dict[str, Any]:
@@ -217,90 +109,6 @@ def _strip_agent_bridge_hooks(settings: dict[str, Any]) -> dict[str, Any]:
         copied["hooks"] = cleaned
     else:
         copied.pop("hooks", None)
-    return copied
-
-
-def _install_profile_hooks(
-    settings: dict[str, Any],
-    *,
-    profile: str,
-    server_url: str,
-    scope: str,
-    mcp_url: str,
-) -> dict[str, Any]:
-    copied = _strip_agent_bridge_hooks(settings)
-    hooks = copied.get("hooks")
-    if not isinstance(hooks, dict):
-        hooks = {}
-    else:
-        hooks = dict(hooks)
-    for event, specs in CLAUDE_MEM_COMPATIBLE_HOOKS.items():
-        event_entries = list(hooks.get(event) or [])
-        for spec in specs:
-            matcher = spec["matcher"]
-            entry: dict[str, Any] = {
-                "hooks": [
-                    {
-                        "type": "command",
-                        "shell": "bash",
-                        "command": _agent_bridge_hook_command(
-                            action,
-                            profile=profile,
-                            server_url=server_url,
-                            scope=scope,
-                            event=event,
-                            matcher=matcher,
-                            timeout=timeout,
-                        ),
-                        "timeout": timeout,
-                    }
-                    for action, timeout in spec["actions"]
-                ]
-            }
-            if matcher is not None:
-                entry["matcher"] = matcher
-            event_entries.append(entry)
-        hooks[event] = event_entries
-    prompt_entries = list(hooks.get("UserPromptSubmit") or [])
-    prompt_entries.append(
-        {
-            "hooks": [
-                {
-                    "type": "command",
-                    "shell": "bash",
-                    "command": _agent_bridge_retrieval_hook_command(
-                        profile=profile,
-                        server_url=server_url,
-                        timeout=RETRIEVAL_PROBE_TIMEOUT_SECONDS,
-                    ),
-                    # 全量探测结果需要在本次 UserPromptSubmit 中作为上下文返回；
-                    # 后台 Hook 无法把 additionalContext 注入当前轮对话。
-                    "async": False,
-                    "timeout": RETRIEVAL_PROBE_COMMAND_TIMEOUT_SECONDS,
-                }
-            ]
-        }
-    )
-    hooks["UserPromptSubmit"] = prompt_entries
-    session_end_entries = list(hooks.get("SessionEnd") or [])
-    session_end_entries.append(
-        {
-            "hooks": [
-                {
-                    "type": "command",
-                    "shell": "bash",
-                    "command": _agent_bridge_profile_sync_hook_command(
-                        profile=profile,
-                        url=mcp_url,
-                        scope=scope,
-                    ),
-                    "timeout": PROFILE_SYNC_HOOK_TIMEOUT_SECONDS,
-                }
-            ]
-        }
-    )
-    hooks["SessionEnd"] = session_end_entries
-    copied["hooks"] = hooks
     return copied
 
 
@@ -358,18 +166,6 @@ def _managed_guidance_projection(content: str) -> list[str]:
         blocks.append(content[start:end].strip())
         cursor = end
     return blocks
-
-
-def _profile_sync_projection(
-    config: dict[str, Any],
-    settings: dict[str, Any],
-    guidance: str,
-) -> dict[str, Any]:
-    return {
-        "mcp": _managed_mcp_projection(config),
-        "hooks": _managed_hooks_projection(settings),
-        "guidance": _managed_guidance_projection(guidance),
-    }
 
 
 def _profile_scope_paths(scope: str) -> tuple[Path, Path, Path]:
@@ -554,56 +350,6 @@ def _select_profile_installation(
     )
 
 
-def _profile_sync(
-    *,
-    profile: str,
-    url: str,
-    scope: str,
-) -> list[Path]:
-    from agent_bridge.cli.app import _load_json_file
-
-    config_path, settings_path, claude_path = _profile_scope_paths(scope)
-    existing_config = _load_json_file(config_path)
-    existing_settings = _load_claude_settings(settings_path)
-    existing_guidance = claude_path.read_text(encoding="utf-8") if claude_path.exists() else ""
-
-    from agent_bridge.cli.app import _with_metamcp_config, _server_url_from_mcp_url
-
-    desired_config = _with_metamcp_config(existing_config, url, profile)
-    desired_settings = _install_profile_hooks(
-        existing_settings,
-        profile=profile,
-        server_url=_server_url_from_mcp_url(url),
-        scope=scope,
-        mcp_url=url,
-    )
-    desired_guidance = pointer_block(SYSTEM_REMINDER_GUIDANCE)
-    current_projection = _profile_sync_projection(existing_config, existing_settings, existing_guidance)
-    desired_projection = _profile_sync_projection(desired_config, desired_settings, desired_guidance)
-    changed: list[Path] = []
-
-    if stable_hash(current_projection["mcp"]) != stable_hash(desired_projection["mcp"]):
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(
-            json.dumps(desired_config, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        changed.append(config_path)
-
-    if stable_hash(current_projection["hooks"]) != stable_hash(desired_projection["hooks"]):
-        settings_path.parent.mkdir(parents=True, exist_ok=True)
-        settings_path.write_text(
-            json.dumps(desired_settings, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        changed.append(settings_path)
-
-    if stable_hash(current_projection["guidance"]) != stable_hash(desired_projection["guidance"]):
-        replace_agent_bridge_block(claude_path, desired_guidance)
-        changed.append(claude_path)
-    return changed
-
-
 @profile_app.command("create")
 def profile_create(
     profile_key: Annotated[str, typer.Argument(help="Profile 标识")],
@@ -668,54 +414,23 @@ def profile_use(
     scope: Annotated[str | None, typer.Option("--scope", help="配置范围: project 或 user")] = None,
     yes: Annotated[bool, typer.Option("--yes", help="覆盖已有配置")] = False,
 ) -> None:
-    """接入 Profile 到 .mcp.json (Claude Code 配置)"""
-    from agent_bridge.cli.app import (
-        _claude_config_path,
-        _confirm_overwrite,
-        _load_json_file,
-        _resolve_metamcp_scope,
-    )
-
-    try:
-        resolved_scope = _resolve_metamcp_scope(scope)
-        path = _claude_config_path(resolved_scope)
-        existing = _load_json_file(path)
-        _confirm_overwrite(existing, yes)
-        changed = _profile_sync(
-            profile=profile,
-            url=url,
-            scope=resolved_scope,
-        )
-    except (OSError, ValueError, RuntimeError) as exc:
-        typer.echo(f"配置错误: {exc}", err=True)
-        raise typer.Exit(1) from None
-    typer.echo(f"已写入: {path}")
-    for changed_path in changed:
-        if changed_path != path:
-            typer.echo(f"已写入: {changed_path}")
+    """旧 Claude Code 接入命令，已停用。"""
+    typer.echo("Claude Code 接入已停用。请在 Agent 工作台选择 DSH 或 Pi；旧配置可用 profile unuse 卸载。", err=True)
+    raise typer.Exit(1)
 
 
-@profile_app.command("sync")
+@profile_app.command("sync", hidden=True)
 def profile_sync(
-    profile: Annotated[str, typer.Argument(help="要同步的 Profile 标识")],
-    url: Annotated[str, typer.Option("--url", help="Agent Bridge MCP 地址")] = "http://127.0.0.1:8765/mcp",
-    scope: Annotated[str, typer.Option("--scope", help="配置范围: project 或 user")] = "project",
+    profile: Annotated[str, typer.Argument()],
+    url: Annotated[str, typer.Option("--url")] = "http://127.0.0.1:8765/mcp",
+    scope: Annotated[str, typer.Option("--scope")] = "project",
     quiet: Annotated[bool, typer.Option("--quiet", hidden=True)] = False,
     hook_id: Annotated[str, typer.Option("--agent-bridge-hook-id", hidden=True)] = "",
 ) -> None:
-    """按当前代码生成结果幂等同步 Profile 的 MCP、Hook 和说明配置。"""
-    del hook_id
-    try:
-        changed = _profile_sync(profile=profile, url=url, scope=scope)
-    except (OSError, ValueError, RuntimeError) as exc:
-        typer.echo(f"配置同步失败: {exc}", err=True)
-        raise typer.Exit(1) from None
-    if quiet:
-        return
-    if changed:
-        typer.echo(f"已同步 {len(changed)} 个配置文件")
-    else:
-        typer.echo("Profile 配置已是最新")
+    """旧 SessionEnd Hook 的兼容入口：不再写入配置。"""
+    if not quiet:
+        typer.echo("Claude Code 配置同步已停用，请用 profile unuse 卸载旧接入。", err=True)
+    raise typer.Exit(1)
 
 
 @profile_app.command("unuse")

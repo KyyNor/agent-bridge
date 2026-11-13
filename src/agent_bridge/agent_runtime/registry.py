@@ -1,14 +1,20 @@
 from __future__ import annotations
 
+import logging
+
 from agent_bridge.agent_runtime.adapters import (
-    ClaudeCodingAgent,
     CodexCodingAgent,
     DshCodingAgent,
     OpenCodeCodingAgent,
     PiCodingAgent,
 )
 from agent_bridge.agent_runtime.types import CodingAgent
-from agent_bridge.core.config import AgentBackendConfig, AgentRuntimeConfig, normalize_agent_runtime_config
+from agent_bridge.core.config import (
+    AgentBackendConfig, AgentRuntimeConfig, RETIRED_AGENT_MESSAGE, normalize_agent_runtime_config,
+)
+
+
+logger = logging.getLogger(__name__)
 
 
 class UnknownCodingAgentError(ValueError):
@@ -19,19 +25,25 @@ class CodingAgentRegistry:
     def __init__(
         self,
         *,
-        default_backend: str = "claude",
+        default_backend: str = "dsh",
         agents: list[CodingAgent] | None = None,
+        retired_backends: tuple[str, ...] = (),
     ) -> None:
         self.default_backend = default_backend
         self._agents: dict[str, CodingAgent] = {}
+        self.retired_backends = frozenset({"claude", *retired_backends})
         for agent in agents or []:
             self.register(agent)
 
     def register(self, agent: CodingAgent) -> None:
+        if agent.backend_key in self.retired_backends:
+            raise UnknownCodingAgentError(RETIRED_AGENT_MESSAGE)
         self._agents[agent.backend_key] = agent
 
     def get(self, backend_key: str | None = None) -> CodingAgent:
         key = backend_key or self.default_backend
+        if key in self.retired_backends:
+            raise UnknownCodingAgentError(RETIRED_AGENT_MESSAGE)
         try:
             return self._agents[key]
         except KeyError as exc:
@@ -69,21 +81,21 @@ def create_coding_agent_registry(
     *,
     dsh_runtime: object | None = None,
 ) -> CodingAgentRegistry:
-    runtime_config = normalize_agent_runtime_config(config or AgentRuntimeConfig())
-    registry = CodingAgentRegistry(default_backend=runtime_config.default_backend)
+    runtime_config = normalize_agent_runtime_config(config or AgentRuntimeConfig(), allow_retired=True)
+    registry = CodingAgentRegistry(
+        default_backend=runtime_config.default_backend, retired_backends=runtime_config.retired_backends
+    )
+    for warning in runtime_config.migration_warnings:
+        logger.warning("Agent 后端配置迁移待处理 default=%s 原因=%s", runtime_config.default_backend, warning)
 
-    # Claude is always registered because some existing runtimes are explicitly
-    # Claude-only even if general agent runs later choose a different default.
-    registry.register(ClaudeCodingAgent())
+    # 全新安装使用 DSH；保留的旧 Claude 默认值不会被替换成其他后端。
+    if runtime_config.default_backend == "dsh" and not any(
+        backend.slug == "dsh" for backend in runtime_config.backends
+    ):
+        registry.register(DshCodingAgent(runtime=dsh_runtime))
 
     for backend in runtime_config.backends:
-        if backend.agent_type == "claude":
-            agent: CodingAgent = ClaudeCodingAgent(
-                backend_key=backend.slug,
-                model=backend.model,
-                effort=backend.effort,
-            )
-        elif backend.agent_type == "opencode":
+        if backend.agent_type == "opencode":
             agent = OpenCodeCodingAgent(
                 backend_key=backend.slug,
                 command=backend.command or "opencode",

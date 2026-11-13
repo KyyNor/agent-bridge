@@ -518,7 +518,7 @@ class CodeGraphService:
             project_dir=project_dir, ua_git_url=ua_git_url,
         ) if project_dir else self.ua_client.check_availability()
         return {
-            "claude_installed": avail.claude_installed,
+            "agent_available": avail.agent_available,
             "ua_skill_available": avail.ua_skill_available,
             "message": avail.message,
             "ua_git_url_configured": bool(ua_git_url),
