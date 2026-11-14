@@ -129,12 +129,12 @@ def test_validator_requires_complete_workflow_metadata(wm_paths):
     ("node_type", "config", "expected_field"),
     [
         ("get_task", {"unexpected": True}, "unexpected"),
-        ("agent", {"prompt": 3, "backend_key": "claude"}, "prompt"),
+        ("agent", {"prompt": 3, "backend_key": "dsh"}, "prompt"),
         (
             "agent",
             {
                 "prompt": "return json",
-                "backend_key": "claude",
+                "backend_key": "dsh",
                 "result_mode": "json",
                 "output_schema": [],
             },
@@ -148,7 +148,7 @@ def test_validator_requires_complete_workflow_metadata(wm_paths):
                 "title": "Report",
                 "path": "report.md",
                 "prompt": 3,
-                "backend_key": "claude",
+                "backend_key": "dsh",
             },
             "prompt",
         ),
@@ -223,7 +223,7 @@ def test_validator_rejects_mcp_for_backend_without_runtime_support(wm_paths):
     )
 
 
-@pytest.mark.parametrize("backend_key", ["claude", "opencode"])
+@pytest.mark.parametrize("backend_key", ["dsh", "opencode"])
 def test_validator_accepts_mcp_for_backend_with_runtime_support(wm_paths, backend_key):
     from agent_bridge.agent_runtime.adapters import OpenCodeCodingAgent
 

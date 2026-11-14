@@ -1,5 +1,6 @@
 import type {
   BackendInfo,
+  BackendCatalogEntry,
   BackendAgent,
   BackendAgentPreset,
   CatalogSource,
@@ -1130,6 +1131,7 @@ export const api = {
 
   // Backends
   listBackends: (options?: ApiRequestOptions) => get<BackendInfo[]>('/backends', options),
+  listBackendCatalog: (options?: ApiRequestOptions) => get<BackendCatalogEntry[]>('/backends-catalog', options),
   createBackend: (data: { slug: string; backend_type: string; base_url?: string | null; api_key?: string | null; timeout?: number; embedding_model_id?: string | null; summary_model_id?: string | null; rerank_model_id?: string | null; expected_edit_token?: string | null }) =>
     post<BackendInfo>('/backends', data),
   updateBackend: (slug: string, data: { backend_type?: string; base_url?: string | null; api_key?: string | null; timeout?: number; embedding_model_id?: string | null; summary_model_id?: string | null; rerank_model_id?: string | null; expected_edit_token?: string | null }) =>

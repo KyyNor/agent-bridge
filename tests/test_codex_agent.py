@@ -257,7 +257,7 @@ def test_registry_rejects_backend_that_borrows_another_type_slug() -> None:
         create_coding_agent_registry(
             AgentRuntimeConfig(
                 backends=(
-                    AgentBackendConfig(slug="claude", agent_type="codex"),
+                    AgentBackendConfig(slug="pi", agent_type="codex"),
                 ),
             )
         )

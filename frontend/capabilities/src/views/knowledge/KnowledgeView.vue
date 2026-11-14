@@ -3,7 +3,7 @@ import { Plus, RotateCw, Upload, File, Folder, Archive, Trash2, ArrowLeft } from
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../../api/client'
-import type { AccessActorContext, KnowledgeBaseSummary, Document, KnowledgeFolder, SyncJob, BackendInfo, KnowledgeBrowseDocumentEntry, KnowledgeBrowseEntry, KnowledgeBrowseResponse, ResourceVisibility } from '../../api/types'
+import type { AccessActorContext, KnowledgeBaseSummary, Document, KnowledgeFolder, SyncJob, BackendCatalogEntry, KnowledgeBrowseDocumentEntry, KnowledgeBrowseEntry, KnowledgeBrowseResponse, ResourceVisibility } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
 import { Card, CardContent } from '../../components/ui/card'
 import { Badge } from '../../components/ui/badge'
@@ -186,7 +186,7 @@ const showDocDetail = ref(false)
 const docDetailSlug = ref('')
 const showPlaneDialog = ref(false)
 const planeKb = ref<KnowledgeBaseSummary | null>(null)
-const backends = ref<BackendInfo[]>([])
+const backends = ref<BackendCatalogEntry[]>([])
 const {
   showUploadDialog,
   uploadKb,
@@ -273,7 +273,7 @@ async function loadBackends(options: { fresh?: boolean } = {}) {
   try {
     backends.value = await queryClient.fetchQuery({
       queryKey: queryKeys.knowledgeBackends(),
-      queryFn: ({ signal }) => api.listBackends({ signal }),
+      queryFn: ({ signal }) => api.listBackendCatalog({ signal }),
     })
   } catch { backends.value = [] }
 }

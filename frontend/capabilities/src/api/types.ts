@@ -1275,6 +1275,13 @@ export interface BackendInfo {
   edit_token?: string
 }
 
+export interface BackendCatalogEntry {
+  slug: string
+  backend_type: string
+  runtime_status: string
+  supports_agents: boolean
+}
+
 export interface BackendAgent {
   agent_id: string
   name: string
@@ -1386,6 +1393,7 @@ export interface AvailableAgentBackend {
 
 /** 可选 Coding Agent 后端目录：工作流编辑器登录即可读，不含各后端的命令与模型配置。 */
 export interface AgentBackendCatalog {
+  migration_warnings?: string[]
   default_backend: string
   available_backends?: AvailableAgentBackend[]
   /** 已配置后端的 slug 兜底来源；目录接口不返回该字段。 */
@@ -1701,7 +1709,7 @@ export interface UASummary {
 }
 
 export interface UAAvailability {
-  claude_installed: boolean
+  agent_available: boolean
   ua_skill_available: boolean
   message: string | null
   ua_git_url_configured: boolean

@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { api } from '../../api/client'
-import type { BackendAgent, BackendInfo, KnowledgeBaseSummary } from '../../api/types'
+import type { BackendAgent, BackendCatalogEntry, KnowledgeBaseSummary } from '../../api/types'
+import { isWeknoraBackend, resolveDefaultAgentId } from '../../lib/knowledgeAgentSelection'
 import { Button } from '../ui/button'
 import { SHARED_RESOURCE_READ_ONLY_HINT } from '../../lib/resourceAccess'
 
 const props = defineProps<{
   kb: KnowledgeBaseSummary
-  backends: BackendInfo[]
+  backends: BackendCatalogEntry[]
   readOnly?: boolean
 }>()
 
@@ -24,22 +25,27 @@ const saving = ref(false)
 const editToken = ref<string | undefined>()
 const saveError = ref('')
 const agentsByBackend = ref<Record<string, BackendAgent[]>>({})
-
-function isWeknoraBackend(slug: string | null | undefined) {
-  return !!slug && props.backends.some(backend => backend.slug === slug && backend.backend_type === 'weknora')
-}
+const agentsError = ref('')
 
 async function loadAgentsForBackend(slug: string): Promise<BackendAgent[]> {
-  if (!slug || !isWeknoraBackend(slug)) return []
+  if (!slug || !isWeknoraBackend(slug, props.backends)) return []
   if (slug in agentsByBackend.value) return agentsByBackend.value[slug]
   try {
     const list = await api.listBackendAgents(slug)
+    agentsError.value = ''
     agentsByBackend.value = { ...agentsByBackend.value, [slug]: list }
     return list
-  } catch {
-    agentsByBackend.value = { ...agentsByBackend.value, [slug]: [] }
+  } catch (e: unknown) {
+    // 不缓存失败结果，重试时重新请求；保存时保留已配置的 Agent。
+    agentsError.value = e instanceof Error ? `Agent 列表加载失败：${e.message}` : 'Agent 列表加载失败'
     return []
   }
+}
+
+async function retryAgents() {
+  agentsLoading.value = true
+  agents.value = await loadAgentsForBackend(backendSlug.value)
+  agentsLoading.value = false
 }
 
 const agentLabel = computed(() => {
@@ -51,10 +57,11 @@ const agentLabel = computed(() => {
 
 async function syncFromKnowledgeBase() {
   editing.value = false
+  agentsError.value = ''
   backendSlug.value = props.kb.default_backend_slug || ''
   agentId.value = props.kb.default_agent_id || ''
   editToken.value = props.kb.edit_token
-  agents.value = isWeknoraBackend(backendSlug.value) ? await loadAgentsForBackend(backendSlug.value) : []
+  agents.value = isWeknoraBackend(backendSlug.value, props.backends) ? await loadAgentsForBackend(backendSlug.value) : []
 }
 
 async function startEditing() {
@@ -65,7 +72,8 @@ async function startEditing() {
     backendSlug.value = latest.default_backend_slug || ''
     agentId.value = latest.default_agent_id || ''
     editToken.value = latest.edit_token
-    agents.value = isWeknoraBackend(backendSlug.value) ? await loadAgentsForBackend(backendSlug.value) : []
+    agentsError.value = ''
+    agents.value = isWeknoraBackend(backendSlug.value, props.backends) ? await loadAgentsForBackend(backendSlug.value) : []
     editing.value = true
   } catch (e: unknown) {
     saveError.value = e instanceof Error ? e.message : '刷新默认检索配置失败'
@@ -75,7 +83,8 @@ async function startEditing() {
 async function onBackendChange() {
   agents.value = []
   agentId.value = ''
-  if (!isWeknoraBackend(backendSlug.value)) return
+  agentsError.value = ''
+  if (!isWeknoraBackend(backendSlug.value, props.backends)) return
   agentsLoading.value = true
   agents.value = await loadAgentsForBackend(backendSlug.value)
   agentsLoading.value = false
@@ -86,7 +95,12 @@ async function save() {
   saveError.value = ''
   try {
     const default_backend_slug = backendSlug.value || null
-    const default_agent_id = isWeknoraBackend(backendSlug.value) ? (agentId.value || null) : null
+    const default_agent_id = resolveDefaultAgentId({
+      backendSlug: backendSlug.value,
+      agentId: agentId.value,
+      backends: props.backends,
+      savedAgentId: props.kb.default_agent_id,
+    })
     const saved = await api.updateKbDefaults(props.kb.slug, {
       default_backend_slug,
       default_agent_id,
@@ -123,10 +137,14 @@ watch(() => [props.kb.slug, props.kb.default_backend_slug, props.kb.default_agen
         <option value="">自动（跟随系统）</option>
         <option v-for="backend in backends" :key="backend.slug" :value="backend.slug">{{ backend.slug }} ({{ backend.backend_type }})</option>
       </select>
-      <select v-if="isWeknoraBackend(backendSlug)" v-model="agentId" :disabled="agentsLoading" class="h-8 rounded-md border border-border bg-background px-2 text-sm flex-1 min-w-[180px]">
+      <select v-if="isWeknoraBackend(backendSlug, backends)" v-model="agentId" :disabled="agentsLoading" class="h-8 rounded-md border border-border bg-background px-2 text-sm flex-1 min-w-[180px]">
         <option value="">无（使用后端默认问答）</option>
         <option v-for="agent in agents" :key="agent.agent_id" :value="agent.agent_id">{{ agent.name }}{{ agent.agent_type ? ' · ' + agent.agent_type : '' }}</option>
       </select>
+      <div v-if="agentsError" class="flex w-full flex-wrap items-center gap-2 text-xs text-destructive">
+        <span>{{ agentsError }}。已保存的 Agent 不会被清空。</span>
+        <Button type="button" variant="ghost" size="sm" class="h-6 text-xs" :disabled="agentsLoading" @click="retryAgents">重试</Button>
+      </div>
       <Button variant="ghost" size="sm" class="h-6 text-xs" @click="syncFromKnowledgeBase">取消</Button>
       <Button size="sm" class="h-6 text-xs" @click="save" :disabled="saving">{{ saving ? '保存中...' : '保存' }}</Button>
     </template>

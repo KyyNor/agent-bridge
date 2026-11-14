@@ -1,4 +1,4 @@
-"""Shared helpers for Claude Agent SDK runs (MCP config + file staging).
+"""Shared helpers for Coding Agent runs (MCP config + file staging).
 
 Workflow DAG nodes and ``AgentService`` build the Agent Bridge MCP
 configuration through these shared helpers.
@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from agent_bridge.core.defaults import DEFAULT_CLAUDE_CODE_MCP_TOOL_TIMEOUT_MS
+from agent_bridge.core.defaults import DEFAULT_AGENT_MCP_TOOL_TIMEOUT_MS
 from agent_bridge.automation.workflows.runtime_capability import WORKFLOW_CAPABILITY_HEADER
 
 
@@ -48,14 +48,14 @@ def build_agent_bridge_server_config(
                 "type": "http",
                 "url": url,
                 "headers": headers,
-                "timeout": DEFAULT_CLAUDE_CODE_MCP_TOOL_TIMEOUT_MS,
+                "timeout": DEFAULT_AGENT_MCP_TOOL_TIMEOUT_MS,
             }
         }
     }
 
 
 def build_opencode_mcp_config(config: dict[str, Any]) -> dict[str, Any]:
-    """Convert Claude-style ``mcpServers`` config to OpenCode's ``mcp`` shape."""
+    """Convert shared ``mcpServers`` config to OpenCode's ``mcp`` shape."""
     if "mcp" in config and "mcpServers" not in config:
         return config
 

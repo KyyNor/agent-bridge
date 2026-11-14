@@ -136,11 +136,42 @@ def test_create_backend_agent_non_weknora_raises(wm_paths, tmp_path):
         svc.create_backend_agent("root", "ragflow", "x", "hybrid-rag-wiki")
 
 
-@pytest.mark.parametrize("method", ["list_backend_agents", "list_backend_agent_types"])
+@pytest.mark.parametrize("method", ["list_backend_agent_types"])
 def test_agent_listing_requires_admin(wm_paths, tmp_path, method):
     svc = _service(wm_paths, tmp_path)
     with pytest.raises(AccessDenied):
         getattr(svc, method)("nonadmin", "weknora")
+
+
+def test_list_backend_agents_readable_by_non_admin(wm_paths, tmp_path):
+    svc = _service(wm_paths, tmp_path)
+    with patch("httpx.request", side_effect=_route_request()):
+        agents = svc.list_backend_agents("nonadmin", "weknora")
+    assert [a["agent_id"] for a in agents] == ["builtin-smart-reasoning", "existing-hybrid-id"]
+
+
+def test_backend_catalog_projection_is_safe(wm_paths, tmp_path):
+    svc = _service(wm_paths, tmp_path)
+    svc.store.upsert_backend(slug="weknora", backend_type="weknora")
+    svc.store.upsert_backend(slug="ragflow", backend_type="ragflow")
+    catalog = svc.list_backend_catalog()
+    by_slug = {entry["slug"]: entry for entry in catalog}
+    assert by_slug["weknora"] == {
+        "slug": "weknora",
+        "backend_type": "weknora",
+        "runtime_status": "active",
+        "supports_agents": True,
+    }
+    assert by_slug["ragflow"]["supports_agents"] is False
+    assert all(set(entry) == {"slug", "backend_type", "runtime_status", "supports_agents"} for entry in catalog)
+
+
+def test_backend_catalog_marks_unregistered_backend_inactive(wm_paths, tmp_path):
+    svc = _service(wm_paths, tmp_path)
+    svc.store.upsert_backend(slug="ghost", backend_type="weknora")
+    entry = next(item for item in svc.list_backend_catalog() if item["slug"] == "ghost")
+    assert entry["runtime_status"] == "inactive"
+    assert entry["supports_agents"] is False
 
 
 def test_create_backend_agent_requires_admin(wm_paths, tmp_path):

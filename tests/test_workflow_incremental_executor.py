@@ -37,7 +37,7 @@ def _graph(node_types, edges):
         if node_type == "script":
             node["config"] = {"script_key": node_id, "params": {}}
         elif node_type == "agent":
-            node["config"] = {"prompt": node_id, "backend_key": "claude"}
+            node["config"] = {"prompt": node_id, "backend_key": "dsh"}
         nodes.append(node)
     return WorkflowGraph.model_validate({"nodes": nodes, "edges": [
         {"id": f"{source}-{target}", "source": source, "target": target}

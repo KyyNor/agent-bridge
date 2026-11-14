@@ -61,14 +61,14 @@ const retrievalProbeLlmForm = ref({ base_url: '', model: '', api_key: '', clear_
 const retrievalProbeLlmSaving = ref(false)
 const retrievalProbeLlmError = ref('')
 
-const agentRuntimeConfig = ref<AgentRuntimeConfig>({ default_backend: 'claude', backends: [] })
+const agentRuntimeConfig = ref<AgentRuntimeConfig>({ default_backend: 'dsh', backends: [] })
 const agentRuntimeSaving = ref(false)
 const agentRuntimeError = ref('')
 const agentRuntimeMessage = ref('')
 const fixedAgentBackendDefs = [
-  { slug: 'claude', type: 'claude', command: null as string | null, model: null as string | null, effort: null as string | null },
   { slug: 'opencode', type: 'opencode', command: 'opencode', model: null as string | null, effort: null as string | null },
   { slug: 'codex', type: 'codex', command: 'codex', model: null as string | null, effort: null as string | null },
+  { slug: 'pi', type: 'pi', command: 'pi', model: null as string | null, effort: null as string | null },
   { slug: 'dsh', type: 'dsh', command: 'dsh', model: null as string | null, effort: null as string | null },
 ]
 
@@ -426,7 +426,8 @@ function normalizeFixedAgentRuntimeConfig(config: AgentRuntimeConfig): AgentRunt
   })
   const allowed = new Set(fixedAgentBackendDefs.map(item => item.slug))
   return {
-    default_backend: allowed.has(config.default_backend) ? config.default_backend : 'claude',
+    default_backend: allowed.has(config.default_backend) ? config.default_backend : '',
+    migration_warnings: config.migration_warnings,
     backends,
     available_backends: config.available_backends,
     edit_token: config.edit_token,
@@ -926,16 +927,18 @@ async function deleteBackend(slug: string) {
         <div class="flex items-center justify-between gap-4">
           <div>
             <div class="text-sm font-medium">Coding Agent 运行配置</div>
-            <div class="mt-1 text-xs text-muted-foreground">普通 Agent 运行三选一；工作流和 Understand Anything 当前仍固定使用 Claude</div>
+            <div class="mt-1 text-xs text-muted-foreground">普通 Agent 与 Understand Anything 使用默认后端；工作流按节点选择后端</div>
           </div>
           <div class="flex gap-2">
             <Button variant="outline" size="sm" @click="loadAgentRuntimeConfig()">刷新</Button>
           </div>
         </div>
 
+        <p v-for="warning in agentRuntimeConfig.migration_warnings" :key="warning" class="text-sm text-destructive">{{ warning }}</p>
         <div class="grid grid-cols-[12rem_minmax(0,20rem)_1fr] items-center gap-4">
           <div class="text-sm shrink-0 whitespace-nowrap">默认后端</div>
           <select v-model="agentRuntimeConfig.default_backend" class="h-9 rounded-md border border-input bg-background px-3 text-sm">
+            <option value="" disabled>请选择支持的后端</option>
             <option v-for="backend in agentRuntimeConfig.backends" :key="backend.slug" :value="backend.slug">
               {{ backend.slug }}
             </option>
@@ -960,13 +963,11 @@ async function deleteBackend(slug: string) {
                 <td class="px-3 py-2 text-sm">{{ backend.type }}</td>
                 <td class="px-3 py-2">
                   <Input
-                    v-if="backend.type !== 'claude'"
                     :model-value="backend.command || ''"
                     :placeholder="backend.type"
                     class="h-8 font-mono text-xs"
                     @update:model-value="backend.command = String($event || '')"
                   />
-                  <span v-else class="text-xs text-muted-foreground">内置</span>
                 </td>
                 <td class="px-3 py-2">
                   <Input :model-value="backend.model || ''" placeholder="默认模型" class="h-8 font-mono text-xs" @update:model-value="backend.model = String($event || '')" />

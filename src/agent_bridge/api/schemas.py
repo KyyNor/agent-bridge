@@ -499,7 +499,7 @@ class AgentBackendConfigRequest(BaseModel):
 
 
 class AgentRuntimeConfigRequest(BaseModel):
-    default_backend: str = "claude"
+    default_backend: str = "dsh"
     backends: list[AgentBackendConfigRequest] = Field(default_factory=list)
     expected_edit_token: str | None = None
 

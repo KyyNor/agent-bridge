@@ -7,11 +7,10 @@ Agent Bridge 是面向内部可信环境的 Agent 能力与知识管理平台。
 - 注册 MCP 与 OpenAPI 服务，同步工具定义并统一检索、执行和审计。
 - 通过 Profile 管理来源级与资源级访问策略，并将常用工具提升为 pinned tools。
 - 管理文档知识库、CodeGraph 代码知识和 claude-mem 记忆。
-- 支持 Claude、Codex、OpenCode、Pi、DSH 等 Coding Agent 后端。
+- 支持 Codex、OpenCode、Pi、DSH 四种 Coding Agent 后端。
 - Coding Agent 可按后端配置思考力度（`server.toml` `[agents.<slug>]` 的 `effort`，或「系统管理 →
-  知识处理配置 → Coding Agent 运行配置」编辑）：Claude 支持 low/medium/high/xhigh/max、Codex 支持
+  知识处理配置 → Coding Agent 运行配置」编辑）：Codex 支持
   minimal~xhigh、Pi 支持 off~xhigh，OpenCode 透传 provider 相关的 variant 名。留空使用各 CLI 默认值；
-  例如部署模型不接受默认的 `high` 时，可把 Claude 后端设为 `xhigh` 或 `medium` 规避 litellm 报错。
   DSH 后端不支持配置思考力度（其托管供应商路由不暴露 reasoning effort，配置会被拒绝）。
 - DSH 可作为 Coding Agent 后端执行后台任务：每次 run 以目标 Linux 用户身份启动独立的
   `dsh --profile acp` 进程，通过标准 Agent Client Protocol（JSON-RPC over stdio）完成一次
@@ -308,31 +307,24 @@ export AGENT_BRIDGE_EVAL_AGENT_WORKER_IMAGE=agent-bridge-agent-worker:latest
 
 若公共模型配置的 Base URL 指向宿主机的 `localhost`，容器默认会改用 `host.docker.internal`；Linux 部署可通过 `AGENT_BRIDGE_EVAL_DOCKER_HOST` 指向可从容器访问的宿主机地址或网关。没有可访问的 Docker 环境或指定镜像时，不存在 venv/CLI 后备，评估功能直接不可用。
 
-## Profile 接入 Claude Code
+## Profile 接入与 Claude 后端升级
 
-先在管理后台或 API 创建 Profile，再执行：
+在 Agent 工作台中选择能力平面并启动 DSH 或 Pi。Understand Anything 技能安装至项目 `.agents/skills/`（旧 `.claude/skills/` 仅作为已有资源读取兼容），可用性 API 使用通用的 `agent_available` 字段。后台 Agent 和 Understand Anything 使用系统默认后端，工作流使用节点配置的后端。全新安装的默认后端为 DSH；运行前需完成组级模型接入和 Linux 身份配置，缺少配置时会明确报错。
+
+Claude / Claude Code 执行后端和 SDK 已移除。升级读取旧 `server.toml` 时会隔离 `agents.claude`（包括以其他 slug 指定 `type = "claude"` 的旧条目），并在配置 API 与管理页提供迁移提示；原文件不会自动改写。旧的 `default = "claude"` 保留为停用状态，默认执行明确拒绝，不会自动换用其他后端。管理员必须在 Coding Agent 运行配置中明确选择 DSH、Pi、Codex 或 OpenCode 并保存。新配置和新执行请求中的 `claude` 都会被拒绝。
+
+已有工作流节点绑定 `claude` 时，定义和历史运行仍可查看；保存、导入和执行预检会提示后端已停用。请逐项修改节点后端，再显式恢复任务调度。历史运行、事件、旧 transcript 和 claude-mem 数据继续保留。Hindsight 记忆接入由 [Issue #38](https://github.com/KyyNor/agent-bridge/issues/38) 跟踪，配置见下方「记忆后端」。
+
+旧 `profile use` / `profile sync` 已停止写入 Claude MCP、Hook 与说明块。`profile unuse` 仍会列出当前项目和用户级旧接入，交互选择后只清理 Agent Bridge 托管配置，保留用户自己的 MCP server、Hook、文档及历史记忆数据。非交互卸载可使用 `--scope project|user --yes`。既有记忆 Hook 接收和查询接口保留兼容。
 
 ```bash
-uv run agent-bridge profile use safe-readonly \
-  --scope project \
-  --url http://127.0.0.1:8765/mcp
+uv run agent-bridge profile list
+uv run agent-bridge profile show safe-readonly
+uv run agent-bridge profile unuse
+uv run agent-bridge profile pins refresh safe-readonly
 ```
 
-`profile use` 会写入或更新：
-
-- 项目级 `.mcp.json`（`scope=project`）或用户级 `~/.mcp.json`；
-- Claude Code hooks 配置；
-- 项目 `CLAUDE.md` 或用户 `~/.claude/CLAUDE.md` 中由 Agent Bridge 管理的
-  `<system-reminder>` 语义说明块。
-
-写入的 `agent-bridge` MCP server 默认设置 300 秒工具调用超时（`timeout: 300000`，单位为毫秒），用于覆盖 Claude Code 远程 HTTP MCP 的短请求超时。AgentService 为受管 Agent 生成的临时 MCP 配置也使用同一设置。
-
-`profile use` 还会安装一个 Claude Code `SessionEnd` Hook。每次会话结束时，它会对 Agent Bridge 实际管理的 MCP、Hook 和 `CLAUDE.md` 说明块计算配置 hash；只有生成结果变化时才更新，用户自己的 MCP server、Hook 和文档内容会保留。代码升级后无需手动修改版本号；首次接入某个 project 或 user scope 仍需执行一次 `profile use` 安装该 Hook。
-
-执行 `profile unuse` 会列出当前项目和用户级已接入的 Profile，交互选择一个后卸载对应范围的 Agent Bridge MCP、托管 Hook 和说明块；用户自己的 MCP server、Hook 与文档内容会保留。非交互场景可使用 `--scope project|user --yes`。
-
-它不会把完整 profile 正文或绝对文件路径复制进 CLAUDE.md。动态 profile 与
-memory 上下文由服务端维护，并通过 `SessionStart` Hook 注入。
+## 记忆后端
 
 系统管理的「记忆后端」可在 claude-mem 与独立部署的 Hindsight 之间选择。
 Hindsight 需填写 API URL 和可选的上游 API Token，保存后可测试连接；服务必须能从
@@ -359,28 +351,6 @@ Pi 使用隔离目录的 `settings.json` extension。DSH 的 web/tui 静态插�
 切换后端保留旧 claude-mem 数据，不迁移、不自动回退。Hindsight 控制台独立部署；平台
 通过现有检索/时间线展示记忆，不代理其全库管理控制台。删除平台区块会撤销访问并清理
 本地数据，上游 bank 保留，由部署管理员按数据保留策略清理。
-
-`profile use` 安装的全量检索探测 Hook 会在 `UserPromptSubmit` 同步执行：它在本轮等待至多 20 秒，将命中的资源提示作为当前轮 `additionalContext` 返回；没有命中或失败时不影响正常对话。
-
-常用 Profile 命令：
-
-```bash
-uv run agent-bridge profile list
-uv run agent-bridge profile show safe-readonly
-uv run agent-bridge profile config --scope project
-uv run agent-bridge profile sync safe-readonly --scope project
-uv run agent-bridge profile unuse
-uv run agent-bridge profile pins refresh safe-readonly
-```
-
-`profile use` 会自动安装 Claude Code 普通 `async` 全量检索探测 Hook。CLI 只转发 Claude
-Code 的原始 Hook payload；服务端通过标准 `full-probe` Hook 使用系统管理的模型生成 0–8
-个业务检索短句，并按 Profile/session 结合最近 3 轮历史去重（最多缓存 12 轮、30 天滑动
-TTL），仅探测当前 Profile 的工作流产出物。模型未配置或调用失败时 Hook 保持
-静默，并将原始 prompt 与完整 Hook 请求/响应写入通用审计日志。监控页仅对
-`codegraph_explore`、`session-start` 和 `full-probe` 的限定 Markdown 字段提供预览，其余
-日志仍通过 JSON 查看完整载荷。工作方式和独立 API 契约见
-[Claude Code 全量检索探测 Hook](docs/integrations/retrieval-probe-hook/README.md)。
 
 ## 测试与质量检查
 
@@ -478,6 +448,8 @@ Draft 2020-12 Schema 中的 `$defs` 及其本地 `$ref` 会自动转换为 Draft
 管理后台上传完成后只触发设为立即同步的后端。定时任务按 `doc_sync_cron` 执行定时同步，并处理立即同步后端的待办和失败重试。暂不同步的后端保留待办和远端数据，恢复同步后继续处理。手动同步也跳过暂不同步的后端。HTTP 上传的 `later` 默认为 `true`，显式传 `false` 可立即处理已启用同步的后端。
 
 例如，设 Weknora 为默认检索后端，并让其他后端暂不同步。API 可用 `PUT /api/v1/kbs/team-docs/sync-policy` 提交 `{"backend_sync_policies":{"weknora":"scheduled","ragflow":"paused"}}`，也可用 `POST /api/v1/kbs/team-docs/sync?backend=weknora` 立即处理 Weknora 的待办。
+
+知识库详情的「默认检索后端」对归属组普通用户开放编辑：后端与 Weknora Agent 选项来自登录可读的目录接口（`GET /api/v1/backends-catalog`、`GET /api/v1/backends/{slug}/agents`），不需要平台管理员权限。Agent 列表加载失败会显示明确提示并可重试；此时保存不会清空已配置的默认 Agent。
 
 当前部署模型是内部可信 VM，不提供互联网级认证。浏览器身份来自总账户系统换取的会话 Cookie；CLI、MCP 与 Agent 进程身份来自受信的 Linux 用户名 Header。部署方必须限制监听地址、网络访问和反向代理边界，并禁止外部请求直接进入 CLI Header 信任通道。
 

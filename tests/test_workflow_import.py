@@ -72,8 +72,8 @@ def _summary_export_payload(workflow_key="summary-wf"):
             "definition": {
                 "nodes": [
                     dict(GET_TASK_NODE),
-                    {"id": "analysis", "type": "agent", "name": "Analysis", "position": {"x": 160, "y": 0}, "config": {"prompt": "分析", "backend_key": "claude"}},
-                    {"id": "report", "type": "output", "name": "Report", "position": {"x": 320, "y": 0}, "config": {"format": "markdown", "title": "Report", "path": "report.md", "prompt": "总结", "backend_key": "claude"}},
+                    {"id": "analysis", "type": "agent", "name": "Analysis", "position": {"x": 160, "y": 0}, "config": {"prompt": "分析", "backend_key": "dsh"}},
+                    {"id": "report", "type": "output", "name": "Report", "position": {"x": 320, "y": 0}, "config": {"format": "markdown", "title": "Report", "path": "report.md", "prompt": "总结", "backend_key": "dsh"}},
                 ],
                 "edges": [
                     {"id": "task-analysis", "source": "n1", "target": "analysis"},

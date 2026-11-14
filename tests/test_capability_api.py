@@ -703,6 +703,40 @@ def test_backend_list_requires_admin(wm_paths) -> None:
     assert response.status_code == 403
 
 
+def test_backend_catalog_login_readable_and_redacted(wm_paths) -> None:
+    wm_paths.config_dir.mkdir(parents=True, exist_ok=True)
+    wm_paths.server_config_path.write_text(
+        '\n'.join([
+            'host = "127.0.0.1"',
+            'port = 8765',
+            'admins = ["root"]',
+            '',
+            '[backends.weknora-main]',
+            'backend_type = "weknora"',
+            'base_url = "http://weknora.example.test"',
+            'api_key = "test-key"',
+        ]),
+        encoding="utf-8",
+    )
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    alice = {"X-Agent-Bridge-User": "alice"}
+
+    response = client.get("/api/v1/backends-catalog", headers=alice)
+
+    assert response.status_code == 200
+    assert response.json() == [{
+        "slug": "weknora-main",
+        "backend_type": "weknora",
+        "runtime_status": "active",
+        "supports_agents": True,
+    }]
+    assert "test-key" not in response.text
+    assert "weknora.example.test" not in response.text
+    assert client.get("/api/v1/backends", headers=alice).status_code == 403
+    assert client.get("/api/v1/backends/weknora-main/agent-types", headers=alice).status_code == 403
+
+
 def test_backend_create_and_update_forward_edit_token(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)

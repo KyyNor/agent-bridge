@@ -1,6 +1,6 @@
-"""Claude Agent SDK compatible JSON Schema helpers.
+"""Coding Agent Draft-07 JSON Schema helpers.
 
-Claude Code structured output validates schemas as JSON Schema draft-07.  The
+Structured output uses JSON Schema draft-07. The
 workflow editor historically accepted draft 2020-12 schemas, so normalize the
 small compatible subset at the agent boundary instead of sending a mixed
 schema dialect to the SDK.
@@ -47,7 +47,7 @@ _UNSUPPORTED_DRAFT7_KEYWORDS = frozenset(
 
 
 def normalize_draft7_schema(schema: dict[str, Any]) -> dict[str, Any]:
-    """Return a Draft-07 schema suitable for Claude structured output.
+    """Return a Draft-07 schema suitable for Coding Agent structured output.
 
     ``$defs`` and local ``$ref`` paths are the only newer constructs converted
     automatically.  Every other semantic Draft 2019-09/2020-12 keyword is

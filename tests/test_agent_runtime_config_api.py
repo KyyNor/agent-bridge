@@ -12,8 +12,8 @@ def test_agent_runtime_config_api_updates_registry(wm_paths) -> None:
 
     initial = client.get("/api/v1/agent-runtime/config", headers=headers)
     assert initial.status_code == 200
-    assert initial.json()["default_backend"] == "claude"
-    assert [item["slug"] for item in initial.json()["available_backends"]] == ["claude"]
+    assert initial.json()["default_backend"] == "dsh"
+    assert [item["slug"] for item in initial.json()["available_backends"]] == ["dsh"]
     assert initial.json()["available_backends"][0]["capabilities"]["supports_mcp"] is True
 
     payload = {
@@ -32,8 +32,8 @@ def test_agent_runtime_config_api_updates_registry(wm_paths) -> None:
 
     assert saved.status_code == 200
     assert {key: saved.json()[key] for key in ("default_backend", "backends")} == payload
-    assert [item["slug"] for item in saved.json()["available_backends"]] == ["claude", "opencode"]
-    assert saved.json()["available_backends"][1]["capabilities"]["supports_mcp"] is True
+    assert [item["slug"] for item in saved.json()["available_backends"]] == ["opencode"]
+    assert saved.json()["available_backends"][0]["capabilities"]["supports_mcp"] is True
     service = app.state.agent_bridge_service
     assert service.agents.coding_agents.default_backend == "opencode"
     assert "opencode" in service.agents.coding_agents.keys()
@@ -63,8 +63,8 @@ def test_agent_runtime_config_api_rejects_slug_type_mismatch(wm_paths) -> None:
     response = client.post(
         "/api/v1/agent-runtime/config",
         json={
-            "default_backend": "claude",
-            "backends": [{"slug": "claude", "type": "codex"}],
+            "default_backend": "dsh",
+            "backends": [{"slug": "pi", "type": "codex"}],
         },
         headers={"X-Agent-Bridge-User": "root"},
     )
@@ -73,7 +73,7 @@ def test_agent_runtime_config_api_rejects_slug_type_mismatch(wm_paths) -> None:
     assert "slug 必须与 type 完全一致" in str(response.json())
 
 
-def test_agent_runtime_config_api_accepts_fixed_three_agent_backends(wm_paths) -> None:
+def test_agent_runtime_config_api_accepts_supported_agent_backends(wm_paths) -> None:
     from agent_bridge.api.app import create_app
 
     app = create_app(wm_paths, {"root"})
@@ -82,7 +82,6 @@ def test_agent_runtime_config_api_accepts_fixed_three_agent_backends(wm_paths) -
     payload = {
         "default_backend": "codex",
         "backends": [
-            {"slug": "claude", "type": "claude", "command": None, "model": None, "effort": None},
             {"slug": "opencode", "type": "opencode", "command": "opencode", "model": None, "effort": None},
             {"slug": "codex", "type": "codex", "command": "codex", "model": "gpt-5", "effort": None},
         ],
@@ -95,10 +94,10 @@ def test_agent_runtime_config_api_accepts_fixed_three_agent_backends(wm_paths) -
 
     assert saved.status_code == 200
     assert {key: saved.json()[key] for key in ("default_backend", "backends")} == payload
-    assert [item["slug"] for item in saved.json()["available_backends"]] == ["claude", "codex", "opencode"]
+    assert [item["slug"] for item in saved.json()["available_backends"]] == ["codex", "opencode"]
     service = app.state.agent_bridge_service
     assert service.agents.coding_agents.default_backend == "codex"
-    assert service.agents.coding_agents.keys() == ["claude", "codex", "opencode"]
+    assert service.agents.coding_agents.keys() == ["codex", "opencode"]
 
 
 def test_agent_runtime_config_api_persists_effort(wm_paths) -> None:
@@ -110,8 +109,8 @@ def test_agent_runtime_config_api_persists_effort(wm_paths) -> None:
     saved = client.post(
         "/api/v1/agent-runtime/config",
         json={
-            "default_backend": "claude",
-            "backends": [{"slug": "claude", "type": "claude", "effort": "xhigh"}],
+            "default_backend": "codex",
+            "backends": [{"slug": "codex", "type": "codex", "effort": "xhigh"}],
         },
         headers={"X-Agent-Bridge-User": "root"},
     )
@@ -119,7 +118,7 @@ def test_agent_runtime_config_api_persists_effort(wm_paths) -> None:
     assert saved.status_code == 200
     assert saved.json()["backends"][0]["effort"] == "xhigh"
     service = app.state.agent_bridge_service
-    assert service.agents.coding_agents.get("claude").effort == "xhigh"
+    assert service.agents.coding_agents.get("codex").effort == "xhigh"
     assert 'effort = "xhigh"' in wm_paths.server_config_path.read_text(encoding="utf-8")
 
 
@@ -132,8 +131,8 @@ def test_agent_runtime_config_api_rejects_unsupported_effort_without_persisting(
     response = client.post(
         "/api/v1/agent-runtime/config",
         json={
-            "default_backend": "claude",
-            "backends": [{"slug": "claude", "type": "claude", "effort": "bogus"}],
+            "default_backend": "codex",
+            "backends": [{"slug": "codex", "type": "codex", "effort": "bogus"}],
         },
         headers={"X-Agent-Bridge-User": "root"},
     )

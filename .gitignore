@@ -16,6 +16,7 @@ wheels/
 .superpowers/
 .claude/worktrees/
 .zcode/
+.smyw/
 frontend/**/node_modules/
 frontend/**/dist/
 frontend/**/*.tsbuildinfo

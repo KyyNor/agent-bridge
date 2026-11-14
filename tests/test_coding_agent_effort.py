@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 
 from agent_bridge.agent_runtime.adapters import (
-    ClaudeCodingAgent,
     CodexCodingAgent,
     OpenCodeCodingAgent,
     PiCodingAgent,
@@ -29,9 +28,8 @@ def _request(tmp_path: Path) -> CodingAgentRequest:
 def test_registry_applies_effort_to_all_agent_types(tmp_path: Path):
     registry = create_coding_agent_registry(
         AgentRuntimeConfig(
-            default_backend="claude",
+            default_backend="codex",
             backends=(
-                AgentBackendConfig(slug="claude", agent_type="claude", effort="xhigh"),
                 AgentBackendConfig(slug="opencode", agent_type="opencode", effort="high"),
                 AgentBackendConfig(slug="codex", agent_type="codex", effort="medium"),
                 AgentBackendConfig(slug="pi", agent_type="pi", effort="low"),
@@ -39,17 +37,16 @@ def test_registry_applies_effort_to_all_agent_types(tmp_path: Path):
         )
     )
 
-    assert registry.get("claude").effort == "xhigh"
     assert registry.get("opencode").variant == "high"
     assert registry.get("codex").effort == "medium"
     assert registry.get("pi").thinking == "low"
 
 
 def test_registry_rejects_effort_outside_supported_values():
-    with pytest.raises(ValueError, match="不支持 effort 取值 'bogus'"):
+    with pytest.raises(ValueError, match="不支持配置思考力度"):
         create_coding_agent_registry(
             AgentRuntimeConfig(
-                backends=(AgentBackendConfig(slug="claude", agent_type="claude", effort="bogus"),),
+                backends=(AgentBackendConfig(slug="dsh", agent_type="dsh", effort="bogus"),),
             )
         )
 
@@ -65,20 +62,7 @@ def test_registry_allows_provider_specific_opencode_variant():
     assert registry.get("opencode").variant == "turbo"
 
 
-def test_claude_agent_carries_effort_into_run(tmp_path: Path):
-    run = ClaudeCodingAgent(backend_key="claude", effort="xhigh").start(_request(tmp_path))
-
-    assert run.effort == "xhigh"
-
-
-def test_claude_agent_without_effort_keeps_default(tmp_path: Path):
-    run = ClaudeCodingAgent().start(_request(tmp_path))
-
-    assert run.effort is None
-
-
 def test_supported_efforts_match_cli_vocabularies():
-    assert ClaudeCodingAgent.supported_efforts == frozenset({"low", "medium", "high", "xhigh", "max"})
     assert CodexCodingAgent.supported_efforts == frozenset({"minimal", "low", "medium", "high", "xhigh"})
     assert PiCodingAgent.supported_efforts == frozenset({"off", "minimal", "low", "medium", "high", "xhigh"})
     assert OpenCodeCodingAgent.supported_efforts is None

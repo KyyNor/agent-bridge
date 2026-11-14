@@ -162,7 +162,7 @@ class Handlers:
 @pytest.mark.asyncio
 async def test_executor_runs_parallel_nodes_then_join():
     graph = WorkflowGraph.model_validate({"nodes": [
-        {"id": item, "type": "agent", "name": item, "position": {"x": 0, "y": 0}, "config": {"prompt": item, "backend_key": "claude"}}
+        {"id": item, "type": "agent", "name": item, "position": {"x": 0, "y": 0}, "config": {"prompt": item, "backend_key": "dsh"}}
         for item in ("start", "left", "right", "join")
     ], "edges": [{"id": "sl", "source": "start", "target": "left"}, {"id": "sr", "source": "start", "target": "right"}, {"id": "lj", "source": "left", "target": "join"}, {"id": "rj", "source": "right", "target": "join"}]})
     result = await WorkflowDagExecutor(store=Store(), handlers=Handlers()).run(workflow={"workflow_key": "w", "profile_key": "p", "definition": graph}, run_id="r", input_data={}, actor="root")
@@ -173,7 +173,7 @@ async def test_executor_runs_parallel_nodes_then_join():
 @pytest.mark.asyncio
 async def test_executor_persists_every_done_result_before_batch_failure():
     graph = WorkflowGraph.model_validate({"nodes": [
-        {"id": item, "type": "agent", "name": item, "position": {"x": 0, "y": 0}, "config": {"prompt": item, "backend_key": "claude"}}
+        {"id": item, "type": "agent", "name": item, "position": {"x": 0, "y": 0}, "config": {"prompt": item, "backend_key": "dsh"}}
         for item in ("ok", "fail")
     ]})
     store = Store()
@@ -202,8 +202,8 @@ async def test_executor_persists_every_done_result_before_batch_failure():
 async def test_no_task_cancels_started_nodes_and_finishes_pending():
     graph = WorkflowGraph.model_validate({"nodes": [
         {"id": "task", "type": "get_task", "name": "Task", "position": {"x": 0, "y": 0}},
-        {"id": "slow", "type": "agent", "name": "Slow", "position": {"x": 1, "y": 0}, "config": {"prompt": "slow", "backend_key": "claude"}},
-        {"id": "after", "type": "agent", "name": "After", "position": {"x": 2, "y": 0}, "config": {"prompt": "after", "backend_key": "claude"}},
+        {"id": "slow", "type": "agent", "name": "Slow", "position": {"x": 1, "y": 0}, "config": {"prompt": "slow", "backend_key": "dsh"}},
+        {"id": "after", "type": "agent", "name": "After", "position": {"x": 2, "y": 0}, "config": {"prompt": "after", "backend_key": "dsh"}},
     ], "edges": [{"id": "task-after", "source": "task", "target": "after"}]})
 
     class NoTaskHandlers:
@@ -225,8 +225,8 @@ async def test_no_task_cancels_started_nodes_and_finishes_pending():
 @pytest.mark.asyncio
 async def test_summary_output_keeps_markdown_when_html_warns():
     graph = WorkflowGraph.model_validate({"nodes": [
-        {"id": "markdown-output", "type": "output", "name": "Markdown", "position": {"x": 0, "y": 0}, "config": {"format": "markdown", "title": "M", "path": "m.md", "prompt": "m", "backend_key": "claude"}},
-        {"id": "html-output", "type": "output", "name": "HTML", "position": {"x": 1, "y": 0}, "config": {"format": "html", "title": "H", "path": "h.html", "prompt": "h", "backend_key": "claude"}},
+        {"id": "markdown-output", "type": "output", "name": "Markdown", "position": {"x": 0, "y": 0}, "config": {"format": "markdown", "title": "M", "path": "m.md", "prompt": "m", "backend_key": "dsh"}},
+        {"id": "html-output", "type": "output", "name": "HTML", "position": {"x": 1, "y": 0}, "config": {"format": "html", "title": "H", "path": "h.html", "prompt": "h", "backend_key": "dsh"}},
     ], "edges": [{"id": "markdown-to-html", "source": "markdown-output", "target": "html-output"}]})
 
     class SummaryHandlers:
@@ -244,7 +244,7 @@ async def test_summary_output_keeps_markdown_when_html_warns():
 @pytest.mark.asyncio
 async def test_executor_validates_graph_and_detects_stalled_schedule():
     graph = WorkflowGraph.model_validate({"nodes": [
-        {"id": item, "type": "agent", "name": item, "position": {"x": 0, "y": 0}, "config": {"prompt": item, "backend_key": "claude"}}
+        {"id": item, "type": "agent", "name": item, "position": {"x": 0, "y": 0}, "config": {"prompt": item, "backend_key": "dsh"}}
         for item in ("a", "b")
     ], "edges": [{"id": "a-b", "source": "a", "target": "b"}, {"id": "b-a", "source": "b", "target": "a"}]})
     executor = WorkflowDagExecutor(store=Store(), handlers=Handlers())
