@@ -74,7 +74,7 @@ class DshTerminalAdapter(TerminalAdapter, DshWorkspaceAdapter):
             if os.geteuid() == 0:
                 os.chown(directory, identity.uid, identity.gid)
         binary = dsh_binary_from_command(str(self._configs.runtime_config_for_runtime().get("web_command") or ""))
-        specs = self._memory_plugin_specs(plugins.parse_plugin_list(TUI_PLUGIN_LIST.read_text(encoding="utf-8")), workspace)
+        specs = plugins.parse_plugin_list(TUI_PLUGIN_LIST.read_text(encoding="utf-8"))
         self._install_plugins(runtime_owner, identity=identity, config_dir=config_dir, dsh_binary=binary, specs=specs)
         if not set(specs) <= set(plugins.read_installed_specs(config_dir)):
             raise ValidationError("DSH TUI 插件未安装完成，请检查工作台日志后重试")

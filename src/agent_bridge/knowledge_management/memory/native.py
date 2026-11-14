@@ -156,13 +156,6 @@ class NativeMemoryIntegration:
             env["HINDSIGHT_API_TOKEN"] = workspace.capability.token
         return NATIVE_ADAPTERS[harness].apply(self, config_dir, identity, env, grant, launcher)
 
-    def enabled_for(self, workspace):
-        if workspace is None or workspace.capability is None or self.memory.backend_config.read()["backend"] != "hindsight":
-            return False
-        capability = workspace.capability
-        with self.memory.access.bind_actor_group(actor=capability.user_id, owner_group_key=capability.owner_group_key):
-            return self.memory.resolve_profile_block(capability.user_id, capability.profile_key)["status"] == "ok"
-
     @staticmethod
     def _pi_entry(config_dir):
         return config_dir / "node_modules" / PACKAGE_NAME / "dist" / "pi.js"

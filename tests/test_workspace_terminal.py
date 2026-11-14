@@ -140,9 +140,11 @@ def test_tui_lock_is_pinned_and_separate_from_web():
     from agent_bridge.dsh import plugins
     import re
     specs = plugins.parse_plugin_list(TUI_PLUGIN_LIST.read_text())
-    assert specs == ['@deepseek-harness-tui/dsh-tui@0.16.1']
+    from agent_bridge.knowledge_management.memory.native import PACKAGE_SPEC
+    assert specs == ['@deepseek-harness-tui/dsh-tui@0.16.1', PACKAGE_SPEC]
     assert all(re.fullmatch(r'.+@\d+\.\d+\.\d+(?:-[\w.]+)?', spec) for spec in specs)
-    assert not set(specs) & set(plugins.read_plugin_list())
+    # 只有通用记忆插件共用，Web UI 插件仍不得进入 TUI。
+    assert set(specs) & set(plugins.read_plugin_list()) == {PACKAGE_SPEC}
     assert plugins.build_install_command('dsh', specs[0], profile='tui')[3] == 'tui'
 
 

@@ -346,7 +346,9 @@ Agent Bridge 服务器访问。连接配置保存于 `data/memory/backend.json`�
 
 四个入口在启动前以目标 Linux 身份安装官方
 `@vectorize-io/hindsight-coding-agents@0.8.7`，需要 Node.js/npm 及 npm registry 网络。
-Pi 使用隔离目录的 `settings.json` extension，DSH 使用各自 web/tui profile 插件。
+Pi 使用隔离目录的 `settings.json` extension。DSH 的 web/tui 静态插件清单均包含同一
+记忆包，无论是否启用记忆都按通用首装机制安装；关闭时通过托管 `disabled` 配置阻止
+工具注册和会话采集。Pi 和 DSH 共用该 npm 包，分别加载 `dist/pi.js` 和 `dist/dsh.js`。
 不另配 Hindsight MCP。插件自动保存会话，默认轻量 recall，可通过原生 reflect 工具
 按需综合；自动更新、Git 导入、代码扫描和自动 seed 默认关闭。
 插件使用独立 `HINDSIGHT_CONFIG`；capability 只经环境变量传递，所有 HTTP 读写经

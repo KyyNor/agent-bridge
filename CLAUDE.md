@@ -114,6 +114,8 @@ Memory 与文档/代码知识平级，但由 Claude Code hooks 实时写入。cl
 `memory/backend_config.py` 管理系统选择及脱敏凭据，禁止未知配置静默回退。
 Hindsight 独立部署，每个区块绑定数据库持久化随机 bank。`memory/native.py` 在
 Pi Web/TUI 与 DSH Web/TUI 启动时注入官方固定 0.8.7 原生插件，不额外注入 MCP；
+DSH 的 web/tui 静态插件清单始终包含该包，安装不依赖记忆开关；关闭时由托管
+`disabled` 配置阻止采集与原生工具注册。Pi 与 DSH 使用同一 npm 包的不同 entry。
 通过独立配置关闭自动更新、seed、代码扫描和 Git 导入。插件会自动把 companion skill
 同步到目标 Linux HOME（Pi 的 `.pi/agent/skills`、DSH 的 `.agents/skills`）。
 `api/routes/memory_backend.py` 只放行 capability 绑定 bank 的必要 API；bank config

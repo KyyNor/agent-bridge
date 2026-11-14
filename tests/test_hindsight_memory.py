@@ -261,15 +261,18 @@ def test_native_memory_hides_and_rejects_duplicate_mcp_tools(setup, tmp_path):
     assert provider.list_tools("alice", "work")
 
 
+@pytest.mark.parametrize("memory_enabled", [True, False])
 @pytest.mark.parametrize("entry", ["pi-web", "pi-tui", "dsh-web", "dsh-tui"])
 @respx.mock
-def test_four_launch_plans_load_official_plugin_before_start(setup, tmp_path, entry, monkeypatch):
+def test_four_launch_plans_load_official_plugin_before_start(setup, tmp_path, entry, memory_enabled, monkeypatch):
     from agent_bridge.agent_workspace.adapters.pi import PiWorkspaceAdapter
     from agent_bridge.agent_workspace.adapters.dsh import DshWorkspaceAdapter
     from agent_bridge.agent_workspace.terminal_adapter import PiTerminalAdapter, DshTerminalAdapter
 
     _, service, selection, identity = setup
-    respx.put(url__regex=r"https://memory.example/v1/default/banks/agent-bridge-.*").respond(200, json={})
+    service.memory.set_profile_binding("alice", "work", "memory", enabled=memory_enabled)
+    if memory_enabled:
+        respx.put(url__regex=r"https://memory.example/v1/default/banks/agent-bridge-.*").respond(200, json={})
 
     class Installer:
         def run_once(self, *, command, env, cwd, identity, timeout_seconds):
@@ -289,11 +292,20 @@ def test_four_launch_plans_load_official_plugin_before_start(setup, tmp_path, en
     plan = adapter.build_launch_plan(identity=identity, runtime_owner="alice", scope="personal", runtime_key="alice",
                                      port=49123, workspace=selection, model_binding={}, log_path=tmp_path / "run.log")
     config = json.loads(Path(plan.env["HINDSIGHT_CONFIG"]).read_text())
-    assert not config["disabled"]
-    assert plan.env["HINDSIGHT_API_TOKEN"] == selection.capability.token
+    assert config["disabled"] is not memory_enabled
+    assert config["retainSessions"] is memory_enabled
+    if memory_enabled:
+        assert plan.env["HINDSIGHT_API_TOKEN"] == selection.capability.token
+    else:
+        assert "HINDSIGHT_API_TOKEN" not in plan.env
     if entry.startswith("dsh"):
         assert "agent-bridge-hindsight.patch.json" in str(plan.command)
         assert PACKAGE_SPEC in (Path(plan.env["DSH_HOME"]) / "agent-bridge-plugins.txt").read_text()
+        patch = Path(plan.env["DSH_HOME"]) / "agent-bridge-hindsight.patch.json"
+        assert json.loads(patch.read_text())[0]["disabled"] is not memory_enabled
     else:
         extensions = json.loads((Path(plan.env["PI_CODING_AGENT_DIR"]) / "settings.json").read_text())["extensions"]
-        assert extensions[0].endswith("/dist/pi.js")
+        if memory_enabled:
+            assert extensions[0].endswith("/dist/pi.js")
+        else:
+            assert extensions == []
