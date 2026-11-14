@@ -716,6 +716,7 @@ def apply_followup_schema(store: Any, conn: sqlite3.Connection) -> None:
         )
         """
     )
+    store._ensure_columns(conn, "memory_blocks", {"hindsight_bank_id": "TEXT NOT NULL DEFAULT ''"})
     conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_blocks_status ON memory_blocks(status)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_profile_memory_bindings_block ON profile_memory_bindings(block_key)")
     conn.execute(

@@ -96,6 +96,7 @@ class DshRuntimeService(WorkspaceRuntimeService):
         launcher=None,
         passwd_lookup=None,
         mcp_url: str | None = None,
+        memory=None,
     ) -> None:
         resolved_mcp_url = mcp_url or DEFAULT_MCP_URL
         adapter = DshWorkspaceAdapter(
@@ -103,6 +104,7 @@ class DshRuntimeService(WorkspaceRuntimeService):
             launcher=launcher,
             passwd_lookup=passwd_lookup,
             mcp_url=resolved_mcp_url,
+            memory=memory,
         )
         super().__init__(
             adapter=adapter,

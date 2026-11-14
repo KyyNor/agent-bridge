@@ -96,11 +96,19 @@ class DshWorkspaceAdapter:
         launcher=None,
         passwd_lookup=None,
         mcp_url: str,
+        memory=None,
     ) -> None:
         self._configs = configs
         self._launcher = launcher
         self._passwd_lookup = passwd_lookup
         self.mcp_url = mcp_url
+        self._memory = memory
+
+    def _memory_plugin_specs(self, specs, workspace):
+        if self._memory is not None and self._memory.enabled_for(workspace):
+            from agent_bridge.knowledge_management.memory.native import PACKAGE_SPEC
+            return [*specs, PACKAGE_SPEC]
+        return specs
 
     def supports_scope(self, scope: str) -> bool:
         return True
@@ -141,7 +149,7 @@ class DshWorkspaceAdapter:
             identity=identity,
             config_dir=config_dir,
             dsh_binary=dsh_binary_from_command(str(runtime_config.get("web_command") or "")),
-            specs=plugins.read_plugin_list(),
+            specs=self._memory_plugin_specs(plugins.read_plugin_list(), workspace),
         )
         # 模型覆盖必须在插件安装之后读取生效配置：首装会初始化 web profile。
         model_overlay_path = self._write_model_overlay(
@@ -151,11 +159,17 @@ class DshWorkspaceAdapter:
             env=env,
             dsh_binary=dsh_binary_from_command(str(runtime_config.get("web_command") or "")),
         )
+        memory_overlay = None
+        if self._memory is not None:
+            env, memory_overlay = self._memory.prepare(
+                config_dir=config_dir, identity=identity, workspace=workspace, env=env,
+                mcp_url=self.mcp_url, harness="dsh", launcher=self._launcher,
+            )
         command = build_dsh_command(
             str(runtime_config.get("web_command") or ""),
             port,
             patch_paths=[
-                path for path in (model_overlay_path, overlay_path) if path is not None
+                path for path in (model_overlay_path, overlay_path, memory_overlay) if path is not None
             ],
         )
         return WorkspaceLaunchPlan(

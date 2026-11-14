@@ -334,6 +334,30 @@ uv run agent-bridge profile use safe-readonly \
 它不会把完整 profile 正文或绝对文件路径复制进 CLAUDE.md。动态 profile 与
 memory 上下文由服务端维护，并通过 `SessionStart` Hook 注入。
 
+系统管理的「记忆后端」可在 claude-mem 与独立部署的 Hindsight 之间选择。
+Hindsight 需填写 API URL 和可选的上游 API Token，保存后可测试连接；服务必须能从
+Agent Bridge 服务器访问。连接配置保存于 `data/memory/backend.json`（0600），API
+响应只返回凭据是否已配置。空凭据仅适用于已由部署网络隔离的无鉴权服务。
+
+记忆区块、Profile 绑定和归属组规则保持一致。每个区块首次使用 Hindsight 时绑定一个
+随机且持久的 bank ID，不根据 cwd 选 bank。同一 Profile 的 Pi Web、Pi 终端、DSH Web
+和 DSH 终端共享该 bank。进入时必须选择已启用记忆的 Profile；不选或未绑定时不采集，
+也不注册原生记忆工具。运行中撤销绑定或变更归属后，网关立即拒绝读写。
+
+四个入口在启动前以目标 Linux 身份安装官方
+`@vectorize-io/hindsight-coding-agents@0.8.7`，需要 Node.js/npm 及 npm registry 网络。
+Pi 使用隔离目录的 `settings.json` extension，DSH 使用各自 web/tui profile 插件。
+不另配 Hindsight MCP。插件自动保存会话，默认轻量 recall，可通过原生 reflect 工具
+按需综合；自动更新、Git 导入、代码扫描和自动 seed 默认关闭。
+插件使用独立 `HINDSIGHT_CONFIG`；capability 只经环境变量传递，所有 HTTP 读写经
+平台网关校验 capability、现行 Profile 绑定和归属组，并限制为对应 bank 的必要操作。
+上游管理凭据留在平台，不交给客户端。
+
+后端和连接配置在实例下次启动生效；运行中的共享实例保持原 Profile 锁定及启动配置。
+切换后端保留旧 claude-mem 数据，不迁移、不自动回退。Hindsight 控制台独立部署；平台
+通过现有检索/时间线展示记忆，不代理其全库管理控制台。删除平台区块会撤销访问并清理
+本地数据，上游 bank 保留，由部署管理员按数据保留策略清理。
+
 `profile use` 安装的全量检索探测 Hook 会在 `UserPromptSubmit` 同步执行：它在本轮等待至多 20 秒，将命中的资源提示作为当前轮 `additionalContext` 返回；没有命中或失败时不影响正常对话。
 
 常用 Profile 命令：

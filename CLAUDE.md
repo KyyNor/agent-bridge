@@ -110,6 +110,17 @@ MetaMCP `/mcp` 每个请求按 profile/workflow 上下文创建 request-scoped �
 
 Memory 与文档/代码知识平级，但由 Claude Code hooks 实时写入。claude-mem worker 是按需进程池；插件更新由独立多 job 的 `PluginUpdateScheduler` 管理。它与单 cron 的 `BaseCronScheduler` 语义不同，不要为了继承而继承。
 
+记忆后端通过 `memory/backends.py` 的 Protocol 与 registry 接入，默认 claude-mem；
+`memory/backend_config.py` 管理系统选择及脱敏凭据，禁止未知配置静默回退。
+Hindsight 独立部署，每个区块绑定数据库持久化随机 bank。`memory/native.py` 在
+Pi Web/TUI 与 DSH Web/TUI 启动时注入官方固定 0.8.7 原生插件，不额外注入 MCP；
+通过独立配置关闭自动更新、seed、代码扫描和 Git 导入。插件会自动把 companion skill
+同步到目标 Linux HOME（Pi 的 `.pi/agent/skills`、DSH 的 `.agents/skills`）。
+`api/routes/memory_backend.py` 只放行 capability 绑定 bank 的必要 API；bank config
+响应仅投影插件需要的字段，不透传模型凭据。实例启动时冻结上游配置，系统切换只影响
+下次启动；运行时每次读写仍重新校验绑定与归属。原生记忆启用的工作台 MCP 请求隐藏
+并拒绝重复的内置 memory 工具。旧 Claude Code Hook 不在 Hindsight 下写入 claude-mem。
+
 `RetrievalProbeService` 为弱模型提供 Profile 范围的轻量路由探测。来源通过
 `RetrievalProbeAdapter` 注册，领域服务只负责模型短句、并发 deadline、状态聚合和审计，
 不按来源类型建立中心分发链。当前 full-probe 只装配 Artifact 来源，探测只返回资源级

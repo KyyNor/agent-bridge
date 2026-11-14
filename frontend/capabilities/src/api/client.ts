@@ -3,6 +3,8 @@ import type {
   BackendAgent,
   BackendAgentPreset,
   CatalogSource,
+  MemoryBackendConfig,
+  MemoryBackendConfigUpdate,
   ClaudeMemConfig,
   ClaudeMemConfigUpdate,
   RetrievalProbeLlmConfig,
@@ -523,6 +525,9 @@ export const api = {
     if (cursor) qs.set('cursor', cursor)
     return get<MemoryTimelineResult>(`/memory/blocks/${blockKey}/timeline?${qs}`)
   },
+  getMemoryBackendConfig: () => get<MemoryBackendConfig>('/memory/backend-config'),
+  saveMemoryBackendConfig: (config: MemoryBackendConfigUpdate) => put<MemoryBackendConfig>('/memory/backend-config', config),
+  testMemoryBackend: () => post<{ status: string }>('/memory/backend-config/test'),
   getClaudeMemConfig: () => get<ClaudeMemConfig>('/claude-mem/config'),
   saveClaudeMemConfig: (config: ClaudeMemConfigUpdate) =>
     post<ClaudeMemConfig>('/claude-mem/config', config),

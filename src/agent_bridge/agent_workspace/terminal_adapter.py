@@ -74,7 +74,7 @@ class DshTerminalAdapter(TerminalAdapter, DshWorkspaceAdapter):
             if os.geteuid() == 0:
                 os.chown(directory, identity.uid, identity.gid)
         binary = dsh_binary_from_command(str(self._configs.runtime_config_for_runtime().get("web_command") or ""))
-        specs = plugins.parse_plugin_list(TUI_PLUGIN_LIST.read_text(encoding="utf-8"))
+        specs = self._memory_plugin_specs(plugins.parse_plugin_list(TUI_PLUGIN_LIST.read_text(encoding="utf-8")), workspace)
         self._install_plugins(runtime_owner, identity=identity, config_dir=config_dir, dsh_binary=binary, specs=specs)
         if not set(specs) <= set(plugins.read_installed_specs(config_dir)):
             raise ValidationError("DSH TUI 插件未安装完成，请检查工作台日志后重试")
@@ -90,8 +90,14 @@ class DshTerminalAdapter(TerminalAdapter, DshWorkspaceAdapter):
         env.pop("AGENT_BRIDGE_DSH_RUNTIME", None)
         overlay = self._write_workspace_overlay(config_dir, identity, runtime_owner, workspace)
         model_overlay = self._write_model_overlay(config_dir, identity, model_binding, env=env, dsh_binary=binary)
+        memory_overlay = None
+        if self._memory is not None:
+            env, memory_overlay = self._memory.prepare(
+                config_dir=config_dir, identity=identity, workspace=workspace, env=env,
+                mcp_url=self.mcp_url, harness="dsh", launcher=self._launcher,
+            )
         command = [binary, "--profile", self.plugin_profile]
-        for patch in (model_overlay, overlay):
+        for patch in (model_overlay, overlay, memory_overlay):
             if patch is not None:
                 command.extend(["--patch", str(patch)])
         return bridge_plan(command, env, port, log_path, self.display_name, workspace.directory if workspace else None)

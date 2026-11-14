@@ -131,6 +131,8 @@ class MemoryHookService:
                 timeout_seconds=timeout_seconds,
             )
         resolved = self.memory_service.resolve_profile_block(actor, profile_key)
+        if not self.memory_service.backend.supports_claude_hooks:
+            return {"stdout": NOOP_HOOK_STDOUT, "stderr": "", "exit_code": 0, "status": "unsupported_backend"}
         if resolved["status"] != "ok":
             logger.info("memory hook 未绑定记忆块 actor=%s profile=%s status=%s", actor, profile_key, resolved["status"])
             return {"stdout": NOOP_HOOK_STDOUT, "stderr": "", "exit_code": 0, "status": resolved["status"]}
@@ -245,6 +247,8 @@ class MemoryHookService:
         logger.info("claude-mem 开始同步 block=%s actor=%s profile=%s", block_key, actor, profile_key)
         sections = [section for section in [self._profile_context(actor, profile_key)] if section]
         memory_status = resolved["status"]
+        if memory_status == "ok" and not self.memory_service.backend.supports_claude_hooks:
+            memory_status = "unsupported_backend"
         if memory_status == "ok":
             worker = self.worker_service or self.memory_service.worker_service
             if worker is None:

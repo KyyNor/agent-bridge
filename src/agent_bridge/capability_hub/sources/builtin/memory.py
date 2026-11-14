@@ -5,7 +5,8 @@ from typing import TYPE_CHECKING, Any
 
 from agent_bridge.capability_hub.models import ToolType
 from agent_bridge.capability_hub.sources.builtin.base import BuiltinTool
-from agent_bridge.core.domain import NotFound, ValidationError
+from agent_bridge.core.domain import NotFound, ValidationError, AccessDenied
+from agent_bridge.knowledge_management.memory.native import NATIVE_MEMORY_ACTIVE
 
 if TYPE_CHECKING:
     from agent_bridge.app.service import AgentBridgeService
@@ -23,6 +24,8 @@ class MemoryBuiltinProvider:
         self.service = service
 
     def list_resources(self, actor: str, profile_key: str | None) -> list[dict[str, Any]]:
+        if NATIVE_MEMORY_ACTIVE.get():
+            return []
         resolved = self.service.memory.resolve_profile_block(actor, profile_key)
         if resolved["status"] != "ok":
             return []
@@ -30,6 +33,10 @@ class MemoryBuiltinProvider:
         return [{"resource_type": "memory_block", "resource_key": block["block_key"], "name": block["name"]}]
 
     def list_tools(self, actor: str, profile_key: str | None) -> list[BuiltinTool]:
+        if NATIVE_MEMORY_ACTIVE.get():
+            return []
+        if profile_key and self.service.memory.resolve_profile_block(actor, profile_key)["status"] != "ok":
+            return []
         return [
             BuiltinTool(
                 "search",
@@ -88,6 +95,8 @@ class MemoryBuiltinProvider:
         workflow_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         del workflow_context
+        if NATIVE_MEMORY_ACTIVE.get():
+            raise AccessDenied("当前工作台请使用原生 Hindsight 记忆工具")
         block_key = str(arguments.get("block") or "").strip() or None
         logger.debug("Memory 调用 actor=%s profile=%s tool=%s block=%s", actor, profile_key, tool, block_key)
         if tool == "search":

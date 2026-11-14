@@ -39,6 +39,20 @@ class MemoryRepository:
                 raise KeyError(f"memory block not found: {block_key}")
             return block
 
+    def ensure_hindsight_bank_id(self, block_key: str) -> str:
+        """首次使用时绑定随机 bank；重命名、重启与切换后端均保持稳定。"""
+        from uuid import uuid4
+
+        with self._connect() as conn:
+            conn.execute("UPDATE memory_blocks SET hindsight_bank_id = ? "
+                         "WHERE block_key = ? AND hindsight_bank_id = ''",
+                         ("agent-bridge-" + uuid4().hex, block_key))
+            row = conn.execute("SELECT hindsight_bank_id FROM memory_blocks WHERE block_key = ?",
+                               (block_key,)).fetchone()
+            if row is None:
+                raise KeyError("记忆区块不存在")
+            return str(row[0])
+
     def list_memory_blocks(self) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(

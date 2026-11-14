@@ -12,9 +12,9 @@ from agent_bridge.agent_workspace.launcher import resolve_linux_identity
 
 class TerminalRuntimeService(WorkspaceRuntimeService):
     def __init__(self, *, adapter_type, paths, configs, access, admins, launcher=None, passwd_lookup=None,
-                 mcp_url=DEFAULT_MCP_URL):
+                 mcp_url=DEFAULT_MCP_URL, memory=None):
         launcher = launcher or PopenDshLauncher()
-        adapter = adapter_type(configs=configs, launcher=launcher, mcp_url=mcp_url)
+        adapter = adapter_type(configs=configs, launcher=launcher, mcp_url=mcp_url, memory=memory)
         super().__init__(adapter=adapter, paths=paths, configs=configs, access=access, admins=admins,
                          launcher=launcher, passwd_lookup=passwd_lookup, mcp_url=mcp_url,
                          state_dir_name=adapter.slug + "-terminal-runtimes")
