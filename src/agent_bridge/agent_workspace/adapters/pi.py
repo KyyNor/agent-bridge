@@ -104,10 +104,11 @@ class PiWorkspaceAdapter:
     # 两者都是 <500，故以 /api/home 作为就绪探测更明确。
     probe_path = "/api/home"
 
-    def __init__(self, *, configs, launcher=None, mcp_url: str) -> None:
+    def __init__(self, *, configs, launcher=None, mcp_url: str, memory=None) -> None:
         self._configs = configs
         self._launcher = launcher
         self.mcp_url = mcp_url
+        self._memory = memory
         # (上游 target, 密码摘要) → (会话 Cookie 值, 换取时刻)。代理对每个请求都
         # 需要上游会话；逐请求 POST /api/web-auth 会给每个静态资源、API、SSE
         # 请求叠加一次阻塞登录，并让 pi-web 不断新建会话。
@@ -192,6 +193,9 @@ class PiWorkspaceAdapter:
             workspace=workspace,
             mark=process_tree.runtime_mark_value(scope, runtime_key),
         )
+        if self._memory is not None:
+            env, _ = self._memory.prepare(config_dir=config_dir, identity=identity, workspace=workspace,
+                                          env=env, mcp_url=self.mcp_url, harness="pi", launcher=self._launcher)
         logger.info(
             "Pi 工作台启动准备完成 runtime=%s config_dir=%s models=%d default_model=%s profile=%s",
             runtime_key,

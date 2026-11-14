@@ -396,6 +396,8 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
 
     from agent_bridge.api.routes.memory import create_memory_routes
     app.include_router(create_memory_routes(service, actor), prefix="/api/v1")
+    from agent_bridge.api.routes.memory_backend import create_memory_backend_routes
+    app.include_router(create_memory_backend_routes(service, actor), prefix="/api/v1")
 
     from agent_bridge.api.routes.business_ledgers import create_business_ledger_routes
     app.include_router(create_business_ledger_routes(service, actor), prefix="/api/v1")

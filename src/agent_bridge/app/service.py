@@ -393,6 +393,7 @@ class AgentBridgeService:
         from agent_bridge.dsh.service import DshRuntimeService
 
         self.dsh = DshRuntimeService(
+            memory=self.memory.native,
             paths=paths,
             configs=self.dsh_configs,
             access=self.access,
@@ -401,6 +402,7 @@ class AgentBridgeService:
         from agent_bridge.agent_workspace.pi_service import PiRuntimeService
 
         self.pi = PiRuntimeService(
+            memory=self.memory.native,
             paths=paths,
             configs=self.dsh_configs,
             access=self.access,
@@ -415,7 +417,7 @@ class AgentBridgeService:
 
         self.workspace_terminals = {
             slug: TerminalRuntimeService(adapter_type=adapter, paths=paths, configs=self.dsh_configs,
-                                         access=self.access, admins=admins)
+                                         access=self.access, admins=admins, memory=self.memory.native)
             for slug, adapter in TERMINAL_ADAPTERS.items()
         }
         self.workspace_runtimes = {

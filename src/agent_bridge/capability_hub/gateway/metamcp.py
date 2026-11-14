@@ -561,6 +561,7 @@ def setup_mcp_route(
         workspace_capability_token = request.headers.get(
             DSH_CAPABILITY_HEADER, ""
         ).strip()
+        native_memory_scope = nullcontext()
         if workspace_capability_token:
             if capability_token:
                 raise AccessDenied("不能同时携带工作流与工作台 capability")
@@ -570,6 +571,7 @@ def setup_mcp_route(
                 workspace_capability_token,
                 profile_key=profile,
             )
+            native_memory_scope = service.memory.native.mcp_scope(workspace_capability)
             profile = workspace_capability.profile_key
             actor = workspace_capability.user_id
             runtime_scope = service.access.bind_actor_group(
@@ -598,7 +600,7 @@ def setup_mcp_route(
             profile,
             bool(workflow_context),
         )
-        with runtime_scope:
+        with runtime_scope, native_memory_scope:
             actor_token = _request_actor.set(actor)
             token = _request_profile.set(profile)
             workflow_token = _request_workflow_context.set(workflow_context)

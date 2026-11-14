@@ -96,11 +96,13 @@ class DshWorkspaceAdapter:
         launcher=None,
         passwd_lookup=None,
         mcp_url: str,
+        memory=None,
     ) -> None:
         self._configs = configs
         self._launcher = launcher
         self._passwd_lookup = passwd_lookup
         self.mcp_url = mcp_url
+        self._memory = memory
 
     def supports_scope(self, scope: str) -> bool:
         return True
@@ -151,11 +153,17 @@ class DshWorkspaceAdapter:
             env=env,
             dsh_binary=dsh_binary_from_command(str(runtime_config.get("web_command") or "")),
         )
+        memory_overlay = None
+        if self._memory is not None:
+            env, memory_overlay = self._memory.prepare(
+                config_dir=config_dir, identity=identity, workspace=workspace, env=env,
+                mcp_url=self.mcp_url, harness="dsh", launcher=self._launcher,
+            )
         command = build_dsh_command(
             str(runtime_config.get("web_command") or ""),
             port,
             patch_paths=[
-                path for path in (model_overlay_path, overlay_path) if path is not None
+                path for path in (model_overlay_path, overlay_path, memory_overlay) if path is not None
             ],
         )
         return WorkspaceLaunchPlan(

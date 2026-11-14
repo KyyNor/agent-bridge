@@ -90,8 +90,14 @@ class DshTerminalAdapter(TerminalAdapter, DshWorkspaceAdapter):
         env.pop("AGENT_BRIDGE_DSH_RUNTIME", None)
         overlay = self._write_workspace_overlay(config_dir, identity, runtime_owner, workspace)
         model_overlay = self._write_model_overlay(config_dir, identity, model_binding, env=env, dsh_binary=binary)
+        memory_overlay = None
+        if self._memory is not None:
+            env, memory_overlay = self._memory.prepare(
+                config_dir=config_dir, identity=identity, workspace=workspace, env=env,
+                mcp_url=self.mcp_url, harness="dsh", launcher=self._launcher,
+            )
         command = [binary, "--profile", self.plugin_profile]
-        for patch in (model_overlay, overlay):
+        for patch in (model_overlay, overlay, memory_overlay):
             if patch is not None:
                 command.extend(["--patch", str(patch)])
         return bridge_plan(command, env, port, log_path, self.display_name, workspace.directory if workspace else None)

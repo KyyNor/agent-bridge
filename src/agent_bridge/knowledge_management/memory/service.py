@@ -12,6 +12,8 @@ from agent_bridge.core.editing import attach_edit_token, require_edit_token
 from agent_bridge.core.slug import make_slug
 from agent_bridge.knowledge_management.memory.claude_mem.worker import ClaudeMemWorkerService
 from agent_bridge.knowledge_management.memory.hooks import MemoryHookService
+from agent_bridge.knowledge_management.memory.backend_config import MemoryBackendConfig
+from agent_bridge.knowledge_management.memory.backends import ClaudeMemBackend, HindsightBackend, MemoryBackendRegistry
 from agent_bridge.knowledge_management.memory.models import ACTIVE_MEMORY_STATUSES
 from agent_bridge.storage.sqlite import SQLiteStore
 
@@ -35,11 +37,21 @@ class MemoryService:
         self.admins = admins
         self.access = access
         self.worker_service = worker_service or ClaudeMemWorkerService(paths=paths)
+        self.backend_config = MemoryBackendConfig(paths)
+        self.backends = MemoryBackendRegistry([
+            ClaudeMemBackend(lambda: self.worker_service), HindsightBackend(self.backend_config, store.memory),
+        ])
+        from agent_bridge.knowledge_management.memory.native import NativeMemoryIntegration
+        self.native = NativeMemoryIntegration(self)
         self.hooks = MemoryHookService(
             memory_service=self,
             worker_service=self.worker_service,
             governance_service=governance_service,
         )
+
+    @property
+    def backend(self):
+        return self.backends.require(self.backend_config.read()["backend"])
 
     def create_block(self, actor: str, block_key: str, name: str, description: str) -> dict[str, Any]:
         scope = (
@@ -194,7 +206,7 @@ class MemoryService:
         if resolved["status"] != "ok":
             logger.info("memory 检索跳过 actor=%s status=%s", actor, resolved["status"])
             return {"status": resolved["status"], "block_key": None, "items": []}
-        return self.worker_service.search(resolved["block"], query=query, limit=limit)
+        return self.backend.search(resolved["block"], query=query, limit=limit)
 
     def timeline(
         self,
@@ -210,7 +222,7 @@ class MemoryService:
         if resolved["status"] != "ok":
             logger.info("memory 时间线跳过 actor=%s status=%s", actor, resolved["status"])
             return {"status": resolved["status"], "block_key": None, "items": [], "next_cursor": None}
-        return self.worker_service.timeline(resolved["block"], limit=limit, cursor=cursor)
+        return self.backend.timeline(resolved["block"], limit=limit, cursor=cursor)
 
     def get_observation(
         self,
@@ -225,36 +237,36 @@ class MemoryService:
         if resolved["status"] != "ok":
             logger.info("memory 读取观察跳过 actor=%s status=%s", actor, resolved["status"])
             return {"status": resolved["status"], "block_key": None, "item": None}
-        return self.worker_service.get_observation(resolved["block"], observation_id)
+        return self.backend.get_observation(resolved["block"], observation_id)
 
     def block_health(self, actor: str, block_key: str) -> dict[str, Any]:
         block = self.get_block(actor, block_key)
-        health = self.worker_service.health(block)
+        health = self.backend.health(block)
         self.store.memory.update_memory_block_health(block_key, health)
         return {"block_key": block_key, **health}
 
     def dashboard_status(self, actor: str, block_key: str) -> dict[str, Any]:
         block = self.get_block(actor, block_key)
-        return self._external_dashboard_payload(block_key, self.worker_service.dashboard_status(block))
+        return self._external_dashboard_payload(block_key, self.backend.dashboard_status(block))
 
     def start_dashboard(self, actor: str, block_key: str) -> dict[str, Any]:
         block = self.get_block(actor, block_key)
-        return self._external_dashboard_payload(block_key, self.worker_service.start_dashboard(block))
+        return self._external_dashboard_payload(block_key, self.backend.start_dashboard(block))
 
     def stop_dashboard(self, actor: str, block_key: str) -> dict[str, Any]:
         block = self.get_block(actor, block_key)
-        return self.worker_service.stop_dashboard(block)
+        return self.backend.stop_dashboard(block)
 
     def touch_dashboard(self, actor: str, block_key: str) -> dict[str, Any]:
         block = self.get_block(actor, block_key)
-        self.worker_service.touch_dashboard(block)
+        self.backend.touch_dashboard(block)
         return {"ok": True}
 
     def dashboard_proxy_target(self, block_key: str) -> str | None:
         block = self.store.memory.get_memory_block(block_key)
         if block is None or block.get("status") != "active":
             return None
-        status = self.worker_service.dashboard_status(block)
+        status = self.backend.dashboard_status(block)
         if not status.get("running"):
             return None
         url = status.get("url")

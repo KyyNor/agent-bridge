@@ -11,3 +11,5 @@
 @anionex/dsh-turn-rewind@0.3.10
 dsh-better-sidebar@0.28.0
 dsh-context@0.74.0
+# 通用记忆插件始终安装；是否采集由启动时托管 disabled 配置控制。
+@vectorize-io/hindsight-coding-agents@0.8.7

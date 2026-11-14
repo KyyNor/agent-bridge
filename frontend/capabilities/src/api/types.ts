@@ -1928,3 +1928,18 @@ export interface TerminalDirectoryListing {
   entries: TerminalFileEntry[]
   truncated: boolean
 }
+
+
+export interface MemoryBackendConfig {
+  backend: string
+  url: string
+  api_token_set: boolean
+  edit_token: string
+}
+export interface MemoryBackendConfigUpdate {
+  backend: string
+  url: string
+  api_token?: string | null
+  clear_api_token?: boolean
+  expected_edit_token?: string
+}

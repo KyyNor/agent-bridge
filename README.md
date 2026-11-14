@@ -313,7 +313,7 @@ export AGENT_BRIDGE_EVAL_AGENT_WORKER_IMAGE=agent-bridge-agent-worker:latest
 
 Claude / Claude Code 执行后端和 SDK 已移除。升级读取旧 `server.toml` 时会隔离 `agents.claude`（包括以其他 slug 指定 `type = "claude"` 的旧条目），并在配置 API 与管理页提供迁移提示；原文件不会自动改写。旧的 `default = "claude"` 保留为停用状态，默认执行明确拒绝，不会自动换用其他后端。管理员必须在 Coding Agent 运行配置中明确选择 DSH、Pi、Codex 或 OpenCode 并保存。新配置和新执行请求中的 `claude` 都会被拒绝。
 
-已有工作流节点绑定 `claude` 时，定义和历史运行仍可查看；保存、导入和执行预检会提示后端已停用。请逐项修改节点后端，再显式恢复任务调度。历史运行、事件、旧 transcript 和 claude-mem 数据继续保留。claude-mem 替换由 [Issue #38](https://github.com/KyyNor/agent-bridge/issues/38) 单独处理。
+已有工作流节点绑定 `claude` 时，定义和历史运行仍可查看；保存、导入和执行预检会提示后端已停用。请逐项修改节点后端，再显式恢复任务调度。历史运行、事件、旧 transcript 和 claude-mem 数据继续保留。Hindsight 记忆接入由 [Issue #38](https://github.com/KyyNor/agent-bridge/issues/38) 跟踪，配置见下方「记忆后端」。
 
 旧 `profile use` / `profile sync` 已停止写入 Claude MCP、Hook 与说明块。`profile unuse` 仍会列出当前项目和用户级旧接入，交互选择后只清理 Agent Bridge 托管配置，保留用户自己的 MCP server、Hook、文档及历史记忆数据。非交互卸载可使用 `--scope project|user --yes`。既有记忆 Hook 接收和查询接口保留兼容。
 
@@ -323,6 +323,34 @@ uv run agent-bridge profile show safe-readonly
 uv run agent-bridge profile unuse
 uv run agent-bridge profile pins refresh safe-readonly
 ```
+
+## 记忆后端
+
+系统管理的「记忆后端」可在 claude-mem 与独立部署的 Hindsight 之间选择。
+Hindsight 需填写 API URL 和可选的上游 API Token，保存后可测试连接；服务必须能从
+Agent Bridge 服务器访问。连接配置保存于 `data/memory/backend.json`（0600），API
+响应只返回凭据是否已配置。空凭据仅适用于已由部署网络隔离的无鉴权服务。
+
+记忆区块、Profile 绑定和归属组规则保持一致。每个区块首次使用 Hindsight 时绑定一个
+随机且持久的 bank ID，不根据 cwd 选 bank。同一 Profile 的 Pi Web、Pi 终端、DSH Web
+和 DSH 终端共享该 bank。进入时必须选择已启用记忆的 Profile；不选或未绑定时不采集，
+也不注册原生记忆工具。运行中撤销绑定或变更归属后，网关立即拒绝读写。
+
+四个入口在启动前以目标 Linux 身份安装官方
+`@vectorize-io/hindsight-coding-agents@0.8.7`，需要 Node.js/npm 及 npm registry 网络。
+Pi 使用隔离目录的 `settings.json` extension。DSH 的 web/tui 静态插件清单均包含同一
+记忆包，无论是否启用记忆都按通用首装机制安装；关闭时通过托管 `disabled` 配置阻止
+工具注册和会话采集。Pi 和 DSH 共用该 npm 包，分别加载 `dist/pi.js` 和 `dist/dsh.js`。
+不另配 Hindsight MCP。插件自动保存会话，默认轻量 recall，可通过原生 reflect 工具
+按需综合；自动更新、Git 导入、代码扫描和自动 seed 默认关闭。
+插件使用独立 `HINDSIGHT_CONFIG`；capability 只经环境变量传递，所有 HTTP 读写经
+平台网关校验 capability、现行 Profile 绑定和归属组，并限制为对应 bank 的必要操作。
+上游管理凭据留在平台，不交给客户端。
+
+后端和连接配置在实例下次启动生效；运行中的共享实例保持原 Profile 锁定及启动配置。
+切换后端保留旧 claude-mem 数据，不迁移、不自动回退。Hindsight 控制台独立部署；平台
+通过现有检索/时间线展示记忆，不代理其全库管理控制台。删除平台区块会撤销访问并清理
+本地数据，上游 bank 保留，由部署管理员按数据保留策略清理。
 
 ## 测试与质量检查
 

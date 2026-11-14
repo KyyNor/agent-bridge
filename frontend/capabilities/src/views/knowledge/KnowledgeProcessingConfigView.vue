@@ -10,6 +10,7 @@ import { Input } from '../../components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../../components/ui/dialog'
 import { Badge } from '../../components/ui/badge'
 import StatusBadge from '../../components/StatusBadge.vue'
+import MemoryBackendConfigSection from '../../components/memory/MemoryBackendConfigSection.vue'
 import DshConfigSection from '../../components/dsh/DshConfigSection.vue'
 import { alert, confirm } from '../../composables/useConfirm'
 
@@ -1003,6 +1004,8 @@ async function deleteBackend(slug: string) {
         </div>
       </CardContent>
     </Card>
+
+    <MemoryBackendConfigSection />
 
     <!-- Claude Mem 运行配置 -->
     <Card>

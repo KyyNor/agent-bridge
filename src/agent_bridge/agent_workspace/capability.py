@@ -57,6 +57,7 @@ class WorkspaceCapability:
     profile_key: str
     owner_group_key: str
     expires_at_monotonic: float | None
+    shared_runtime: bool = False
 
 
 @dataclass(frozen=True)
@@ -105,6 +106,7 @@ class WorkspaceCapabilityRegistry:
             user_id=user_id,
             profile_key=profile_key,
             owner_group_key=owner_group_key,
+            shared_runtime=bool(key and key.startswith(SHARED_RUNTIME_CAPABILITY_PREFIX)),
             expires_at_monotonic=(
                 time.monotonic() + max(1, ttl_seconds) if ttl_seconds is not None else None
             ),

@@ -51,12 +51,14 @@ class PiRuntimeService(WorkspaceRuntimeService):
         launcher=None,
         passwd_lookup=None,
         mcp_url: str | None = None,
+        memory=None,
     ) -> None:
         resolved_mcp_url = mcp_url or DEFAULT_MCP_URL
         adapter = PiWorkspaceAdapter(
             configs=configs,
             launcher=launcher,
             mcp_url=resolved_mcp_url,
+            memory=memory,
         )
         super().__init__(
             adapter=adapter,

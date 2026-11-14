@@ -109,7 +109,7 @@ async function maybeStartMemoryTour() {
 }
 
 async function deleteBlock(block: MemoryBlock) {
-  if (!await confirm({ title: '删除记忆区块', description: `确定删除记忆区块「${block.name}」？将停止 worker 进程并清除该区块的全部记忆数据，且不可恢复。`, destructive: true, confirmText: '删除' })) return
+  if (!await confirm({ title: '删除记忆区块', description: `确定删除记忆区块「${block.name}」？将停止 worker 并清除本地区块数据，且不可恢复。Hindsight 上游 bank 保留，由部署管理员清理。`, destructive: true, confirmText: '删除' })) return
   try {
     await api.deleteMemoryBlock(block.block_key)
     await loadBlocks()
