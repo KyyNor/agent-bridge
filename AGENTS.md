@@ -24,6 +24,7 @@
 - Mock 后端只能由显式 `type = "mock"` 使用，不得作为未知或缺失配置的静默回退。
 - CodeGraph CLI/MCP 是同一正式后端的两种调用通道，统一通过 `CodeGraphBackend` 使用。
 - 文档知识库上传同步策略按后端分为 `immediate` / `scheduled` / `paused`。新库未显式设置的目标随当前默认检索后端计算，默认后端为 `scheduled`、其余为 `paused`。切换默认后端时保留显式策略，存量库继承旧布尔配置。手动与定时同步跳过 `paused` 目标并保留待办；指定后端时建库、补排、领取和恢复均限定在该后端。
+- 知识库默认检索配置的后端选项来自登录可读的 `GET /api/v1/backends-catalog` 投影（slug/backend_type/runtime_status/supports_agents，不含接入配置与密钥），Weknora Agent 列表 `GET /api/v1/backends/{slug}/agents` 登录即可读（响应已脱敏）；后端管理 payload（`GET /backends`）、agent-types 与创建 Agent 仍管理员专属。前端保存默认检索配置时，后端类型无法判定必须保留已保存的 `default_agent_id`，不得强制清空；Agent 列表加载失败要给出明确提示与重试。
 - 禁止为 CodeGraph 恢复 SQLite 隐式文本索引降级；后端缺失或索引未就绪必须明确失败。
 - 仓库文件读取和文件列表基于 Git 镜像，不应依赖 CodeGraph 后端。
 - 工作流产物的文本检索使用 jieba 预分词与 SQLite FTS5；结构化范围条件（Profile、current/history、标签、格式和路径前缀）必须继续在 `workflow_artifacts` 主表上过滤。中文查询按分词后的关键词组合匹配，长度至少 3 的 ASCII 标识符支持前缀匹配，短 token 和带分隔符的路径/标识符保持字面匹配。

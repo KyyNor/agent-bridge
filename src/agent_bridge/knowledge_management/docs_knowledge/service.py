@@ -123,7 +123,6 @@ class DocsKnowledgeService:
         return adapter
 
     def list_backend_agents(self, actor: str, slug: str) -> list[dict[str, Any]]:
-        require_admin_user(actor, self.admins)
         adapter = self._agent_adapter(slug)
         if adapter is None:
             return []
@@ -311,6 +310,23 @@ class DocsKnowledgeService:
                 exc,
                 exc_info=True,
             )
+
+    def list_backend_catalog(self) -> list[dict[str, Any]]:
+        """知识后端目录的登录可读投影：只含选择与展示字段，不含接入配置与密钥。"""
+        registry = self.registry
+        payload = []
+        for row in self.store.list_backends():
+            slug = row["slug"]
+            adapter = registry.get(slug) if registry else None
+            payload.append(
+                {
+                    "slug": slug,
+                    "backend_type": row.get("backend_type") or slug,
+                    "runtime_status": "active" if adapter is not None else "inactive",
+                    "supports_agents": bool(adapter.capabilities().supports_agents) if adapter is not None else False,
+                }
+            )
+        return payload
 
     def list_backends(self, actor: str) -> list[dict[str, Any]]:
         require_admin_user(actor, self.admins)

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { api } from '../../api/client'
-import type { BackendAgent, BackendInfo, KnowledgeBaseSummary, ProfileResourceRule, ProjectProfile } from '../../api/types'
+import type { BackendAgent, BackendCatalogEntry, KnowledgeBaseSummary, ProfileResourceRule, ProjectProfile } from '../../api/types'
 import { Button } from '../ui/button'
 import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog'
 
@@ -10,7 +10,7 @@ type ResourceProfileAssignment = ProfileResourceRule & { profile_key: string }
 const props = defineProps<{
   open: boolean
   kb: KnowledgeBaseSummary | null
-  backends: BackendInfo[]
+  backends: BackendCatalogEntry[]
 }>()
 
 const emit = defineEmits<{

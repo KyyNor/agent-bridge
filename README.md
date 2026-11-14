@@ -453,6 +453,8 @@ Draft 2020-12 Schema 中的 `$defs` 及其本地 `$ref` 会自动转换为 Draft
 
 例如，设 Weknora 为默认检索后端，并让其他后端暂不同步。API 可用 `PUT /api/v1/kbs/team-docs/sync-policy` 提交 `{"backend_sync_policies":{"weknora":"scheduled","ragflow":"paused"}}`，也可用 `POST /api/v1/kbs/team-docs/sync?backend=weknora` 立即处理 Weknora 的待办。
 
+知识库详情的「默认检索后端」对归属组普通用户开放编辑：后端与 Weknora Agent 选项来自登录可读的目录接口（`GET /api/v1/backends-catalog`、`GET /api/v1/backends/{slug}/agents`），不需要平台管理员权限。Agent 列表加载失败会显示明确提示并可重试；此时保存不会清空已配置的默认 Agent。
+
 当前部署模型是内部可信 VM，不提供互联网级认证。浏览器身份来自总账户系统换取的会话 Cookie；CLI、MCP 与 Agent 进程身份来自受信的 Linux 用户名 Header。部署方必须限制监听地址、网络访问和反向代理边界，并禁止外部请求直接进入 CLI Header 信任通道。
 
 ## 目录概览
