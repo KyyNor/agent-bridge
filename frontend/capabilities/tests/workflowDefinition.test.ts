@@ -212,7 +212,7 @@ test('workflow backend options come from the runtime registry payload and keep c
     ],
   }
 
-  assert.deepEqual(deriveWorkflowBackendKeys(runtime), ['claude', 'team-codex'])
+  assert.deepEqual(deriveWorkflowBackendKeys(runtime), ['team-codex'])
 })
 
 test('workflow backend options come from the catalog payload without configured backends', () => {
@@ -225,7 +225,7 @@ test('workflow backend options come from the catalog payload without configured 
     ],
   }
 
-  assert.deepEqual(deriveWorkflowBackendKeys(catalog), ['claude', 'codex'])
+  assert.deepEqual(deriveWorkflowBackendKeys(catalog), ['codex'])
   assert.deepEqual(
     deriveWorkflowBackendKeys({ default_backend: 'codex', available_backends: [] }),
     ['codex'],
@@ -249,4 +249,9 @@ test('workflow validation run guard blocks duplicates and ignores stale response
   assert.equal(guard.validating, true)
   assert.equal(finishWorkflowValidationRun(guard, second), true)
   assert.equal(guard.validating, false)
+})
+
+
+test('retired Claude defaults never become workflow backend options', () => {
+  assert.deepEqual(deriveWorkflowBackendKeys({ default_backend: 'claude', available_backends: [] }), [])
 })

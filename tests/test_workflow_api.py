@@ -61,7 +61,7 @@ def test_malformed_definition_uses_structured_validator_issues_for_save_and_vali
                     "type": "agent",
                     "name": "Broken agent",
                     "position": {"x": 0, "y": 0},
-                    "config": {"prompt": 42, "backend_key": "claude"},
+                    "config": {"prompt": 42, "backend_key": "dsh"},
                 }
             ],
             "edges": [],

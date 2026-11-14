@@ -114,7 +114,7 @@ async function toggleStatus(profile: ProjectProfile) {
 }
 
 function getProfileCommand(profile: ProjectProfile) {
-  return `agent-bridge profile use ${profile.profile_key}`
+  return `agent-bridge profile show ${profile.profile_key}`
 }
 
 async function copyCommand(profile: ProjectProfile) {

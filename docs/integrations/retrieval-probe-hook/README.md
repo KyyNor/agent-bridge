@@ -1,4 +1,6 @@
-# Claude Code 全量检索探测 Hook
+# Claude Code 全量检索探测 Hook（旧接入兼容）
+
+> Claude 执行后端及新接入安装已下线。本文只说明既有 Hook 的兼容协议，不能用于安装新的 Claude 接入。`profile use` / `profile sync` 均已停用；卸载请使用 `profile unuse`。记忆替换见 #38。
 
 ## 用途
 
@@ -7,9 +9,7 @@
 探测结果只告诉 Agent “哪些关键词在哪些资源中命中、建议继续调用哪个工具”，
 不返回正文，也不替 Agent 生成答案。
 
-`profile use` 会在所选 project/user scope 自动安装这个 Hook，并在 Claude
-托管说明块中声明 `<system-reminder>` 是补充的系统信息。重复执行不会累加；
-切换 Profile 时会替换 Agent Bridge 管理的旧 Hook，用户已有 Hook 保持不变。
+既有 Hook 的接收、审计与探测 API 继续兼容，保留历史数据。
 
 ## 工作方式
 
@@ -44,20 +44,9 @@ Wiki、CodeGraph 和 Memory 不参与本探测。
 3. Claude Code 运行环境可以执行 `agent-bridge`，并访问 Agent Bridge API。
 4. Profile 已配置相应资源权限；API 不接受客户端传入资源列表绕过 Profile。
 
-## 自动安装与手工配置
+## 旧配置协议示例
 
-正常使用时执行：
-
-```bash
-agent-bridge profile use chengdu \
-  --scope project \
-  --url http://127.0.0.1:8765/mcp
-```
-
-Agent Bridge 会生成等价于下方内容的 Claude Code settings。下方 JSON 仅用于
-排障或需要绕过 `profile use` 的独立调试：
-
-在所需作用域的 Claude Code settings 中加入：
+以下仅供识别和排查存量配置；本版本不再安装这些配置。
 
 ```json
 {
@@ -189,7 +178,7 @@ curl -X POST http://127.0.0.1:8765/api/v1/retrieval/probe \
 
 从 Claude Code settings 中删除带
 `--agent-bridge-hook-id agent-bridge-retrieval-probe` 的 `UserPromptSubmit`
-Hook entry 即可临时停用。再次执行 `profile use` 会重新安装它。
+Hook entry 即可临时停用。新版本不再安装或恢复它。
 
 ## 当前边界
 

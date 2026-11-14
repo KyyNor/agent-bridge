@@ -11,12 +11,12 @@ Agent Client Protocol（ACP v1，JSON-RPC over stdio）完成一次任务：
 - 模型接入（Base URL / 模型目录 / API Key / Linux 身份）复用 DSH Web
   Runtime 的 group 级配置与用户级目录，由
   :class:`agent_bridge.dsh.agent_runtime.DshAgentRuntimeResolver` 解析；
-- ``.mcp.json``（Claude 形态）转换为 ACP ``session/new`` 的 stdio/HTTP MCP
+- ``.mcp.json``（mcpServers 形态）转换为 ACP ``session/new`` 的 stdio/HTTP MCP
   声明，Profile 能力平面照常经 Agent Bridge MetaMCP 网关生效；
 - 权限请求（``session/request_permission``）按无人值守语义自动放行
   （优先 allow_* 选项）；沙箱策略仍由 DSH 侧执行。
 
-协议差异（相对 Claude）：无原生 JSON Schema 结构化输出（经 system prompt
+协议能力：无原生 JSON Schema 结构化输出（经 system prompt
 回落）、无 USD 成本与 turn 计数、无子代理生命周期事件（subagent 以普通
 tool_call 形态出现）、reasoning 阶段经 ``agent_thought_chunk`` 映射为
 ``status`` 事件。原始 ACP update 全量进 ``messages.jsonl`` 供诊断。
@@ -127,7 +127,7 @@ def write_model_patch(
 
 
 def acp_mcp_servers(mcp_servers: Path | str | dict[str, Any]) -> list[dict[str, Any]]:
-    """把 Claude 形态 MCP 配置（dict / JSON 文件路径）转为 ACP 声明列表。
+    """把 mcpServers 形态 MCP 配置（dict / JSON 文件路径）转为 ACP 声明列表。
 
     HTTP/SSE 条目转 ``{"type": "http", …}``，其余按 stdio 声明转发绝对
     command；无法识别的条目跳过并留痕。``timeout`` 等 ACP 不支持的

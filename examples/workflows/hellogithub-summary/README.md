@@ -33,5 +33,5 @@
 ## 环境依赖
 
 - 系统中存在 `github-research` 能力平面，并允许 Agent 使用所需的网页/检索能力。
-- Agent backend 使用 `claude`；如项目改用其他 backend，应同时修改 workflow 中所有 `backend_key`。
+- Agent backend 使用 `dsh`；如项目改用其他 backend，应同时修改 workflow 中所有 `backend_key`。
 - HTML 输出使用内置 `design_html_report` skill。

@@ -26,7 +26,9 @@ from agent_bridge.agent_runtime.control import RunControlRegistry
 from agent_bridge.agent_runtime.events import event_record
 from agent_bridge.agent_runtime.live_events import LiveAgentRunEventHub
 from agent_bridge.agent_runtime.json_schema import normalize_draft7_schema
-from agent_bridge.agent_runtime.registry import CodingAgentRegistry, create_coding_agent_registry
+from agent_bridge.agent_runtime.registry import (
+    CodingAgentRegistry, UnknownCodingAgentError, create_coding_agent_registry,
+)
 from agent_bridge.agent_runtime.support import (
     build_agent_bridge_server_config,
     build_opencode_mcp_config,
@@ -152,7 +154,7 @@ class AgentService:
         * **Managed** (default, ``cwd`` is None): an isolated working directory
           is created under ``run/agent-runs/{agent_name}_{uuid7}/``, ``files``
           are staged into it, and — when ``profile`` is set — the profile's
-          CLAUDE.md guidance and governed ``.mcp.json`` are installed.
+          AGENTS.md guidance and governed ``.mcp.json`` are installed.
 
         * **In-place** (``cwd`` given): the caller owns the directory (including
           any agent guidance / staged files); this method just runs the adapter
@@ -168,6 +170,12 @@ class AgentService:
         """
         timeout_seconds = timeout if timeout is not None else DEFAULT_TIMEOUT_SECONDS
         effective_backend_key = backend_key or self.coding_agents.default_backend
+        # 在分配运行记录、工作目录和进程之前拒绝停用或未知的后端。
+        try:
+            coding_agent = self.coding_agents.get(effective_backend_key)
+        except UnknownCodingAgentError as exc:
+            logger.warning("Agent run 后端预检拒绝 backend=%s 原因=%s", effective_backend_key, exc)
+            return AgentRunResult(ok=False, error=str(exc))
         started = time.monotonic()
         started_iso = utc_iso()
         total_timer = StageTimer(
@@ -256,7 +264,6 @@ class AgentService:
         try:
             if output_schema is not None:
                 effective_output_schema = normalize_draft7_schema(output_schema)
-            coding_agent = self.coding_agents.get(effective_backend_key)
             if cwd is not None:
                 work_dir = Path(cwd)
                 effective_setting_sources = setting_sources or []

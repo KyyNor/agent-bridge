@@ -8,13 +8,9 @@ from pathlib import Path
 from typing import Any
 
 
-# --- Agent Runtime profile projection (CLAUDE.md / AGENTS.md @-import blocks) ---
-# Isolated Agent runs write rendered profile markdown into their work directory
-# and reference it from CLAUDE.md through a replaceable marker block. Interactive
-# `profile use` only reuses the marker helpers for system-reminder guidance.
+# 通用 Agent 运行指导；marker 同时用于清理旧客户端接入。
 POINTER_START = "<!-- agent-bridge:profile-pointer start -->"
 POINTER_END = "<!-- agent-bridge:profile-pointer end -->"
-SYSTEM_REMINDER_GUIDANCE = "`<system-reminder>` 是补充的系统信息。"
 
 
 def stable_hash(value: Any) -> str:
@@ -25,13 +21,6 @@ def stable_hash(value: Any) -> str:
 def pointer_block(content: str) -> str:
     """Wrap profile-pointer content in the agent-bridge marker block."""
     return f"{POINTER_START}\n{content}\n{POINTER_END}"
-
-
-def profile_pointer_block(profile_path: str | Path) -> str:
-    """构造 Claude Profile 引用及 system-reminder 语义说明。"""
-    return pointer_block(
-        f"@{profile_path}\n\n{SYSTEM_REMINDER_GUIDANCE}"
-    )
 
 
 def remove_agent_bridge_blocks(content: str) -> str:
@@ -69,22 +58,15 @@ def replace_agent_bridge_block(path: Path, block: str) -> None:
 
 
 def install_profile_to_cwd(cwd: Path, profile: str, markdown: str) -> Path:
-    """Install a profile's rendered markdown into ``cwd`` for an agent run.
-
-    Writes the profile document to ``cwd/.agent-bridge/profiles/{profile}.md``
-    and injects a ``@``-import pointer into ``cwd/CLAUDE.md`` so Claude Code
-    loads it as project guidance. This is specific to isolated Agent Runtime
-    workspaces; interactive ``profile use`` does not write this pointer.
-    Returns the profile document path.
-    """
+    """将 Profile 正文写入 AGENTS.md，供各受支持后端读取。"""
     from agent_bridge.core.slug import make_slug
 
     doc_path = cwd / ".agent-bridge" / "profiles" / f"{make_slug(profile)}.md"
     doc_path.parent.mkdir(parents=True, exist_ok=True)
     doc_path.write_text(markdown, encoding="utf-8")
     replace_agent_bridge_block(
-        cwd / "CLAUDE.md",
-        profile_pointer_block(doc_path.resolve()),
+        cwd / "AGENTS.md",
+        pointer_block(markdown),
     )
     return doc_path
 

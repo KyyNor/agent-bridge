@@ -136,7 +136,7 @@ def _schema_for_codex(schema: dict[str, Any]) -> dict[str, Any]:
     """Codex forwards schemas to strict structured output.
 
     Strict object schemas require every property to be listed in ``required``.
-    Claude's SDK accepts optional properties, so normalize on the Codex side
+    Agent Bridge accepts optional properties, so normalize on the Codex side
     instead of forcing every Agent Bridge schema author to remember this rule.
     """
     normalized = copy.deepcopy(schema)

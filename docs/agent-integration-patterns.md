@@ -1,5 +1,7 @@
 # Coding Agent 对接方式参考：Skill / Hook / Plugin 层
 
+> 历史调研材料：Claude 执行与新接入已由 #37 下线，文中的 Claude 安装方式和当前状态判断不再适用。受支持后端及迁移步骤以 README 为准。
+
 > 本文整理自 `gsd-core`（open-gsd）的 EoS（Embeddable Orchestration System, ADR-1239）落地实现。
 > gsd-core 同时对接了 18 个 coding agent（Claude Code / Codex / OpenCode / Cursor / Cline /
 > Antigravity / Hermes / Kimi / Qwen / Kilo / Trae / Augment / CodeBuddy / Copilot / Windsurf /

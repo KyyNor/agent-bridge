@@ -168,8 +168,8 @@ def test_position_and_display_metadata_changes_do_not_change_reuse():
 
 
 @pytest.mark.parametrize("node_type, config", [
-    ("agent", {"prompt": "x", "backend_key": "claude", "timeout_seconds": 600}),
-    ("output", {"format": "markdown", "title": "Report", "path": "report.md", "prompt": "x", "backend_key": "claude", "timeout_seconds": 600}),
+    ("agent", {"prompt": "x", "backend_key": "dsh", "timeout_seconds": 600}),
+    ("output", {"format": "markdown", "title": "Report", "path": "report.md", "prompt": "x", "backend_key": "dsh", "timeout_seconds": 600}),
 ])
 def test_agent_timeout_change_does_not_invalidate_incremental_reuse(node_type, config):
     planner = WorkflowIncrementalPlanner()
@@ -188,7 +188,7 @@ def test_agent_timeout_change_does_not_invalidate_incremental_reuse(node_type, c
 def test_output_display_title_change_does_not_invalidate_incremental_reuse():
     planner = WorkflowIncrementalPlanner()
     original = _workflow([_node("report", node_type="output", config={
-        "format": "markdown", "title": "旧标题", "path": "report.md", "prompt": "x", "backend_key": "claude",
+        "format": "markdown", "title": "旧标题", "path": "report.md", "prompt": "x", "backend_key": "dsh",
     })])
     baseline_run, baseline_nodes = _baseline(planner, original)
     changed = deepcopy(original)
@@ -338,7 +338,7 @@ def test_legacy_mcp_fingerprint_reuses_unchanged_prefix_when_only_final_backend_
             _node(
                 "markdown",
                 node_type="output",
-                config={"format": "markdown", "title": "Report", "path": "report.md", "prompt": "write", "backend_key": "claude"},
+                config={"format": "markdown", "title": "Report", "path": "report.md", "prompt": "write", "backend_key": "dsh"},
             ),
             _node(
                 "html",

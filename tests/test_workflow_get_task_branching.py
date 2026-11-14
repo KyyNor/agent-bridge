@@ -38,7 +38,7 @@ def _branching_graph() -> dict:
                 "type": "agent",
                 "name": "处理任务",
                 "position": {"x": 720, "y": 0},
-                "config": {"prompt": "work", "backend_key": "claude"},
+                "config": {"prompt": "work", "backend_key": "dsh"},
             },
         ],
         "edges": [

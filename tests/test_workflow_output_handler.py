@@ -35,8 +35,8 @@ class FailingWorkflows:
 @pytest.mark.asyncio
 async def test_markdown_output_injects_ancestors_and_saves_artifact():
     graph = WorkflowGraph.model_validate({"nodes": [
-        {"id": "analysis", "type": "agent", "name": "Analysis", "position": {"x": 0, "y": 0}, "config": {"prompt": "analyze", "backend_key": "claude"}},
-        {"id": "out", "type": "output", "name": "Out", "position": {"x": 1, "y": 0}, "config": {"format": "markdown", "title": "T", "path": "reports/index.md", "prompt": "render", "backend_key": "claude", "timeout_seconds": 1200}},
+        {"id": "analysis", "type": "agent", "name": "Analysis", "position": {"x": 0, "y": 0}, "config": {"prompt": "analyze", "backend_key": "dsh"}},
+        {"id": "out", "type": "output", "name": "Out", "position": {"x": 1, "y": 0}, "config": {"format": "markdown", "title": "T", "path": "reports/index.md", "prompt": "render", "backend_key": "dsh", "timeout_seconds": 1200}},
     ], "edges": [{"id": "analysis-out", "source": "analysis", "target": "out"}]})
     node = graph.nodes[1]
     agent = Agent()
@@ -55,8 +55,8 @@ async def test_markdown_output_injects_ancestors_and_saves_artifact():
 @pytest.mark.asyncio
 async def test_html_save_failure_becomes_warning_but_markdown_save_failure_raises():
     graph = WorkflowGraph.model_validate({"nodes": [
-        {"id": "markdown", "type": "output", "name": "Markdown", "position": {"x": 0, "y": 0}, "config": {"format": "markdown", "title": "M", "path": "m.md", "prompt": "render", "backend_key": "claude"}},
-        {"id": "html", "type": "output", "name": "HTML", "position": {"x": 1, "y": 0}, "config": {"format": "html", "title": "H", "path": "h.html", "prompt": "render", "backend_key": "claude"}},
+        {"id": "markdown", "type": "output", "name": "Markdown", "position": {"x": 0, "y": 0}, "config": {"format": "markdown", "title": "M", "path": "m.md", "prompt": "render", "backend_key": "dsh"}},
+        {"id": "html", "type": "output", "name": "HTML", "position": {"x": 1, "y": 0}, "config": {"format": "html", "title": "H", "path": "h.html", "prompt": "render", "backend_key": "dsh"}},
     ], "edges": [{"id": "m-h", "source": "markdown", "target": "html"}]})
     context = NodeExecutionContext(actor="root", workflow={"workflow_key": "w", "profile_key": "p"}, run_id="r", input={}, task=None, nodes={"markdown": {"type": "output", "format": "markdown", "output": {"title": "M", "summary": "S", "content": "# M"}}}, graph=graph)
     html_result = await OutputHandler(agent_service=HtmlAgent(), skill_service=Skills(), workflow_service=FailingWorkflows()).execute(graph.nodes[1], context)
@@ -69,10 +69,10 @@ async def test_html_save_failure_becomes_warning_but_markdown_save_failure_raise
 @pytest.mark.asyncio
 async def test_output_prompts_follow_graph_dependencies_only():
     graph = WorkflowGraph.model_validate({"nodes": [
-        {"id": "ancestor", "type": "agent", "name": "Ancestor", "position": {"x": 0, "y": 0}, "config": {"prompt": "a", "backend_key": "claude"}},
-        {"id": "unrelated", "type": "agent", "name": "Unrelated", "position": {"x": 0, "y": 1}, "config": {"prompt": "u", "backend_key": "claude"}},
-        {"id": "markdown", "type": "output", "name": "Markdown", "position": {"x": 1, "y": 0}, "config": {"format": "markdown", "title": "M", "path": "m.md", "prompt": "render", "backend_key": "claude"}},
-        {"id": "html", "type": "output", "name": "HTML", "position": {"x": 2, "y": 0}, "config": {"format": "html", "title": "H", "path": "h.html", "prompt": "render", "backend_key": "claude"}},
+        {"id": "ancestor", "type": "agent", "name": "Ancestor", "position": {"x": 0, "y": 0}, "config": {"prompt": "a", "backend_key": "dsh"}},
+        {"id": "unrelated", "type": "agent", "name": "Unrelated", "position": {"x": 0, "y": 1}, "config": {"prompt": "u", "backend_key": "dsh"}},
+        {"id": "markdown", "type": "output", "name": "Markdown", "position": {"x": 1, "y": 0}, "config": {"format": "markdown", "title": "M", "path": "m.md", "prompt": "render", "backend_key": "dsh"}},
+        {"id": "html", "type": "output", "name": "HTML", "position": {"x": 2, "y": 0}, "config": {"format": "html", "title": "H", "path": "h.html", "prompt": "render", "backend_key": "dsh"}},
     ], "edges": [
         {"id": "a-m", "source": "ancestor", "target": "markdown"},
         {"id": "m-h", "source": "markdown", "target": "html"},

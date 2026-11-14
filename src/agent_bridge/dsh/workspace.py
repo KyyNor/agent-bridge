@@ -35,7 +35,7 @@ from agent_bridge.agent_workspace.scopes import (
     DEFAULT_WORKSPACE_SCOPE,
     normalize_workspace_scope,
 )
-from agent_bridge.core.defaults import DEFAULT_CLAUDE_CODE_MCP_TOOL_TIMEOUT_MS
+from agent_bridge.core.defaults import DEFAULT_AGENT_MCP_TOOL_TIMEOUT_MS
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +103,7 @@ def build_mcp_overlay(*, mcp_url: str, profile_key: str, capability_token: str) 
                             "X-Agent-Bridge-MetaMCP-Profile": profile_key,
                             DSH_CAPABILITY_HEADER: capability_token,
                         },
-                        "toolCallTimeoutMs": DEFAULT_CLAUDE_CODE_MCP_TOOL_TIMEOUT_MS,
+                        "toolCallTimeoutMs": DEFAULT_AGENT_MCP_TOOL_TIMEOUT_MS,
                         "failOnStartupError": False,
                     },
                 }
