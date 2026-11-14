@@ -38,7 +38,7 @@ class FakeLauncher:
             except (IndexError, ValueError):
                 port = 0
         self.starts.append(
-            {"pid": process.pid, "command": list(command), "port": port, "log_path": str(log_path)}
+            {"pid": process.pid, "command": list(command), "env": dict(env), "port": port, "log_path": str(log_path)}
         )
         return process
 
@@ -288,15 +288,34 @@ def test_shared_without_profile_runs_plain_and_members_enter_without_injection(
     plain = service.dsh.authorize_workspace("user1", profile_key=None, scope="shared")
     assert plain["profile_key"] is None
     assert len(launcher.starts) == 1
-    # 无能力平面：只叠加模型覆盖，不注入 MCP
-    assert [Path(item).name for item in _patch_args(launcher.starts[0]["command"])] == [
-        "agent-bridge-model.patch.yml"
+    # 通用插件已安装；无能力平面时保留明确禁用 Hindsight 的覆盖，不注入 MCP。
+    from agent_bridge.dsh.workspace import mcp_overlay_path
+    from agent_bridge.knowledge_management.memory.native import CONFIG_NAME
+
+    start = launcher.starts[0]
+    config_dir = Path(start["env"]["DSH_HOME"])
+    assert [Path(item).name for item in _patch_args(start["command"])] == [
+        "agent-bridge-model.patch.yml", "agent-bridge-hindsight.patch.json",
     ]
+    memory_patch = config_dir / "agent-bridge-hindsight.patch.json"
+    assert json.loads(memory_patch.read_text()) == [{"id": "hindsight", "disabled": True}]
+    memory_config = json.loads((config_dir / CONFIG_NAME).read_text())
+    assert memory_config["disabled"] is True
+    assert memory_config["retainSessions"] is False
+    assert memory_config["bankId"] == ""
+    assert "HINDSIGHT_API_TOKEN" not in start["env"]
+    assert not mcp_overlay_path(config_dir).exists()
+    assert service.dsh.capabilities.current_for_user("user1") is None
+    assert not service.dsh.capabilities._items
+    original_patch = memory_patch.read_bytes()
 
     # 运行中（active profile 为空）：成员即便请求平面也按无注入进入
     again = service.dsh.authorize_workspace("user2", profile_key="safe", scope="shared")
     assert again["profile_key"] is None
     assert len(launcher.starts) == 1
+    assert memory_patch.read_bytes() == original_patch
+    assert service.dsh.capabilities.current_for_user("user2") is None
+    assert not service.dsh.capabilities._items
 
 
 def test_shared_requires_active_profile_permission_for_entering_member(
