@@ -191,6 +191,10 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
     def actor(current_identity=Depends(identity)) -> str:
         return current_identity.user_id
 
+    def personal_actor(request: Request) -> str:
+        # 个人凭据只能绑定基础登录主体，不能把临时维护身份固化成长期 Key。
+        return identity_resolver.resolve_base(request).user_id
+
     @app.get("/api/v1/auth/admin/status")
     def admin_status(request: Request) -> dict[str, Any]:
         token = request.cookies.get(admin_access.cookie_name, "").strip()
@@ -312,14 +316,19 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
             service.dsh_configs.admins = reloaded
             return await call_next(request)
 
-    def save_upload(file: UploadFile) -> Path:
+    def save_upload(file: UploadFile, *, max_bytes: int | None = None) -> Path:
         resolved_paths.run_dir.mkdir(parents=True, exist_ok=True)
         suffix = Path(upload_filename(file)).suffix
         tmp_path: Path | None = None
         try:
             with tempfile.NamedTemporaryFile(delete=False, dir=resolved_paths.run_dir, suffix=suffix) as output:
                 tmp_path = Path(output.name)
-                shutil.copyfileobj(file.file, output)
+                copied = 0
+                while chunk := file.file.read(1024 * 1024):
+                    copied += len(chunk)
+                    if max_bytes is not None and copied > max_bytes:
+                        raise HTTPException(status_code=413, detail="文件超过上传大小限制")
+                    output.write(chunk)
             return tmp_path
         except Exception:
             if tmp_path is not None:
@@ -424,6 +433,9 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
     )
     # 旧路径保留至少一个版本，语义等价于 agent=dsh。
     app.include_router(create_dsh_routes(service, actor), prefix="/api/v1")
+
+    from agent_bridge.api.routes.knowledge_public import create_knowledge_public_routes
+    app.include_router(create_knowledge_public_routes(service, actor, personal_actor, save_upload, upload_filename), prefix="/api/v1")
 
     # MCP streamable HTTP endpoint
     from agent_bridge.capability_hub.gateway.metamcp import setup_mcp_route

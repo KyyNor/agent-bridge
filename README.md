@@ -517,3 +517,31 @@ tests/                         # 后端测试
 当前编辑会话的画布以红色提醒标记这些节点，助手会收到上游 before/after 与受影响引用。
 移除受影响引用或恢复旧输出会消除提醒；保留引用时请检查语义后点击「确认兼容」。
 连线条件和脚本参数需手工调整，助手仅修改当前 Agent 节点。提醒属于当前编辑会话，刷新页面后不保留。
+
+### 知识库文档 API
+
+进入知识库详情，点击“API 接入”，可查看调用示例和 OpenAPI 定义、下载当前知识库的
+OpenAPI JSON，并生成或重置自己的 API Key。每个用户只有一把 Key，跨知识库通用，
+访问范围和读写权限与该用户当前权限一致。完整值只在生成/重置后显示，关闭弹窗后
+只显示掩码；重置使旧 Key 立即失效。数据库只保存随机 Key 的 SHA-256 摘要。
+
+程序调用使用 `Authorization: Bearer <API Key>`，仅支持以下三个操作：
+
+- `GET /api/v1/knowledge-api/kbs/{kb_slug}/documents?limit=50&offset=0`：分页列出文档，
+  返回 `items/total/limit/offset`，每项包含 `slug/title/status/sync_status/current_version_no`。
+- `POST /api/v1/knowledge-api/kbs/{kb_slug}/documents`：以 multipart 的 `file` 字段上传，
+  单文件最多 32 MiB，沿用平台格式与 ZIP 展开规则。HTTP 202 和 `accepted=true` 只表示
+  文档已接收，`documents` 返回文档标识，ZIP 的跳过数量在 `skipped_count` 中；后续处理
+  遵循知识库同步策略，可从列表查看状态。相同内容沿用既有去重规则。
+- `DELETE /api/v1/knowledge-api/kbs/{kb_slug}/documents/{doc_slug}`：从当前库移除文档，
+  保留其他库关联；最后一个关联移除时沿用平台软删除规则。
+
+Key 不作为管理接口或 MCP 的登录凭据。OpenAPI 定义由这三个实际路由生成，页面通过
+登录可读的 `GET /api/v1/kbs/{kb_slug}/openapi` 获取。个人凭据管理使用登录态的
+`GET /api/v1/personal-api-key` 和 `POST /api/v1/personal-api-key/reset`，只能管理本人。
+常见错误：400 输入无效、401 凭据失效、403 无权限、404 资源不存在、413 文件过大、
+422 参数格式错误。完整 Key 不会放进调用示例、OpenAPI 文件或浏览器持久化存储。
+
+个人 Key 始终绑定基础登录主体（SSO 用户或受信 CLI 用户）；进入维护管理员模式不会
+改变 Key 的归属或提升其权限。只有匿名维护管理员 Cookie、没有个人登录身份时，
+不能查看或生成个人 Key。
