@@ -168,7 +168,7 @@ def test_workflow_mcp_task_type_round_trips(wm_paths):
     assert get_result["task"]["type"] == "page_summary"
 
 
-def test_execute_builtin_load_skill_returns_design_workflow_prompt(wm_paths):
+def test_execute_builtin_load_skill_returns_design_agent_node_prompt(wm_paths):
     svc = _create_service_with_workflow(wm_paths)
 
     result = asyncio.run(
@@ -176,16 +176,16 @@ def test_execute_builtin_load_skill_returns_design_workflow_prompt(wm_paths):
             actor="root",
             service="built-in",
             tool_name="load_skill",
-            params={"skill_name": "design_workflow"},
+            params={"skill_name": "design_agent_node"},
             profile_key="report-plane",
         )
     )
 
     assert result["success"] is True
-    assert result["result"]["skill_name"] == "design_workflow"
-    assert "system.validate_workflow" in result["result"]["prompt"]
-    assert "run_script" in result["result"]["prompt"]
-    assert "code" in result["result"]["prompt"]
+    assert result["result"]["skill_name"] == "design_agent_node"
+    assert "output_schema_json" in result["result"]["prompt"]
+    assert "不生成工作流" in result["result"]["prompt"]
+    assert "result_mode" in result["result"]["prompt"]
 
 
 def test_workflow_mcp_rejects_mismatched_run_context(wm_paths):

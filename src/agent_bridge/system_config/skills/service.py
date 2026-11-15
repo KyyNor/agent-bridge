@@ -37,11 +37,11 @@ class SkillService:
                 description="编写 Agent Bridge 受控脚本的提示词。",
                 default_path=defaults / "design_script.md",
             ),
-            "design_workflow": SkillDefinition(
-                skill_name="design_workflow",
-                name="Design Workflow",
-                description="设计 Agent Bridge 结构化 DAG 工作流的提示词。",
-                default_path=defaults / "design_workflow.md",
+            "design_agent_node": SkillDefinition(
+                skill_name="design_agent_node",
+                name="Design Agent Node",
+                description="生成或修改单个 Agent 节点的提示词。",
+                default_path=defaults / "design_agent_node.md",
             ),
             "design_html_report": SkillDefinition(
                 skill_name="design_html_report",

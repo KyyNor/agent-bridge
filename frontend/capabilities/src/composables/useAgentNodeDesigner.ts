@@ -1,6 +1,6 @@
 import { computed, ref } from 'vue'
 import { api } from '../api/client'
-import type { DesignAgentResponse, WorkflowDesignResult } from '../api/types'
+import type { DesignAgentResponse, AgentNodeDesignResult } from '../api/types'
 
 type WorkflowDesignerOptions = {
   current: (mode: 'create' | 'modify') => Record<string, unknown>
@@ -15,22 +15,25 @@ function createDesignRunKey() {
   const suffix = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`
-  return `design-workflow-${suffix}`
+  return `design-agent-node-${suffix}`
 }
 
-/** 管理工作流设计 Agent 的请求、停止和结果状态。 */
-export function useWorkflowDesigner(options: WorkflowDesignerOptions) {
+/** 管理Agent 节点助手 的请求、停止和结果状态。 */
+export function useAgentNodeDesigner(options: WorkflowDesignerOptions) {
   const showDesigner = ref(false)
   const designMode = ref<'create' | 'modify'>('modify')
   const designPrompt = ref('')
   const designing = ref(false)
   const designError = ref('')
-  const designResponse = ref<DesignAgentResponse<WorkflowDesignResult> | null>(null)
+  const designResponse = ref<DesignAgentResponse<AgentNodeDesignResult> | null>(null)
   const designRunKey = ref('')
   const designStopRequested = ref(false)
-  const workflowDesignDraft = computed(() => designResponse.value?.result?.workflow || null)
+  const designSnapshot = ref('')
+  const workflowDesignDraft = computed(() => designResponse.value?.result?.node || null)
 
   function openWorkflowDesigner(mode: 'create' | 'modify' = 'modify') {
+    designResponse.value = null
+    designPrompt.value = ''
     designMode.value = mode
     showDesigner.value = true
     designError.value = ''
@@ -48,11 +51,13 @@ export function useWorkflowDesigner(options: WorkflowDesignerOptions) {
     designResponse.value = null
     designing.value = true
     try {
-      const response = await api.designWorkflow({
+      const current = options.current(designMode.value)
+      designSnapshot.value = JSON.stringify(current)
+      const response = await api.designAgentNode({
         run_key: runKey,
         mode: designMode.value,
         prompt: designPrompt.value,
-        current: options.current(designMode.value),
+        current,
         profile_key: options.profileKey(),
       })
       if (designRunKey.value !== runKey || designStopRequested.value) return
@@ -83,6 +88,7 @@ export function useWorkflowDesigner(options: WorkflowDesignerOptions) {
   }
 
   return {
+    designSnapshot,
     showDesigner,
     designMode,
     designPrompt,

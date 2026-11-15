@@ -5,27 +5,9 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 from jsonschema import Draft7Validator
 
-from agent_bridge.api.routes.agent_runs import BUSINESS_LEDGER_DESIGN_SCHEMA, SCRIPT_DESIGN_SCHEMA, WORKFLOW_DESIGN_SCHEMA
+from agent_bridge.api.routes.agent_runs import BUSINESS_LEDGER_DESIGN_SCHEMA, SCRIPT_DESIGN_SCHEMA
 
 
-def _workflow_definition() -> dict[str, object]:
-    return {
-        "nodes": [
-            {
-                "id": "collect",
-                "type": "agent",
-                "name": "Collect",
-                "position": {"x": 0, "y": 0},
-                "config": {
-                    "prompt": "collect",
-                    "backend_key": "codex",
-                    "result_mode": "json",
-                    "output_schema": {"type": "object", "properties": {}},
-                },
-            }
-        ],
-        "edges": [],
-    }
 
 
 def _client(wm_paths) -> TestClient:
@@ -34,99 +16,10 @@ def _client(wm_paths) -> TestClient:
     return TestClient(create_app(wm_paths, {"root"}))
 
 
-def test_workflow_design_agent_uses_design_workflow_skill(wm_paths) -> None:
-    client = _client(wm_paths)
-    svc = client.app.state.agent_bridge_service
-    captured: dict[str, object] = {}
-
-    async def fake_run(**kwargs):
-        captured.update(kwargs)
-        return SimpleNamespace(
-            ok=True,
-            error=None,
-            run_key=None,
-            result={
-                "summary": "updated",
-                "notes": ["kept task protocol"],
-                "workflow": {
-                    "workflow_key": "page-report",
-                    "name": "Page Report",
-                    "description": "desc",
-                    "profile_key": "report-plane",
-                    "workflow_type": "operation",
-                    "status": "active",
-                    "definition": _workflow_definition(),
-                },
-            },
-        )
-
-    svc.agents.run = fake_run
-
-    response = client.post(
-        "/api/v1/agent-runs/design/workflow",
-        headers={"X-Agent-Bridge-User": "root"},
-        json={
-            "mode": "modify",
-            "prompt": "加一个清理输出的步骤",
-            "profile_key": "report-plane",
-            "run_key": "design_workflow_fixed",
-            "current": {
-                "workflow_key": "page-report",
-                "workflow_type": "operation",
-                "definition": {"nodes": [], "edges": []},
-            },
-        },
-    )
-
-    assert response.status_code == 200, response.text
-    assert response.json()["result"]["workflow"]["workflow_key"] == "page-report"
-    assert response.json()["result"]["workflow"]["definition"] == _workflow_definition()
-    assert captured["agent_name"] == "design_workflow"
-    assert captured["profile"] == "report-plane"
-    assert captured["run_key"] == "design_workflow_fixed"
-    assert "design_workflow 内容" in str(captured["prompt"])
-    assert "structured workflow definition" in str(captured["prompt"])
-    assert '"workflow_key": "page-report"' in str(captured["prompt"])
 
 
-def test_workflow_design_schema_accepts_structured_definition() -> None:
-    assert WORKFLOW_DESIGN_SCHEMA["$schema"] == "http://json-schema.org/draft-07/schema#"
-    assert "definitions" in WORKFLOW_DESIGN_SCHEMA
-    assert "$defs" not in WORKFLOW_DESIGN_SCHEMA
-    validator = Draft7Validator(WORKFLOW_DESIGN_SCHEMA)
-    result = {
-        "summary": "updated",
-        "notes": ["kept DAG shape"],
-        "workflow": {
-            "workflow_key": "page-report",
-            "name": "Page Report",
-            "description": "desc",
-            "profile_key": "report-plane",
-            "workflow_type": "operation",
-            "status": "active",
-            "definition": _workflow_definition(),
-        },
-    }
-
-    assert list(validator.iter_errors(result)) == []
 
 
-def test_workflow_design_schema_requires_complete_envelope() -> None:
-    validator = Draft7Validator(WORKFLOW_DESIGN_SCHEMA)
-    result = {
-        "summary": "updated",
-        "workflow": {
-            "workflow_key": "page-report",
-            "name": "Page Report",
-            "description": "desc",
-            "profile_key": "report-plane",
-            "workflow_type": "operation",
-            "status": "active",
-            "definition": _workflow_definition(),
-        },
-    }
-
-    assert any(error.validator == "required" and "notes" in error.message for error in validator.iter_errors(result))
 
 
 def test_business_ledger_design_agent_uses_design_business_ledger_skill(wm_paths) -> None:
@@ -210,62 +103,8 @@ def test_business_ledger_design_schema_accepts_complete_definition() -> None:
     assert list(validator.iter_errors(invalid))
 
 
-def test_workflow_design_schema_rejects_legacy_workflow_js() -> None:
-    validator = Draft7Validator(WORKFLOW_DESIGN_SCHEMA)
-    result = {
-        "summary": "updated",
-        "workflow": {
-            "workflow_key": "page-report",
-            "name": "Page Report",
-            "description": "desc",
-            "profile_key": "report-plane",
-            "status": "active",
-            "workflow_js": "export const meta = {};",
-        },
-    }
-
-    errors = list(validator.iter_errors(result))
-
-    assert errors
-    assert any("workflow_js" in error.message for error in errors)
 
 
-def test_workflow_design_schema_rejects_incomplete_definition_node_config() -> None:
-    validator = Draft7Validator(WORKFLOW_DESIGN_SCHEMA)
-    result = {
-        "summary": "invalid",
-        "workflow": {
-            "workflow_key": "page-report",
-            "name": "Page Report",
-            "description": "desc",
-            "profile_key": "report-plane",
-            "workflow_type": "operation",
-            "status": "active",
-            "definition": {
-                "nodes": [
-                    {
-                        "id": "collect",
-                        "type": "agent",
-                        "name": "Collect",
-                        "position": {"x": 0, "y": 0},
-                        "config": {"prompt": "missing backend"},
-                    }
-                ],
-                "edges": [],
-            },
-        },
-    }
-
-    errors = list(validator.iter_errors(result))
-
-    assert errors
-    pending = list(errors)
-    messages: list[str] = []
-    while pending:
-        error = pending.pop()
-        messages.append(error.message)
-        pending.extend(error.context)
-    assert any("backend_key" in message for message in messages)
 
 
 def test_script_design_agent_uses_design_script_skill(wm_paths) -> None:

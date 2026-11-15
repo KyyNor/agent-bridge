@@ -19,7 +19,7 @@ import WorkflowImportDialog from '../../components/workflow/WorkflowImportDialog
 import WorkflowTaskExecutionPreview from '../../components/workflow/WorkflowTaskExecutionPreview.vue'
 import WorkflowArtifactBrowser from '../../components/workflow/WorkflowArtifactBrowser.vue'
 import WorkflowArtifactDialogs from '../../components/workflow/WorkflowArtifactDialogs.vue'
-import WorkflowDesignerDrawer from '../../components/workflow/WorkflowDesignerDrawer.vue'
+import AgentNodeDesignerDrawer from '../../components/workflow/AgentNodeDesignerDrawer.vue'
 import WorkflowTaskToolbar from '../../components/workflow/WorkflowTaskToolbar.vue'
 import WorkflowRunHistory from '../../components/workflow/WorkflowRunHistory.vue'
 import WorkflowDetailTourPreview from './WorkflowDetailTourPreview.vue'
@@ -56,7 +56,7 @@ import { renderMarkdown } from '../../lib/markdown'
 import { useWorkflowRoute } from '../../composables/useWorkflowRoute'
 import { useWorkflowEditorState } from '../../composables/useWorkflowEditorState'
 import { useWorkflowArtifacts } from '../../composables/useWorkflowArtifacts'
-import { useWorkflowDesigner } from '../../composables/useWorkflowDesigner'
+import { useAgentNodeDesigner } from '../../composables/useAgentNodeDesigner'
 import { useWorkflowTasks } from '../../composables/useWorkflowTasks'
 import { useWorkflowRunProgress } from '../../composables/useWorkflowRunProgress'
 import { formatLocalDatetime, formatDuration } from '../../lib/time'
@@ -197,18 +197,16 @@ const {
   designResponse,
   designStopRequested,
   workflowDesignDraft,
+  designSnapshot,
   openWorkflowDesigner,
   runWorkflowDesigner,
   stopWorkflowDesigner,
-} = useWorkflowDesigner({
-  current: mode => mode === 'modify'
-    ? { ...workflowDraft() }
-    : {
-        profile_key: form.value.profile_key,
-        status: 'active',
-        workflow_type: form.value.workflow_type,
-        definition: createDefaultGraph(form.value.workflow_type, defaultBackend.value),
-      },
+} = useAgentNodeDesigner({
+  current: () => ({
+    node: selectedNode.value,
+    references: selectedNodeReferenceItems.value,
+    graph: form.value.definition,
+  }),
   profileKey: () => form.value.profile_key || undefined,
 })
 
@@ -736,18 +734,18 @@ async function acceptWorkflowDesign() {
   if (designing.value || designStopRequested.value) return
   const draft = workflowDesignDraft.value
   if (!draft) return
-  const workflowType = draft.workflow_type === 'summary' ? 'summary' : 'operation'
-  resetForm({
-    workflow_key: draft.workflow_key,
-    name: draft.name,
-    description: draft.description,
-    profile_key: draft.profile_key,
-    status: draft.status,
-    workflow_type: workflowType,
-    definition: draft.definition || createDefaultGraph(workflowType, defaultBackend.value),
-  })
-  const saved = await saveWorkflow()
-  if (saved) showDesigner.value = false
+  if (selectedNode.value?.type !== 'agent' || selectedNode.value.id !== draft.id) {
+    designError.value = '当前节点已变化，请重新生成'
+    return
+  }
+  const current = { node: selectedNode.value, references: selectedNodeReferenceItems.value, graph: form.value.definition }
+  if (JSON.stringify(current) !== designSnapshot.value) {
+    designError.value = '节点或上游配置已变化，请重新生成'
+    return
+  }
+  replaceNode(draft)
+  showDesigner.value = false
+
 }
 
 async function openDetail(item: WorkflowDefinition) {
@@ -1925,9 +1923,9 @@ async function confirmClearWorkflow() {
             </div>
           </div>
           <div data-tour="workflow-editor-actions" class="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" :disabled="designing" @click="openWorkflowDesigner('modify')">
+            <Button variant="outline" size="sm" :disabled="designing || selectedNode?.type !== 'agent'" @click="openWorkflowDesigner('modify')">
               <WandSparkles class="mr-1.5 h-4 w-4" />
-              AI 设计
+              AI 节点助手
             </Button>
             <Button variant="outline" size="sm" :disabled="editedWorkflowRunBusy" @click="runEditedWorkflow">
               <Play class="mr-1.5 h-4 w-4" />
@@ -2202,7 +2200,7 @@ async function confirmClearWorkflow() {
         </WorkflowConfigDrawer>
       </div>
 
-      <WorkflowDesignerDrawer
+      <AgentNodeDesignerDrawer
         :open="showDesigner"
         :mode="designMode"
         :prompt="designPrompt"

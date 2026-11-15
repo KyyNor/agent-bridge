@@ -65,7 +65,7 @@ import type {
   AgentBackendCatalog,
   AgentRuntimeConfig,
   DesignAgentResponse,
-  WorkflowDesignResult,
+  AgentNodeDesignResult,
   ScriptDesignResult,
   BusinessLedgerDesignResult,
   UAStatus,
@@ -835,8 +835,8 @@ export const api = {
     const rows = await get<AgentRun[]>(`/agent-runs?workflow_run_id=${encodeURIComponent(workflowRunId)}&limit=50`)
     return rows
   },
-  designWorkflow: (body: { run_key: string; mode: 'create' | 'modify'; prompt: string; current?: Record<string, unknown>; profile_key?: string }) =>
-    post<DesignAgentResponse<WorkflowDesignResult>>('/agent-runs/design/workflow', body),
+  designAgentNode: (body: { run_key: string; mode: 'create' | 'modify'; prompt: string; current?: Record<string, unknown>; profile_key?: string }) =>
+    post<DesignAgentResponse<AgentNodeDesignResult>>('/agent-runs/design/agent-node', body),
   designScript: (body: { run_key: string; mode: 'create' | 'modify'; prompt: string; current?: Record<string, unknown>; profile_key?: string }) =>
     post<DesignAgentResponse<ScriptDesignResult>>('/agent-runs/design/script', body),
   designBusinessLedger: (body: { run_key: string; mode: 'create' | 'modify'; prompt: string; current?: Record<string, unknown> }) =>

@@ -1406,7 +1406,7 @@ def test_execute_capability_api_uses_service_tool_name_params(wm_paths) -> None:
         json={
             "service": "built-in",
             "tool_name": "load_skill",
-            "params": {"skill_name": "design_workflow"},
+            "params": {"skill_name": "design_agent_node"},
         },
         headers={"X-Agent-Bridge-User": "root"},
     )
@@ -1415,7 +1415,7 @@ def test_execute_capability_api_uses_service_tool_name_params(wm_paths) -> None:
     assert "service" not in response.json()
     assert "tool" not in response.json()
     assert "tool_name" not in response.json()
-    assert response.json()["result"]["skill_name"] == "design_workflow"
+    assert response.json()["result"]["skill_name"] == "design_agent_node"
 
 
 def test_frontend_workflow_view_exposes_workflow_management() -> None:

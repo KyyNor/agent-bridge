@@ -52,7 +52,7 @@ from agent_bridge_runtime import execute
 
 def main(envelope):
     params = envelope["script_params"]
-    skill = execute("built-in", "load_skill", {"skill_name": "design_workflow"})
+    skill = execute("built-in", "load_skill", {"skill_name": "design_agent_node"})
     return {
         "ok": True,
         "params": params,
@@ -71,7 +71,7 @@ from agent_bridge_runtime import execute
 
 
 def main(envelope):
-    result = execute("built-in", "load_skill", {"skill_name": "design_workflow"})
+    result = execute("built-in", "load_skill", {"skill_name": "design_agent_node"})
     return {"result": result["result"]}
 ```
 

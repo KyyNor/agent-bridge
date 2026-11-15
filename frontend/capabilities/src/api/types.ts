@@ -915,18 +915,10 @@ export interface AgentRunPage {
   counts: AgentRunCounts
 }
 
-export interface WorkflowDesignResult {
+export interface AgentNodeDesignResult {
   summary: string
-  notes?: string[]
-  workflow: {
-    workflow_key: string
-    name: string
-    description: string
-    profile_key: string
-    status: string
-    workflow_type?: WorkflowType
-    definition?: WorkflowGraph
-  }
+  notes: string[]
+  node: Extract<WorkflowNode, { type: 'agent' }>
 }
 
 export interface ScriptDesignResult {
