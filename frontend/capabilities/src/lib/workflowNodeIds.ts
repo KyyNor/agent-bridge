@@ -77,7 +77,7 @@ function mapTemplateValue(value: unknown, field: string, transform: TemplateTran
   return value
 }
 
-function mapNodeTemplates(node: WorkflowNode, transform: TemplateTransform): WorkflowNode {
+export function mapNodeTemplates(node: WorkflowNode, transform: TemplateTransform): WorkflowNode {
   if (node.type === 'agent') {
     const prompt = transform(node.config.prompt || '', 'prompt')
     return prompt === node.config.prompt ? node : { ...node, config: { ...node.config, prompt } }

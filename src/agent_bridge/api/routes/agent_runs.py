@@ -11,11 +11,12 @@ from fastapi import APIRouter, Depends, Header, Request, Response
 from fastapi.responses import StreamingResponse
 
 from agent_bridge.api.schemas import DesignAgentRequest
+from agent_bridge.automation.workflows.node_design import NODE_DESIGN_SCHEMA, prepare_node_design, finish_node_design
 from agent_bridge.agent_runtime.json_schema import DRAFT7_SCHEMA_URI
 from agent_bridge.agent_runtime.trace import read_payload
-from agent_bridge.automation.workflows.definition import WorkflowGraph
 from agent_bridge.access_control.service import ResourceScope
 from agent_bridge.core.domain import ConflictError, NotFound
+from jsonschema.exceptions import ValidationError as JsonSchemaValidationError, SchemaError
 
 logger = logging.getLogger(__name__)
 
@@ -138,43 +139,6 @@ def _extract_json(text: str) -> Any | None:
         return None
 
 
-_WORKFLOW_GRAPH_SCHEMA = WorkflowGraph.model_json_schema(ref_template="#/definitions/{model}")
-_WORKFLOW_GRAPH_DEFS = _WORKFLOW_GRAPH_SCHEMA.pop("$defs", {})
-_WORKFLOW_GRAPH_SCHEMA["required"] = ["nodes", "edges"]
-
-WORKFLOW_DESIGN_SCHEMA: dict[str, Any] = {
-    "$schema": DRAFT7_SCHEMA_URI,
-    "definitions": _WORKFLOW_GRAPH_DEFS,
-    "type": "object",
-    "additionalProperties": False,
-    "required": ["summary", "notes", "workflow"],
-    "properties": {
-        "summary": {"type": "string"},
-        "notes": {"type": "array", "items": {"type": "string"}},
-        "workflow": {
-            "type": "object",
-            "additionalProperties": False,
-            "required": [
-                "workflow_key",
-                "name",
-                "description",
-                "profile_key",
-                "workflow_type",
-                "status",
-                "definition",
-            ],
-            "properties": {
-                "workflow_key": {"type": "string"},
-                "name": {"type": "string"},
-                "description": {"type": "string"},
-                "profile_key": {"type": "string"},
-                "workflow_type": {"type": "string", "enum": ["operation", "summary"]},
-                "status": {"type": "string", "enum": ["active", "disabled"]},
-                "definition": _WORKFLOW_GRAPH_SCHEMA,
-            },
-        },
-    },
-}
 
 SCRIPT_DESIGN_SCHEMA: dict[str, Any] = {
     "$schema": DRAFT7_SCHEMA_URI,
@@ -490,27 +454,30 @@ def create_agent_runs_routes(service, actor):
             return {"task_id": task_id, "transcript_dir": None, "agents": []}
         return build_subagent_detail(Path(str(cwd)), task_id)
 
-    @router.post("/agent-runs/design/workflow")
-    async def design_workflow(
-        payload: DesignAgentRequest,
-        current_actor: str = Depends(actor),
-    ) -> dict[str, Any]:
+    @router.post("/agent-runs/design/agent-node")
+    async def design_agent_node(payload: DesignAgentRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        node = prepare_node_design(payload.current)
+        design_payload = payload.model_copy(update={"current": {
+            "node": node.model_dump(mode="json"), "references": payload.current.get("references", []),
+            "upstream_changes": payload.current.get("upstream_changes", []),
+        }})
         result = await service.agents.run(
             prompt=_design_prompt(
-                kind="workflow",
-                skill_name="design_workflow",
-                skill_prompt=service.skills.get_skill(current_actor, "design_workflow")["prompt"],
-                payload=payload,
-                expected_artifact="structured workflow definition",
+                kind="Agent 节点", skill_name="design_agent_node",
+                skill_prompt=service.skills.get_skill(current_actor, "design_agent_node")["prompt"],
+                payload=design_payload, expected_artifact="single Agent node content",
             ),
-            agent_name="design_workflow",
-            profile=payload.profile_key or _str_or_none(payload.current.get("profile_key")),
-            output_schema=WORKFLOW_DESIGN_SCHEMA,
-            actor=current_actor,
-            run_key=payload.run_key,
-            timeout=900,
+            agent_name="design_agent_node", profile=payload.profile_key,
+            output_schema=NODE_DESIGN_SCHEMA, actor=current_actor,
+            run_key=payload.run_key, timeout=900,
         )
-        return _design_response(service, result)
+        response = _design_response(service, result)
+        if result.ok:
+            try:
+                response["result"] = finish_node_design(service, current_actor, payload.current, node, result.result)
+            except (ValueError, TypeError, JsonSchemaValidationError, SchemaError) as exc:
+                response.update(ok=False, error=str(exc), result=None)
+        return response
 
     @router.post("/agent-runs/design/script")
     async def design_script(

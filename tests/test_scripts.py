@@ -726,7 +726,7 @@ def test_runtime_helper_execute_signature_rejects_profile_override(wm_paths):
         code=(
             "from agent_bridge_runtime import execute\n\n"
             "def main(envelope):\n"
-            "    execute('built-in', 'load_skill', {'skill_name': 'design_workflow'}, profile_key='other')\n"
+            "    execute('built-in', 'load_skill', {'skill_name': 'design_agent_node'}, profile_key='other')\n"
             "    return {}\n"
         ),
         input_schema=PERMISSIVE_INPUT_SCHEMA,

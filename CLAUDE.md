@@ -541,3 +541,11 @@ Agent 运行事件以 `agent_runs` 为统一查询基准。前端通过 `RunEven
 - 测试命令和发布构建链。
 
 注释、docstring 和用户可见错误优先中文；标识符、协议字段和外部产品名保留英文。
+
+工作流 AI 辅助收束为单个 Agent 节点：`design_agent_node` 使用扁平字符串协议
+（结构化输出 Schema 在 `output_schema_json` 中编码），服务端解析并校验后才返回
+节点草案。前端应用前检查草案上下文未变化，只替换目标节点，不自动保存或改连线。
+
+单节点助手的下游影响分析复用 `workflowNodeIds.mapNodeTemplates` 遍历模板。
+`workflowOutputImpact` 收集输出契约变化的直接引用，包含嵌套脚本参数和边条件；
+提醒在当前编辑会话派生，作为 `upstream_changes` 注入助手，不能据此自动改写业务映射。

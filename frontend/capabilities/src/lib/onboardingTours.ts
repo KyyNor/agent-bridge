@@ -104,7 +104,7 @@ export const workflowEditorFirstUseTour: ProductTourDefinition = {
     { element: '[data-tour="workflow-editor-palette"]', popover: { title: '从节点调色板开始', description: '将节点加入画布，再用连线表达依赖或条件分支。总结型工作流会保留其系统输出节点。', side: 'bottom', align: 'start' } },
     { element: '[data-tour="workflow-editor-canvas"]', popover: { title: '在画布编排依赖', description: '点击节点或连线可在右侧编辑其配置；画布空白处可返回工作流信息。', side: 'right', align: 'start' } },
     { element: '[data-tour="workflow-editor-agent-panel"]', popover: { title: '配置 Agent 节点', description: '这里设置提示词、执行后端、Profile MCP、超时、输出模式和技能。面板中的内容是指南示例，不会改动当前工作流。', side: 'left', align: 'start' } },
-    { element: '[data-tour="workflow-editor-actions"]', popover: { title: '验证后保存或测试', description: '可先用 AI 设计生成草案或测试运行；保存时可选择是否安排受影响任务增量刷新。', side: 'bottom', align: 'end' } },
+    { element: '[data-tour="workflow-editor-actions"]', popover: { title: '验证后保存或测试', description: '可选中 Agent 节点使用 AI 节点助手，或测试运行；保存时可选择是否安排受影响任务增量刷新。', side: 'bottom', align: 'end' } },
   ],
 }
 

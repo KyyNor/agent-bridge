@@ -817,7 +817,7 @@ function errorMessage(e: unknown) {
             <pre class="mt-3 overflow-auto rounded-md bg-muted p-3 text-xs text-foreground">from agent_bridge_runtime import execute
 
 def main(envelope):
-    result = execute("built-in", "load_skill", {"skill_name": "design_workflow"})
+    result = execute("built-in", "load_skill", {"skill_name": "design_agent_node"})
     return {"skill": result["result"]}</pre>
             <p class="mt-2">
               这意味着脚本可以复用能力中心的统一权限校验，调用其他 MCP 时仍然按来源 profile 检查可见性与可执行性。
