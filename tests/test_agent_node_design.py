@@ -75,3 +75,13 @@ def test_node_design_requires_agent_node(wm_paths):
     _, response, captured = call(wm_paths, {'node': {'type': 'output'}}, result())
     assert response.status_code == 400
     assert not captured
+
+
+def test_node_design_receives_upstream_change_context(wm_paths):
+    changes = [{"nodeId": "a", "field": "prompt", "path": "nodes.source.output.status",
+                "before": {"result_mode": "json"}, "after": {"result_mode": "text"}}]
+    _, response, captured = call(wm_paths, {"node": node(), "upstream_changes": changes}, result())
+    assert response.json()["ok"] is True
+    assert 'upstream_changes' in captured["prompt"]
+    assert 'nodes.source.output.status' in captured["prompt"]
+    assert 'before' in captured["prompt"] and 'after' in captured["prompt"]

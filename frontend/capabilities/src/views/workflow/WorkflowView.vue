@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useWorkflowOutputImpacts } from '../../composables/useWorkflowOutputImpacts'
+import { collectOutputImpact, outputImpactIssues } from '../../lib/workflowOutputImpact'
 import { useRouter } from 'vue-router'
 import { ArrowLeft, Download, FolderOutput, GitBranch, HelpCircle, ListTodo, Maximize2, MoreHorizontal, Play, Plus, Save, Upload, WandSparkles, X } from '@lucide/vue'
 import { api, beginWorkflowValidationRun, finishWorkflowValidationRun, hasBlockingWorkflowValidationErrors, invalidateWorkflowValidationRun, isCurrentWorkflowValidationRun, workflowValidationErrorMessage, workflowValidationIssuesFor } from '../../api/client'
@@ -202,11 +204,7 @@ const {
   runWorkflowDesigner,
   stopWorkflowDesigner,
 } = useAgentNodeDesigner({
-  current: () => ({
-    node: selectedNode.value,
-    references: selectedNodeReferenceItems.value,
-    graph: form.value.definition,
-  }),
+  current: nodeDesignContext,
   profileKey: () => form.value.profile_key || undefined,
 })
 
@@ -344,7 +342,14 @@ const {
   setPageError: (value: string) => { error.value = value },
 })
 
-const selectedNodeIssues = computed(() => scopedGraphIssues('node', selectedNode.value?.id || null))
+const { outputImpacts, activeImpacts, combinedGraphErrors, nodeRepairContext, acknowledgeOutputImpact } = useWorkflowOutputImpacts({
+  graph: () => form.value.definition, workflowKey: () => form.value.workflow_key,
+  selectedNodeId: () => selectedNode.value?.id, errors: () => graphErrors.value,
+})
+function nodeDesignContext() {
+  return { node: selectedNode.value, references: selectedNodeReferenceItems.value, graph: form.value.definition, upstream_changes: nodeRepairContext() }
+}
+const selectedNodeIssues = computed(() => [...scopedGraphIssues('node', selectedNode.value?.id || null), ...outputImpactIssues(nodeRepairContext())])
 const selectedEdgeIssues = computed(() => scopedGraphIssues('edge', selectedEdge.value?.id || null))
 const configDrawerTitle = computed(() => {
   if (selectedNode.value) return `节点配置 / ${selectedNode.value.name || selectedNode.value.id}`
@@ -738,11 +743,19 @@ async function acceptWorkflowDesign() {
     designError.value = '当前节点已变化，请重新生成'
     return
   }
-  const current = { node: selectedNode.value, references: selectedNodeReferenceItems.value, graph: form.value.definition }
+  const current = nodeDesignContext()
   if (JSON.stringify(current) !== designSnapshot.value) {
     designError.value = '节点或上游配置已变化，请重新生成'
     return
   }
+  const impacts = collectOutputImpact(form.value.definition, draft)
+  if (impacts.length && !await confirm({ title: '上游输出变化将影响下游',
+    description: impacts.map(i => `${form.value.definition.nodes.find(n => n.id === i.nodeId)?.name || i.nodeId}：${i.edgeId ? `连线 ${i.edgeId} / ` : ''}${i.field} 引用 ${i.path}`).join('；') + '。应用后这些节点会显示红色提醒，请逐项检查或使用节点助手修复。', confirmText: '应用并处理下游' })) return
+  if (JSON.stringify(nodeDesignContext()) !== designSnapshot.value) {
+    designError.value = '节点或上游配置已变化，请重新生成'
+    return
+  }
+  outputImpacts.value = [...activeImpacts.value, ...impacts]
   replaceNode(draft)
   showDesigner.value = false
 
@@ -1927,6 +1940,7 @@ async function confirmClearWorkflow() {
               <WandSparkles class="mr-1.5 h-4 w-4" />
               AI 节点助手
             </Button>
+            <Button v-if="nodeRepairContext().length" variant="outline" size="sm" @click="acknowledgeOutputImpact">已检查当前节点及连线，确认兼容</Button>
             <Button variant="outline" size="sm" :disabled="editedWorkflowRunBusy" @click="runEditedWorkflow">
               <Play class="mr-1.5 h-4 w-4" />
               测试运行
@@ -1981,7 +1995,7 @@ async function confirmClearWorkflow() {
                 <WorkflowEditorCanvas
                   v-model:graph="form.definition"
                   :workflow-type="form.workflow_type"
-                  :errors="graphErrors"
+                  :errors="combinedGraphErrors"
                   class="h-full border-t !min-h-0"
                   @select-node="selectWorkflowNode"
                   @select-edge="selectWorkflowEdge"

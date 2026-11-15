@@ -459,6 +459,7 @@ def create_agent_runs_routes(service, actor):
         node = prepare_node_design(payload.current)
         design_payload = payload.model_copy(update={"current": {
             "node": node.model_dump(mode="json"), "references": payload.current.get("references", []),
+            "upstream_changes": payload.current.get("upstream_changes", []),
         }})
         result = await service.agents.run(
             prompt=_design_prompt(
