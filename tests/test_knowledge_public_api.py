@@ -108,3 +108,80 @@ def test_schema_has_exact_three_operations_and_limits(api_setup):
     assert client.post(path, headers=auth(token), files={'file': ('bad.exe', b'x')}).status_code == 400
     response = client.post(path, headers=auth(token), files={'file': ('large.md', b'x' * (32 * 1024 * 1024 + 1))})
     assert response.status_code == 413
+
+
+def test_admin_elevation_cannot_create_shared_or_persistent_admin_key(api_setup):
+    client, svc = api_setup
+    alice_headers = {'X-Agent-Bridge-User': 'alice'}
+    password = 'synthetic-admin-password'
+    login = client.post('/api/v1/auth/admin/session', headers=alice_headers, json={'password': password})
+    assert login.status_code == 200
+    assert login.json()['subject_user_id'] == 'alice'
+    alice_token = key(client, 'alice')
+    alice_status = client.get('/api/v1/personal-api-key', headers=alice_headers).json()
+    with svc.store.connect() as conn:
+        assert conn.execute("SELECT user_id FROM personal_api_keys").fetchall()[0][0] == 'alice'
+        assert conn.execute("SELECT 1 FROM personal_api_keys WHERE user_id='root'").fetchone() is None
+    path_a = '/api/v1/knowledge-api/kbs/docs-a/documents'
+    path_b = '/api/v1/knowledge-api/kbs/docs-b/documents'
+    # 进入、退出维护模式都不能令个人 Key 获得 root 权限。
+    assert client.get(path_b, headers=auth(alice_token)).status_code == 403
+    assert client.post(path_b, headers=auth(alice_token), files={'file': ('x.md', b'x')}).status_code == 403
+    assert client.delete(path_b + '/unknown', headers=auth(alice_token)).status_code == 403
+    client.delete('/api/v1/auth/admin/session')
+    assert client.get(path_a, headers=auth(alice_token)).status_code == 200
+    assert client.get(path_b, headers=auth(alice_token)).status_code == 403
+    # 另一个人在维护模式下重置，只能影响本人。
+    bob = TestClient(client.app)
+    assert bob.post('/api/v1/auth/admin/session', headers={'X-Agent-Bridge-User': 'bob'}, json={'password': password}).status_code == 200
+    bob_token = key(bob, 'bob')
+    assert bob_token != alice_token
+    assert client.get('/api/v1/personal-api-key', headers=alice_headers).json() == alice_status
+    assert client.get(path_a, headers=auth(alice_token)).status_code == 200
+    assert client.get(path_b, headers=auth(bob_token)).status_code == 200
+    svc.access.set_user_group(actor='root', user_id='alice', group_key='team-b')
+    assert client.get(path_a, headers=auth(alice_token)).status_code == 403
+    assert client.get(path_b, headers=auth(alice_token)).status_code == 200
+    with svc.store.connect() as conn:
+        conn.execute("UPDATE access_users SET status='inactive' WHERE user_id='alice'")
+    assert client.get(path_b, headers=auth(alice_token)).status_code == 401
+
+
+def test_anonymous_maintenance_session_cannot_manage_personal_keys(api_setup):
+    client, svc = api_setup
+    login = client.post('/api/v1/auth/admin/session', json={'password': 'synthetic-admin-password'})
+    assert login.status_code == 200
+    assert login.json()['subject_user_id'] == 'anonymous'
+    # 维护功能仍可用，但维护 Cookie 不能代替个人身份签发凭据。
+    assert client.get('/api/v1/backends').status_code == 200
+    assert client.get('/api/v1/personal-api-key').status_code == 401
+    assert client.post('/api/v1/personal-api-key/reset').status_code == 401
+    with svc.store.connect() as conn:
+        assert conn.execute('SELECT COUNT(*) FROM personal_api_keys').fetchone()[0] == 0
+
+
+def test_sso_personal_subject_is_preserved_during_admin_mode(api_setup):
+    from datetime import timedelta
+    import jwt
+    from agent_bridge.core.timeutil import utc_now
+
+    _, svc = api_setup
+    secret = 'synthetic-sso-secret-at-least-32-characters'
+    svc.paths.server_config_path.write_text(
+        'admins = ["root"]\n[identity]\nsso_secret = "' + secret + '"\nallow_cli_header = false\n', encoding='utf-8',
+    )
+    app = create_app(svc.paths, {'root'})
+    client = TestClient(app)
+    token = jwt.encode({'user_id': 'alice', 'exp': int((utc_now() + timedelta(hours=1)).timestamp())}, secret, algorithm='HS256')
+    client.cookies.set('agent_bridge_sso', token)
+    login = client.post('/api/v1/auth/admin/session', json={'password': 'synthetic-admin-password'})
+    assert login.status_code == 200
+    response = client.post('/api/v1/personal-api-key/reset')
+    assert response.status_code == 200
+    personal = response.json()['api_key']
+    client.cookies.delete('agent_bridge_sso')
+    assert client.get('/api/v1/backends').status_code == 200
+    assert client.post('/api/v1/personal-api-key/reset').status_code == 401
+    assert client.get('/api/v1/knowledge-api/kbs/docs-b/documents', headers=auth(personal)).status_code == 403
+    with svc.store.connect() as conn:
+        assert conn.execute('SELECT user_id FROM personal_api_keys').fetchone()[0] == 'alice'

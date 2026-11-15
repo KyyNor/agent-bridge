@@ -49,7 +49,7 @@ class KeyCreated(KeyStatus):
     api_key: str
 
 
-def create_knowledge_public_routes(service, actor, save_upload, upload_filename):
+def create_knowledge_public_routes(service, actor, personal_actor, save_upload, upload_filename):
     router = APIRouter()
     public = APIRouter(prefix="/knowledge-api", tags=["知识库文档 API"])
     keys = PersonalApiKeys(service.store.access_control)
@@ -60,11 +60,11 @@ def create_knowledge_public_routes(service, actor, save_upload, upload_filename)
         return keys.authenticate(credentials.credentials if credentials else "")
 
     @router.get("/personal-api-key", response_model=KeyStatus)
-    def key_status(current_actor: str = Depends(actor)):
+    def key_status(current_actor: str = Depends(personal_actor)):
         return keys.status(current_actor)
 
     @router.post("/personal-api-key/reset", response_model=KeyCreated)
-    def key_reset(current_actor: str = Depends(actor)):
+    def key_reset(current_actor: str = Depends(personal_actor)):
         return keys.reset(current_actor)
 
     @public.get("/kbs/{kb_slug}/documents", response_model=DocumentPage, summary="列出文档及处理状态")

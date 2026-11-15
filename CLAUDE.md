@@ -554,3 +554,5 @@ Agent 运行事件以 `agent_runs` 为统一查询基准。前端通过 `RunEven
 复用现有服务权限检查；独立的 Bearer dependency 只用于这三个路由，不扩展全局身份
 解析器。`access_control/personal_api_keys.py` 负责个人 Key 生命周期，持久层只存摘要，
 每次鉴权确认账号仍 active，知识库权限按请求时归属判断。OpenAPI 从实际路由生成。
+个人 Key 管理依赖 `personal_actor`，只调用 `RequestIdentityResolver.resolve_base`；
+其他知识库页面仍沿用原 actor，禁止改动全局维护管理员身份映射来修复个人凭据问题。

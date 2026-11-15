@@ -191,6 +191,10 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
     def actor(current_identity=Depends(identity)) -> str:
         return current_identity.user_id
 
+    def personal_actor(request: Request) -> str:
+        # 个人凭据只能绑定基础登录主体，不能把临时维护身份固化成长期 Key。
+        return identity_resolver.resolve_base(request).user_id
+
     @app.get("/api/v1/auth/admin/status")
     def admin_status(request: Request) -> dict[str, Any]:
         token = request.cookies.get(admin_access.cookie_name, "").strip()
@@ -431,7 +435,7 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
     app.include_router(create_dsh_routes(service, actor), prefix="/api/v1")
 
     from agent_bridge.api.routes.knowledge_public import create_knowledge_public_routes
-    app.include_router(create_knowledge_public_routes(service, actor, save_upload, upload_filename), prefix="/api/v1")
+    app.include_router(create_knowledge_public_routes(service, actor, personal_actor, save_upload, upload_filename), prefix="/api/v1")
 
     # MCP streamable HTTP endpoint
     from agent_bridge.capability_hub.gateway.metamcp import setup_mcp_route
