@@ -9,6 +9,12 @@ CREATE TABLE IF NOT EXISTS access_users (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS personal_api_keys (
+  user_id TEXT PRIMARY KEY REFERENCES access_users(user_id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  prefix TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS access_groups (
   group_key TEXT PRIMARY KEY,
   name TEXT NOT NULL,

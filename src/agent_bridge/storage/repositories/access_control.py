@@ -227,3 +227,24 @@ class AccessControlRepository:
             )
             if cursor.rowcount != 1:
                 raise KeyError("admin access config not found")
+
+    def get_personal_api_key(self, user_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT prefix, updated_at FROM personal_api_keys WHERE user_id = ?", (user_id,)).fetchone()
+            return dict(row) if row else None
+
+    def replace_personal_api_key(self, user_id: str, token_hash: str, prefix: str, updated_at: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO personal_api_keys(user_id, token_hash, prefix, updated_at) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(user_id) DO UPDATE SET token_hash=excluded.token_hash, prefix=excluded.prefix, updated_at=excluded.updated_at",
+                (user_id, token_hash, prefix, updated_at),
+            )
+
+    def personal_api_key_owner(self, token_hash: str) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT keys.user_id FROM personal_api_keys keys JOIN access_users users ON users.user_id=keys.user_id "
+                "WHERE keys.token_hash=? AND users.status='active'", (token_hash,),
+            ).fetchone()
+            return str(row[0]) if row else None

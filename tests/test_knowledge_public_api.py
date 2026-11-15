@@ -1,0 +1,110 @@
+from __future__ import annotations
+
+import json
+
+import pytest
+from fastapi.testclient import TestClient
+
+from agent_bridge.api.app import create_app
+
+
+@pytest.fixture
+def api_setup(wm_paths):
+    app = create_app(wm_paths, {'root'})
+    svc = app.state.agent_bridge_service
+    svc.access.upsert_group(actor='root', group_key='team-a', name='A')
+    svc.access.upsert_group(actor='root', group_key='team-b', name='B')
+    svc.access.set_user_group(actor='root', user_id='alice', group_key='team-a')
+    svc.access.set_user_group(actor='root', user_id='bob', group_key='team-b')
+    svc.create_kb('alice', 'docs-a', 'A', '')
+    svc.create_kb('alice', 'docs-a2', 'A2', '')
+    svc.create_kb('bob', 'docs-b', 'B', '')
+    return TestClient(app), svc
+
+
+def key(client, user):
+    response = client.post('/api/v1/personal-api-key/reset', headers={'X-Agent-Bridge-User': user})
+    assert response.status_code == 200, response.text
+    return response.json()['api_key']
+
+
+def auth(token):
+    return {'Authorization': 'Bearer ' + token}
+
+
+def test_key_lifecycle_private_hash_only_and_no_global_access(api_setup):
+    client, svc = api_setup
+    alice = key(client, 'alice');bob = key(client, 'bob')
+    assert alice != bob
+    status = client.get('/api/v1/personal-api-key', headers={'X-Agent-Bridge-User': 'alice'}).json()
+    assert status['has_key'] and 'api_key' not in status
+    assert alice not in json.dumps(status)
+    with svc.store.connect() as conn:
+        row = dict(conn.execute("SELECT * FROM personal_api_keys WHERE user_id='alice'").fetchone())
+    assert alice not in json.dumps(row)
+    assert len(row['token_hash']) == 64
+    assert client.get('/api/v1/backends', headers=auth(alice)).status_code == 401
+    assert client.post('/api/v1/personal-api-key/reset', headers=auth(alice)).status_code == 401
+    replacement = key(client, 'alice')
+    path = '/api/v1/knowledge-api/kbs/docs-a/documents'
+    assert client.get(path, headers=auth(alice)).status_code == 401
+    assert client.get(path, headers=auth(replacement)).status_code == 200
+    with svc.store.connect() as conn:
+        conn.execute("UPDATE access_users SET status='inactive' WHERE user_id='alice'")
+    assert client.get(path, headers=auth(replacement)).status_code == 401
+
+
+def test_document_real_service_roundtrip_and_scoped_deletion(api_setup):
+    client, svc = api_setup
+    token = key(client, 'alice');headers = auth(token)
+    path = '/api/v1/knowledge-api/kbs/docs-a/documents'
+    response = client.post(path, headers=headers, files={'file': ('example.md', b'# Hello\nSynthetic document', 'text/markdown')})
+    assert response.status_code == 202, response.text
+    slug = response.json()['documents'][0]['slug']
+    kb2 = svc.store.get_kb_by_slug('docs-a2')
+    folder = svc.store.ensure_root_folder(kb2['id'])
+    svc.attach_document('alice', slug, 'docs-a2', folder['id'])
+    response = client.get(path, headers=headers)
+    assert response.status_code == 200, response.text
+    assert response.json()['total'] == 1
+    assert response.json()['items'][0]['slug'] == slug
+    assert 'status' in response.json()['items'][0]
+    assert client.delete(path + '/' + slug, headers=headers).status_code == 200
+    assert client.get(path, headers=headers).json()['total'] == 0
+    assert client.get('/api/v1/knowledge-api/kbs/docs-a2/documents', headers=headers).json()['total'] == 1
+    assert client.delete(path + '/' + slug, headers=headers).status_code == 404
+
+
+def test_cross_group_permissions_and_auth_no_header_fallback(api_setup):
+    client, svc = api_setup
+    token = key(client, 'alice');path = '/api/v1/knowledge-api/kbs/docs-b/documents'
+    assert client.get(path, headers=auth(token)).status_code == 403
+    assert client.post(path, headers=auth(token), files={'file': ('a.md', b'a')}).status_code == 403
+    assert client.delete(path + '/unknown', headers=auth(token)).status_code == 403
+    assert client.get(path, headers={'X-Agent-Bridge-User': 'root'}).status_code == 401
+    assert client.get(path, headers={**auth('bad'), 'X-Agent-Bridge-User': 'root'}).status_code == 401
+    svc.update_kb_visibility('bob', 'docs-b', visibility='shared')
+    assert client.get(path, headers=auth(token)).status_code == 200
+    assert client.post(path, headers=auth(token), files={'file': ('a.md', b'a')}).status_code == 403
+    assert client.delete(path + '/unknown', headers=auth(token)).status_code == 403
+    svc.access.set_user_group(actor='root', user_id='alice', group_key='team-b')
+    assert client.get(path, headers=auth(token)).status_code == 200
+    assert client.get('/api/v1/knowledge-api/kbs/docs-a/documents', headers=auth(token)).status_code == 403
+
+
+def test_schema_has_exact_three_operations_and_limits(api_setup):
+    client, _ = api_setup
+    response = client.get('/api/v1/kbs/docs-a/openapi', headers={'X-Agent-Bridge-User': 'alice'})
+    assert response.status_code == 200
+    schema = response.json()
+    operations = [op for path in schema['paths'].values() for op in path.values()]
+    assert len(operations) == 3
+    assert all(op['security'] == [{'PersonalApiKey': []}] for op in operations)
+    assert 'personal-api-key' not in json.dumps(schema)
+    assert client.get('/api/v1/kbs/docs-a/openapi', headers={'X-Agent-Bridge-User': 'bob'}).status_code == 403
+    token = key(client, 'alice');path = '/api/v1/knowledge-api/kbs/docs-a/documents'
+    assert client.get(path + '?limit=0', headers=auth(token)).status_code == 422
+    assert client.post(path, headers=auth(token)).status_code == 422
+    assert client.post(path, headers=auth(token), files={'file': ('bad.exe', b'x')}).status_code == 400
+    response = client.post(path, headers=auth(token), files={'file': ('large.md', b'x' * (32 * 1024 * 1024 + 1))})
+    assert response.status_code == 413

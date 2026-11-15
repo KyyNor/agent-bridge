@@ -549,3 +549,8 @@ Agent 运行事件以 `agent_runs` 为统一查询基准。前端通过 `RunEven
 单节点助手的下游影响分析复用 `workflowNodeIds.mapNodeTemplates` 遍历模板。
 `workflowOutputImpact` 收集输出契约变化的直接引用，包含嵌套脚本参数和边条件；
 提醒在当前编辑会话派生，作为 `upstream_changes` 注入助手，不能据此自动改写业务映射。
+
+知识库程序接入位于 `api/routes/knowledge_public.py`，只开放文档列表、上传、按库移除。
+复用现有服务权限检查；独立的 Bearer dependency 只用于这三个路由，不扩展全局身份
+解析器。`access_control/personal_api_keys.py` 负责个人 Key 生命周期，持久层只存摘要，
+每次鉴权确认账号仍 active，知识库权限按请求时归属判断。OpenAPI 从实际路由生成。

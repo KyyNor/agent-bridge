@@ -3,6 +3,7 @@ import { Plus, RotateCw, Upload, File, Folder, Archive, Trash2, ArrowLeft } from
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../../api/client'
+import KnowledgeApiDialog from '../../components/knowledge/KnowledgeApiDialog.vue'
 import type { AccessActorContext, KnowledgeBaseSummary, Document, KnowledgeFolder, SyncJob, BackendCatalogEntry, KnowledgeBrowseDocumentEntry, KnowledgeBrowseEntry, KnowledgeBrowseResponse, ResourceVisibility } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
 import { Card, CardContent } from '../../components/ui/card'
@@ -185,6 +186,7 @@ onBeforeUnmount(stopFolderPaneResize)
 const showDocDetail = ref(false)
 const docDetailSlug = ref('')
 const showPlaneDialog = ref(false)
+const showApiDialog = ref(false)
 const planeKb = ref<KnowledgeBaseSummary | null>(null)
 const backends = ref<BackendCatalogEntry[]>([])
 const {
@@ -850,7 +852,7 @@ function syncBadgeLabel(status?: string | null) {
 
       <!-- KB name header -->
       <div v-if="detailKb && !routeError">
-        <h2 class="text-lg font-semibold text-foreground">{{ detailKb.name }}</h2>
+        <div class="flex items-center justify-between gap-3"><h2 class="text-lg font-semibold text-foreground">{{ detailKb.name }}</h2><Button variant="outline" size="sm" @click="showApiDialog = true">API 接入</Button></div>
         <p class="font-mono text-xs text-muted-foreground">{{ detailKb.slug }}</p>
       </div>
 
@@ -1086,6 +1088,7 @@ function syncBadgeLabel(status?: string | null) {
       </DialogContent>
     </Dialog>
 
+    <KnowledgeApiDialog v-if="detailKb" v-model:open="showApiDialog" :kb-slug="detailKb.slug" />
     <KnowledgePlaneDialog v-model:open="showPlaneDialog" :kb="planeKb" :backends="backends" />
 
     <KnowledgeDocumentDetailDialog v-model:open="showDocDetail" :slug="docDetailSlug" />

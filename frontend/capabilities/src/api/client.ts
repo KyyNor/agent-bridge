@@ -382,6 +382,9 @@ async function getBlob(url: string, options: ApiRequestOptions = {}): Promise<Bl
 }
 
 export const api = {
+  getPersonalApiKey: () => get<{ has_key: boolean; masked_key: string; updated_at: string | null }>('/personal-api-key'),
+  resetPersonalApiKey: () => post<{ has_key: boolean; masked_key: string; updated_at: string | null; api_key: string }>('/personal-api-key/reset', {}),
+  getKnowledgeOpenApi: (kb: string) => get<Record<string, unknown>>(`/kbs/${encodeURIComponent(kb)}/openapi`),
   // 管理员密码与浏览器提权会话
   getAdminAccessStatus: () => get<AdminAccessStatus>('/auth/admin/status'),
   createAdminSession: (password: string) =>
