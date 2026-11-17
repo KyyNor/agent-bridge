@@ -1,0 +1,256 @@
+{
+  "status": {
+    "exit_code": 0,
+    "client": "codex",
+    "model": "gpt-6-luna",
+    "variant": "old",
+    "elapsed_seconds": 24.91
+  },
+  "calls": [
+    {
+      "event": "request",
+      "tool": "search",
+      "arguments": {
+        "query": "python_run sql_query file_publish batch_transform route_probe artifact_export",
+        "limit": 50
+      }
+    },
+    {
+      "event": "request",
+      "tool": "search",
+      "arguments": {
+        "limit": 50
+      }
+    },
+    {
+      "event": "request",
+      "tool": "execute",
+      "arguments": {
+        "service": "fixture",
+        "tool_name": "python_run",
+        "params": {
+          "code": "print({\"中文\": [1, 2]})",
+          "environment": {
+            "variables": {
+              "REGION": "内网"
+            },
+            "packages": [
+              "pandas==2.2.3"
+            ]
+          },
+          "limits": {
+            "seconds": 30,
+            "network": false
+          }
+        }
+      }
+    },
+    {
+      "event": "business",
+      "tool": "python_run",
+      "correct": true,
+      "params": {
+        "code": "print({\"中文\": [1, 2]})",
+        "environment": {
+          "variables": {
+            "REGION": "内网"
+          },
+          "packages": [
+            "pandas==2.2.3"
+          ]
+        },
+        "limits": {
+          "seconds": 30,
+          "network": false
+        }
+      }
+    },
+    {
+      "event": "request",
+      "tool": "execute",
+      "arguments": {
+        "service": "fixture",
+        "tool_name": "sql_query",
+        "params": {
+          "query": "SELECT * FROM orders WHERE region = ? AND amount > ? AND deleted IS ?",
+          "bindings": [
+            "华东",
+            1200,
+            null
+          ],
+          "output": {
+            "format": "json",
+            "columns": [
+              "id",
+              "amount"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "event": "business",
+      "tool": "sql_query",
+      "correct": true,
+      "params": {
+        "query": "SELECT * FROM orders WHERE region = ? AND amount > ? AND deleted IS ?",
+        "bindings": [
+          "华东",
+          1200,
+          null
+        ],
+        "output": {
+          "format": "json",
+          "columns": [
+            "id",
+            "amount"
+          ]
+        }
+      }
+    },
+    {
+      "event": "request",
+      "tool": "execute",
+      "arguments": {
+        "service": "fixture",
+        "tool_name": "file_publish",
+        "params": {
+          "path": {
+            "directory": "报表/2026",
+            "filename": "a.json"
+          },
+          "content": "{\"params\":{\"code\":\"literal\"}}",
+          "overwrite": false
+        }
+      }
+    },
+    {
+      "event": "business",
+      "tool": "file_publish",
+      "correct": true,
+      "params": {
+        "path": {
+          "directory": "报表/2026",
+          "filename": "a.json"
+        },
+        "content": "{\"params\":{\"code\":\"literal\"}}",
+        "overwrite": false
+      }
+    },
+    {
+      "event": "request",
+      "tool": "execute",
+      "arguments": {
+        "service": "fixture",
+        "tool_name": "batch_transform",
+        "params": {
+          "rows": [
+            {
+              "id": 1,
+              "tags": [
+                "甲",
+                "乙"
+              ],
+              "enabled": true
+            },
+            {
+              "id": 2,
+              "tags": [],
+              "enabled": false
+            }
+          ],
+          "options": {}
+        }
+      }
+    },
+    {
+      "event": "business",
+      "tool": "batch_transform",
+      "correct": true,
+      "params": {
+        "rows": [
+          {
+            "id": 1,
+            "tags": [
+              "甲",
+              "乙"
+            ],
+            "enabled": true
+          },
+          {
+            "id": 2,
+            "tags": [],
+            "enabled": false
+          }
+        ],
+        "options": {}
+      }
+    },
+    {
+      "event": "request",
+      "tool": "execute",
+      "arguments": {
+        "service": "fixture",
+        "tool_name": "route_probe",
+        "params": {
+          "service": "business-service",
+          "tool_name": "business-operation",
+          "params": {
+            "input": "原样保留"
+          }
+        }
+      }
+    },
+    {
+      "event": "business",
+      "tool": "route_probe",
+      "correct": true,
+      "params": {
+        "service": "business-service",
+        "tool_name": "business-operation",
+        "params": {
+          "input": "原样保留"
+        }
+      }
+    },
+    {
+      "event": "request",
+      "tool": "execute",
+      "arguments": {
+        "service": "fixture",
+        "tool_name": "artifact_export",
+        "params": {
+          "destination": {
+            "kind": "file",
+            "path": "out/a b.json"
+          },
+          "selection": {
+            "ids": [
+              7,
+              19
+            ],
+            "comment": null
+          }
+        }
+      }
+    },
+    {
+      "event": "business",
+      "tool": "artifact_export",
+      "correct": true,
+      "params": {
+        "destination": {
+          "kind": "file",
+          "path": "out/a b.json"
+        },
+        "selection": {
+          "ids": [
+            7,
+            19
+          ],
+          "comment": null
+        }
+      }
+    }
+  ]
+}

@@ -20,7 +20,7 @@ from pydantic import Field
 from agent_bridge.access_control.identity import RequestIdentityResolver
 from agent_bridge.automation.workflows.runtime_capability import WORKFLOW_CAPABILITY_HEADER
 from agent_bridge.core.config import default_user
-from agent_bridge.core.domain import AccessDenied
+from agent_bridge.core.domain import AccessDenied, ValidationError
 from agent_bridge.dsh.workspace import DSH_CAPABILITY_HEADER
 from agent_bridge.app.service import AgentBridgeService
 from agent_bridge.capability_hub.gateway.request_context import (
@@ -28,6 +28,7 @@ from agent_bridge.capability_hub.gateway.request_context import (
     set_request_capability_token,
 )
 from agent_bridge.capability_hub.gateway.top_level_tools import top_level_mcp_tools
+from agent_bridge.capability_hub.execute_arguments import normalize_execute_arguments
 
 logger = logging.getLogger("agent_bridge.mcp")
 
@@ -128,6 +129,20 @@ def _has_complete_workflow_context(context: dict[str, Any] | None) -> bool:
     return bool(context.get("workflow_key")) and bool(context.get("run_id"))
 
 
+class CapabilityFastMCP(FastMCP):
+    """在 SDK 丢弃额外参数前处理 execute 的兼容包装。"""
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        if name == "execute":
+            started = time.monotonic()
+            try:
+                arguments = normalize_execute_arguments(arguments)
+            except ValidationError:
+                logger.warning("MCP execute 参数归一化阶段 状态=拒绝 耗时=%.0fms", (time.monotonic() - started) * 1000)
+                raise
+        return await super().call_tool(name, arguments)
+
+
 def create_mcp_server(
     service: AgentBridgeService,
     profile_key: str | None = None,
@@ -142,7 +157,7 @@ def create_mcp_server(
     以及 profile 的 pinned 工具和 wiki/codegraph/memory 直连工具。
     """
     bridge_service = service
-    mcp = FastMCP(
+    mcp = CapabilityFastMCP(
         name="agent-bridge",
         instructions=(
             "Agent Capability Hub gateway. "
@@ -189,7 +204,8 @@ def create_mcp_server(
         logger.info("执行 profile=%s service=%s tool=%s params=%s", active_profile, service, tool_name, json.dumps(params or {}, ensure_ascii=False))
         started = time.monotonic()
         try:
-            result = await bridge_service.capabilities.execute(
+            executor = getattr(bridge_service.capabilities, "execute_mcp", bridge_service.capabilities.execute)
+            result = await executor(
                 actor=_active_actor(),
                 service=service,
                 tool_name=tool_name,
