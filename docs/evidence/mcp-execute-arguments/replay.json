@@ -1,0 +1,394 @@
+[
+  {
+    "variant": "old",
+    "case": "standard",
+    "expected_success": true,
+    "is_error": false,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"success\": true,\n  \"result\": {\n    \"fixture\": \"python_run\",\n    \"verified\": true\n  }\n}",
+        "annotations": null,
+        "meta": null
+      }
+    ]
+  },
+  {
+    "variant": "old",
+    "case": "flat",
+    "expected_success": true,
+    "is_error": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "Error executing tool execute: 'code' is a required property\n\nFailed validating 'required' in schema:\n    {'type': 'object',\n     'properties': {'code': {'type': 'string'},\n                    'environment': {'type': 'object',\n                                    'properties': {'variables': {'type': 'object',\n                                                                 'properties': {'REGION': {'type': 'string'}},\n                                                                 'required': ['REGION'],\n                                                                 'additionalProperties': False},\n                                                   'packages': {'type': 'array',\n                                                                'items': {'type': 'string'}}},\n                                    'required': ['variables', 'packages'],\n                                    'additionalProperties': False},\n                    'limits': {'type': 'object',\n                               'properties': {'seconds': {'type': 'integer'},\n                                              'network': {'type': 'boolean'}},\n                               'required': ['seconds', 'network'],\n                               'additionalProperties': False}},\n     'required': ['code', 'environment', 'limits'],\n     'additionalProperties': False}\n\nOn instance:\n    {}",
+        "annotations": null,
+        "meta": null
+      }
+    ]
+  },
+  {
+    "variant": "old",
+    "case": "mixed",
+    "expected_success": true,
+    "is_error": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "Error executing tool execute: 'environment' is a required property\n\nFailed validating 'required' in schema:\n    {'type': 'object',\n     'properties': {'code': {'type': 'string'},\n                    'environment': {'type': 'object',\n                                    'properties': {'variables': {'type': 'object',\n                                                                 'properties': {'REGION': {'type': 'string'}},\n                                                                 'required': ['REGION'],\n                                                                 'additionalProperties': False},\n                                                   'packages': {'type': 'array',\n                                                                'items': {'type': 'string'}}},\n                                    'required': ['variables', 'packages'],\n                                    'additionalProperties': False},\n                    'limits': {'type': 'object',\n                               'properties': {'seconds': {'type': 'integer'},\n                                              'network': {'type': 'boolean'}},\n                               'required': ['seconds', 'network'],\n                               'additionalProperties': False}},\n     'required': ['code', 'environment', 'limits'],\n     'additionalProperties': False}\n\nOn instance:\n    {'code': 'print({\"中文\": [1, 2]})'}",
+        "annotations": null,
+        "meta": null
+      }
+    ]
+  },
+  {
+    "variant": "old",
+    "case": "empty_params_flat",
+    "expected_success": true,
+    "is_error": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "Error executing tool execute: 'code' is a required property\n\nFailed validating 'required' in schema:\n    {'type': 'object',\n     'properties': {'code': {'type': 'string'},\n                    'environment': {'type': 'object',\n                                    'properties': {'variables': {'type': 'object',\n                                                                 'properties': {'REGION': {'type': 'string'}},\n                                                                 'required': ['REGION'],\n                                                                 'additionalProperties': False},\n                                                   'packages': {'type': 'array',\n                                                                'items': {'type': 'string'}}},\n                                    'required': ['variables', 'packages'],\n                                    'additionalProperties': False},\n                    'limits': {'type': 'object',\n                               'properties': {'seconds': {'type': 'integer'},\n                                              'network': {'type': 'boolean'}},\n                               'required': ['seconds', 'network'],\n                               'additionalProperties': False}},\n     'required': ['code', 'environment', 'limits'],\n     'additionalProperties': False}\n\nOn instance:\n    {}",
+        "annotations": null,
+        "meta": null
+      }
+    ]
+  },
+  {
+    "variant": "old",
+    "case": "identical_duplicate",
+    "expected_success": true,
+    "is_error": false,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"success\": true,\n  \"result\": {\n    \"fixture\": \"python_run\",\n    \"verified\": true\n  }\n}",
+        "annotations": null,
+        "meta": null
+      }
+    ]
+  },
+  {
+    "variant": "old",
+    "case": "conflicting_duplicate",
+    "expected_success": false,
+    "is_error": false,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"success\": true,\n  \"result\": {\n    \"fixture\": \"python_run\",\n    \"verified\": true\n  }\n}",
+        "annotations": null,
+        "meta": null
+      }
+    ]
+  },
+  {
+    "variant": "old",
+    "case": "wrong_wrapper",
+    "expected_success": false,
+    "is_error": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "Error executing tool execute: 'code' is a required property\n\nFailed validating 'required' in schema:\n    {'type': 'object',\n     'properties': {'code': {'type': 'string'},\n                    'environment': {'type': 'object',\n                                    'properties': {'variables': {'type': 'object',\n                                                                 'properties': {'REGION': {'type': 'string'}},\n                                                                 'required': ['REGION'],\n                                                                 'additionalProperties': False},\n                                                   'packages': {'type': 'array',\n                                                                'items': {'type': 'string'}}},\n                                    'required': ['variables', 'packages'],\n                                    'additionalProperties': False},\n                    'limits': {'type': 'object',\n                               'properties': {'seconds': {'type': 'integer'},\n                                              'network': {'type': 'boolean'}},\n                               'required': ['seconds', 'network'],\n                               'additionalProperties': False}},\n     'required': ['code', 'environment', 'limits'],\n     'additionalProperties': False}\n\nOn instance:\n    {}",
+        "annotations": null,
+        "meta": null
+      }
+    ]
+  },
+  {
+    "variant": "old",
+    "case": "string_params",
+    "expected_success": false,
+    "is_error": false,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"success\": true,\n  \"result\": {\n    \"fixture\": \"python_run\",\n    \"verified\": true\n  }\n}",
+        "annotations": null,
+        "meta": null
+      }
+    ]
+  },
+  {
+    "variant": "old",
+    "case": "wrong_type",
+    "expected_success": false,
+    "is_error": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "Error executing tool execute: '30' is not of type 'integer'\n\nFailed validating 'type' in schema['properties']['limits']['properties']['seconds']:\n    {'type': 'integer'}\n\nOn instance['limits']['seconds']:\n    '30'",
+        "annotations": null,
+        "meta": null
+      }
+    ]
+  },
+  {
+    "variant": "old",
+    "case": "sql_query",
+    "expected_success": true,
+    "is_error": false,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"success\": true,\n  \"result\": {\n    \"fixture\": \"sql_query\",\n    \"verified\": true\n  }\n}",
+        "annotations": null,
+        "meta": null
+      }
+    ]
+  },
+  {
+    "variant": "old",
+    "case": "file_publish",
+    "expected_success": true,
+    "is_error": false,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"success\": true,\n  \"result\": {\n    \"fixture\": \"file_publish\",\n    \"verified\": true\n  }\n}",
+        "annotations": null,
+        "meta": null
+      }
+    ]
+  },
+  {
+    "variant": "old",
+    "case": "batch_transform",
+    "expected_success": true,
+    "is_error": false,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"success\": true,\n  \"result\": {\n    \"fixture\": \"batch_transform\",\n    \"verified\": true\n  }\n}",
+        "annotations": null,
+        "meta": null
+      }
+    ]
+  },
+  {
+    "variant": "old",
+    "case": "route_probe",
+    "expected_success": true,
+    "is_error": false,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"success\": true,\n  \"result\": {\n    \"fixture\": \"route_probe\",\n    \"verified\": true\n  }\n}",
+        "annotations": null,
+        "meta": null
+      }
+    ]
+  },
+  {
+    "variant": "old",
+    "case": "artifact_export",
+    "expected_success": true,
+    "is_error": false,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"success\": true,\n  \"result\": {\n    \"fixture\": \"artifact_export\",\n    \"verified\": true\n  }\n}",
+        "annotations": null,
+        "meta": null
+      }
+    ]
+  },
+  {
+    "variant": "new",
+    "case": "standard",
+    "expected_success": true,
+    "is_error": false,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"success\": true,\n  \"result\": {\n    \"fixture\": \"python_run\",\n    \"verified\": true\n  }\n}",
+        "annotations": null,
+        "meta": null
+      }
+    ]
+  },
+  {
+    "variant": "new",
+    "case": "flat",
+    "expected_success": true,
+    "is_error": false,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"success\": true,\n  \"result\": {\n    \"fixture\": \"python_run\",\n    \"verified\": true\n  }\n}",
+        "annotations": null,
+        "meta": null
+      }
+    ]
+  },
+  {
+    "variant": "new",
+    "case": "mixed",
+    "expected_success": true,
+    "is_error": false,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"success\": true,\n  \"result\": {\n    \"fixture\": \"python_run\",\n    \"verified\": true\n  }\n}",
+        "annotations": null,
+        "meta": null
+      }
+    ]
+  },
+  {
+    "variant": "new",
+    "case": "empty_params_flat",
+    "expected_success": true,
+    "is_error": false,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"success\": true,\n  \"result\": {\n    \"fixture\": \"python_run\",\n    \"verified\": true\n  }\n}",
+        "annotations": null,
+        "meta": null
+      }
+    ]
+  },
+  {
+    "variant": "new",
+    "case": "identical_duplicate",
+    "expected_success": true,
+    "is_error": false,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"success\": true,\n  \"result\": {\n    \"fixture\": \"python_run\",\n    \"verified\": true\n  }\n}",
+        "annotations": null,
+        "meta": null
+      }
+    ]
+  },
+  {
+    "variant": "new",
+    "case": "conflicting_duplicate",
+    "expected_success": false,
+    "is_error": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "execute 参数冲突：字段 ['code'] 在顶层与 params 内的值不同；请仅在 params 内保留确定的值。本次未执行。",
+        "annotations": null,
+        "meta": null
+      }
+    ]
+  },
+  {
+    "variant": "new",
+    "case": "wrong_wrapper",
+    "expected_success": false,
+    "is_error": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "Error executing tool execute: 目标参数结构不符：疑似把 params 包装字段写成了其他名称。本次未执行。请将该内层对象原样放到 params 内，保留原 service 与 tool_name。标准结构：{\"service\":\"服务标识\",\"tool_name\":\"工具名\",\"params\":{}}。",
+        "annotations": null,
+        "meta": null
+      }
+    ]
+  },
+  {
+    "variant": "new",
+    "case": "string_params",
+    "expected_success": false,
+    "is_error": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "execute.params 必须是 JSON 对象；本次未执行，不会自动解析字符串或转换类型。",
+        "annotations": null,
+        "meta": null
+      }
+    ]
+  },
+  {
+    "variant": "new",
+    "case": "wrong_type",
+    "expected_success": false,
+    "is_error": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "Error executing tool execute: 目标参数 Schema 校验失败（字段：limits.seconds，规则：type）；本次未执行。请按 search 返回的 input_schema 将原始业务字段放入 params，保留规定类型与必填字段。",
+        "annotations": null,
+        "meta": null
+      }
+    ]
+  },
+  {
+    "variant": "new",
+    "case": "sql_query",
+    "expected_success": true,
+    "is_error": false,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"success\": true,\n  \"result\": {\n    \"fixture\": \"sql_query\",\n    \"verified\": true\n  }\n}",
+        "annotations": null,
+        "meta": null
+      }
+    ]
+  },
+  {
+    "variant": "new",
+    "case": "file_publish",
+    "expected_success": true,
+    "is_error": false,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"success\": true,\n  \"result\": {\n    \"fixture\": \"file_publish\",\n    \"verified\": true\n  }\n}",
+        "annotations": null,
+        "meta": null
+      }
+    ]
+  },
+  {
+    "variant": "new",
+    "case": "batch_transform",
+    "expected_success": true,
+    "is_error": false,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"success\": true,\n  \"result\": {\n    \"fixture\": \"batch_transform\",\n    \"verified\": true\n  }\n}",
+        "annotations": null,
+        "meta": null
+      }
+    ]
+  },
+  {
+    "variant": "new",
+    "case": "route_probe",
+    "expected_success": true,
+    "is_error": false,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"success\": true,\n  \"result\": {\n    \"fixture\": \"route_probe\",\n    \"verified\": true\n  }\n}",
+        "annotations": null,
+        "meta": null
+      }
+    ]
+  },
+  {
+    "variant": "new",
+    "case": "artifact_export",
+    "expected_success": true,
+    "is_error": false,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"success\": true,\n  \"result\": {\n    \"fixture\": \"artifact_export\",\n    \"verified\": true\n  }\n}",
+        "annotations": null,
+        "meta": null
+      }
+    ]
+  }
+]

@@ -1,0 +1,10 @@
+{
+  "status": {
+    "exit_code": 1,
+    "client": "cmd",
+    "model": "minimaxai/minimax-m2.7",
+    "variant": "old",
+    "elapsed_seconds": 2.45
+  },
+  "calls": []
+}

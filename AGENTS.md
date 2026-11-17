@@ -13,6 +13,8 @@
 
 ## 后端与标识约束
 
+- 通用 MCP `execute` 仅兼容平铺参数收纳和无冲突合并；在 SDK 参数解析前完成，不改对外标准 Schema。目标 Schema 校验在统一执行审计内完成，不强转、不猜测包装字段、不联网解析 Schema 引用；冲突与校验失败不得执行目标工具。
+
 - 文档知识后端实现 `BackendAdapter`；可选能力通过独立 runtime-checkable Protocol 表达。
 - MCP 服务配置响应只返回 Header 名称和掩码。逐项编辑通过 `header_updates` 保留未提交的值，`null` 删除。同步失败记录安全分类与上游状态码，禁止把原始异常、响应正文或 Header 值写入用户可见错误。上游鉴权失败与平台登录失败使用不同的 HTTP 状态。
 - 能力来源实现 `CapabilitySourceAdapter` 并注册到来源 registry。

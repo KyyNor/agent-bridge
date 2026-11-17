@@ -1,0 +1,89 @@
+{
+  "baseline": "04c311d",
+  "cases": 6,
+  "runs": [
+    {
+      "exit_code": 0,
+      "client": "codex",
+      "model": "gpt-6-luna",
+      "variant": "old",
+      "elapsed_seconds": 24.91,
+      "run": "luna-old",
+      "execute_calls": 6,
+      "correct_tasks": 6
+    },
+    {
+      "exit_code": 0,
+      "client": "codex",
+      "model": "gpt-6-luna",
+      "variant": "new",
+      "elapsed_seconds": 39.04,
+      "run": "luna-new-r1",
+      "execute_calls": 6,
+      "correct_tasks": 6
+    },
+    {
+      "exit_code": 0,
+      "client": "cmd",
+      "model": "deepseek/deepseek-v4.1-flash",
+      "variant": "old",
+      "elapsed_seconds": 14.16,
+      "run": "deepseek-old-r1",
+      "execute_calls": 6,
+      "correct_tasks": 6
+    },
+    {
+      "exit_code": 0,
+      "client": "cmd",
+      "model": "deepseek/deepseek-v4.1-flash",
+      "variant": "new",
+      "elapsed_seconds": 20.81,
+      "run": "deepseek-new-r1",
+      "execute_calls": 6,
+      "correct_tasks": 6
+    },
+    {
+      "exit_code": 0,
+      "client": "cmd",
+      "model": "qwen/qwen3.8-27b",
+      "variant": "old",
+      "elapsed_seconds": 26.87,
+      "run": "qwen-old-r1",
+      "execute_calls": 6,
+      "correct_tasks": 6
+    },
+    {
+      "exit_code": 0,
+      "client": "cmd",
+      "model": "qwen/qwen3.8-27b",
+      "variant": "new",
+      "elapsed_seconds": 17.5,
+      "run": "qwen-new-r1",
+      "execute_calls": 6,
+      "correct_tasks": 6
+    },
+    {
+      "exit_code": 1,
+      "client": "cmd",
+      "model": "minimaxai/minimax-m2.7",
+      "variant": "old",
+      "elapsed_seconds": 2.45,
+      "run": "minimax-old-r1",
+      "execute_calls": 0,
+      "correct_tasks": 0
+    },
+    {
+      "exit_code": 1,
+      "client": "cmd",
+      "model": "minimaxai/minimax-m2.7",
+      "variant": "new",
+      "elapsed_seconds": 2.37,
+      "run": "minimax-new-r1",
+      "execute_calls": 0,
+      "correct_tasks": 0
+    }
+  ],
+  "unavailable": "MiniMax M2.7: CMD 400 model temporarily unavailable on both variants",
+  "excluded": "Initial CMD runs before explicit fixture permission setup; no business calls executed",
+  "scope": "Real CLI model + real MCP transport; MOCKED business; one short session per model and variant"
+}

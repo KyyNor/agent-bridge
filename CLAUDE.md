@@ -82,6 +82,9 @@ MCP 服务的配置响应仅返回 Header 名称和掩码。注册接口接受�
 
 MetaMCP `/mcp` 每个请求按 profile/workflow 上下文创建 request-scoped 工具集，底层 transport 使用 stateless 模式。不要缓存包含动态工具注册的 server 实例，避免跨请求上下文泄漏。
 
+`capability_hub/execute_arguments.py` 负责通用 `execute` 的无损参数归一化与 Schema 校验。`CapabilityFastMCP.call_tool` 在 SDK 解析前保留平铺字段，`CapabilityService.execute_mcp` 在统一审计范围内校验当前可见工具 Schema；直接工具与内部调用沿用各自参数契约。禁止自动解包疑似错写的包装字段、覆盖冲突值或通过类型强转修复调用；Schema 引用不允许联网解析。
+
+
 Claude 执行适配和 SDK 已移除；新安装默认 DSH，遗留 Claude 配置只读隔离并返回迁移提示，不能启动新 run，也不静默切换后端。新配置保存严格拒绝 Claude。
 
 `profile use` / `profile sync` 不再写入 Claude 接入配置；保留 `profile unuse` 清理旧 MCP、Hook 与说明块，保留用户配置和历史数据。受管 Agent 的 Profile 正文写入 `AGENTS.md`。

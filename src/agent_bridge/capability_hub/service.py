@@ -40,6 +40,7 @@ from agent_bridge.capability_hub.sources.adapters import (
     McpSourceAdapter,
     OpenApiSourceAdapter,
 )
+from agent_bridge.capability_hub.execute_arguments import validate_execute_params
 from agent_bridge.capability_hub.gateway.top_level_tools import (
     top_level_mcp_tools,
     top_level_tool_by_name,
@@ -874,6 +875,21 @@ class CapabilityService:
         logger.debug("搜索完成 path=%s 结果数=%d", response_path, len(items))
         return {"path": response_path, "items": items[:limit]}
 
+    def validate_execution_params(
+        self, actor: str, service: str, tool_name: str, params: dict[str, Any],
+        profile_key: str | None = None,
+    ) -> None:
+        """按当前可见目录校验 MCP execute 参数；实际执行仍重新校验权限。"""
+        source = self.source_registry.resolve(service)
+        visible_tools = source.search_items(actor, service, profile_key)
+        target = next((item for item in visible_tools if item.get("tool") == tool_name), None)
+        if target is not None:
+            validate_execute_params(params, target.get("input_schema") or {})
+
+    async def execute_mcp(self, **kwargs: Any) -> dict[str, Any]:
+        """通用 MCP 入口在统一审计范围内校验目标参数。"""
+        return await self.execute(**kwargs, validate_schema=True)
+
     async def execute(
         self,
         actor: str,
@@ -882,6 +898,8 @@ class CapabilityService:
         params: dict[str, Any],
         profile_key: str | None = None,
         workflow_context: dict[str, Any] | None = None,
+        *,
+        validate_schema: bool = False,
     ) -> dict[str, Any]:
         """能力执行的统一入口（经 MetaMCP gateway ``execute`` 工具暴露给 agent）。
 
@@ -894,6 +912,8 @@ class CapabilityService:
         resource_type = None
         resource_key = None
         try:
+            if validate_schema:
+                self.validate_execution_params(actor, service, tool_name, params, profile_key)
             execution = await source.execute(
                 actor,
                 service,
