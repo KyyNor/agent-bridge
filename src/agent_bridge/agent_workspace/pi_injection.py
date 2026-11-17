@@ -15,12 +15,15 @@ API Key 同样只经环境变量传递，不写入任何文件。
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from copy import deepcopy
 import json
 import logging
 from pathlib import Path
 from typing import Any
 
 from agent_bridge.agent_workspace import safe_files
+from agent_bridge.agent_workspace.compaction import compaction_reserve
 from agent_bridge.agent_workspace.capability import WorkspaceSelection
 from agent_bridge.agent_workspace.launcher import LinuxIdentity
 
@@ -124,7 +127,9 @@ def write_models(
 # -- settings.json --
 
 
-def build_settings_payload(existing: dict[str, Any], *, default_model: str) -> dict[str, Any]:
+def build_settings_payload(
+    existing: dict[str, Any], *, default_model: str, models: Sequence[str] = (), context_window: int = 0
+) -> dict[str, Any]:
     """写入组级默认模型，保留其余用户设置。
 
     pi 解析默认模型需要 ``defaultProvider`` + ``defaultModel`` **成对**（见
@@ -137,16 +142,32 @@ def build_settings_payload(existing: dict[str, Any], *, default_model: str) -> d
     if default_model:
         payload["defaultModel"] = default_model
         payload["defaultProvider"] = MANAGED_PROVIDER_KEY
+    reserve = compaction_reserve(context_window)
+    compaction = deepcopy(payload.get("compaction") or {})
+    overrides = compaction.get("modelOverrides", {})
+    for key in list(overrides):
+        if key.startswith(MANAGED_PROVIDER_KEY + "/"):
+            overrides[key].pop("reserveTokens", None)
+            if not overrides[key]:
+                del overrides[key]
+    if reserve:
+        compaction["enabled"] = True
+        for model in models:
+            overrides.setdefault(f"{MANAGED_PROVIDER_KEY}/{model}", {})["reserveTokens"] = reserve
+    if overrides or "modelOverrides" in compaction or reserve:
+        compaction["modelOverrides"] = overrides
+    if compaction:
+        payload["compaction"] = compaction
     return payload
 
 
 def write_settings(
-    config_dir: Path, *, uid: int, gid: int, default_model: str
+    config_dir: Path, *, uid: int, gid: int, default_model: str, models: Sequence[str] = (), context_window: int = 0
 ) -> Path:
     """写入 ``settings.json``；返回文件路径。"""
     path = config_dir / SETTINGS_FILENAME
     payload = build_settings_payload(
-        _read_json(path), default_model=default_model
+        _read_json(path), default_model=default_model, models=models, context_window=context_window
     )
     write_managed_json(path, payload, uid=uid, gid=gid, label="Pi settings")
     return path

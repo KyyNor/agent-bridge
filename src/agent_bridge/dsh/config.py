@@ -17,6 +17,7 @@ import re
 from typing import Any
 from urllib.parse import urlparse
 
+from agent_bridge.agent_workspace.compaction import compaction_reserve
 from agent_bridge.agent_workspace.pi_versions import (
     DEFAULT_PI_WEB_COMMAND,
     normalize_pi_web_command,
@@ -122,7 +123,9 @@ def normalize_token_limit(value: int | None, *, label: str) -> int:
 
 def normalize_context_window(value: int | None) -> int:
     """校验上下文长度；0 表示不声明（沿用 CLI 自身默认）。"""
-    return normalize_token_limit(value, label="上下文长度")
+    result = normalize_token_limit(value, label="上下文长度")
+    compaction_reserve(result)
+    return result
 
 
 def normalize_max_tokens(value: int | None) -> int:

@@ -490,3 +490,24 @@ def test_settings_write_default_provider_with_model() -> None:
     assert build_settings_payload({"defaultModel": "mine"}, default_model="") == {
         "defaultModel": "mine"
     }
+
+
+@pytest.mark.parametrize('terminal', [False, True])
+def test_launch_plan_writes_compaction_budget(service, tmp_path, monkeypatch, terminal):
+    """Web 与终端均把公共窗口转换成实际 PI_CODING_AGENT_DIR 中的设置。"""
+    from agent_bridge.agent_workspace.launcher import LinuxIdentity
+    from agent_bridge.agent_workspace.terminal_adapter import PiTerminalAdapter
+
+    monkeypatch.setattr('shutil.which', lambda name: '/usr/bin/' + name)
+    identity = LinuxIdentity(user='test', uid=os.getuid(), gid=os.getgid(), home=tmp_path)
+    adapter = PiTerminalAdapter(configs=service.dsh_configs, mcp_url='http://localhost/mcp') if terminal else service.pi.adapter
+    plan = adapter.build_launch_plan(
+        runtime_owner='user1', identity=identity, scope='personal', runtime_key='user1',
+        port=48701, workspace=None, log_path=tmp_path / 'runtime.log',
+        model_binding={'base_url': 'http://models/v1', 'available_models': ['m'],
+                       'default_model': 'm', 'context_window': 200_000, 'max_tokens': 32_768},
+    )
+    settings_path = Path(plan.env['PI_CODING_AGENT_DIR']) / 'settings.json'
+    settings = json.loads(settings_path.read_text())
+    assert settings['compaction']['modelOverrides']['agent-bridge/m']['reserveTokens'] == 35_000
+    assert settings_path.stat().st_mode & 0o777 == 0o600

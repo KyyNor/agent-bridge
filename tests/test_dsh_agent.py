@@ -768,7 +768,7 @@ def test_resolver_builds_binding_and_model_overlay(tmp_path: Path) -> None:
 
     def reader(**kwargs: Any) -> Any:
         reads.append(kwargs)
-        return {"providers": {"user-own": {"baseURL": "http://user/v1"}}}
+        return [{"id": "llm-pi-ai", "config": {"providers": {"user-own": {"baseURL": "http://user/v1"}}}}]
 
     resolver = DshAgentRuntimeResolver(
         configs=configs,
@@ -789,7 +789,7 @@ def test_resolver_builds_binding_and_model_overlay(tmp_path: Path) -> None:
     # 模型接入不再写 settings.yaml（DSH 0.2 已移除），而是读取 acp profile 的
     # 生效配置合并托管供应商，交给 adapter 写入 run 的 --patch。
     assert not (binding.dsh_home / "settings.yaml").exists()
-    assert reads[0]["profile"] == "acp" and reads[0]["entry_id"] == "llm-pi-ai"
+    assert reads[0]["profile"] == "acp"
     assert reads[0]["env"]["DSH_HOME"] == str(binding.dsh_home)
     entries = {entry["id"]: entry["config"] for entry in binding.model_overlay}
     providers = entries["llm-pi-ai"]["providers"]

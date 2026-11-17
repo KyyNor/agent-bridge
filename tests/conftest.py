@@ -9,14 +9,17 @@ from agent_bridge.core.config import AgentBridgePaths
 
 @pytest.fixture(autouse=True)
 def _stub_dsh_dump_config(monkeypatch: pytest.MonkeyPatch) -> None:
-    """单元测试不执行真实 ``dsh --dump-config``：生效配置视为空（无用户供应商）。
+    """单元测试不执行真实 ``dsh --dump-config``：只保留基础压缩器（无用户供应商）。
 
-    需要模拟用户供应商的测试自行覆盖 ``injection.read_entry_config``；真实
+    需要模拟用户供应商的测试自行覆盖 ``injection.read_profile_entries``；真实
     DSH 进程测试在模块导入时保留原函数引用。
     """
     from agent_bridge.dsh import injection
 
-    monkeypatch.setattr(injection, "read_entry_config", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        injection, "read_profile_entries",
+        lambda **_kwargs: [{"id": "compaction-basic", "name": "@deepseek-ai/dsh-compaction-basic"}],
+    )
 
 
 @pytest.fixture

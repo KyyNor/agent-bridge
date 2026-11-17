@@ -36,6 +36,8 @@ import yaml
 
 from agent_bridge.agent_workspace import safe_files
 from agent_bridge.agent_workspace.launcher import LinuxIdentity, demotion_kwargs
+from agent_bridge.core.domain import ValidationError
+from agent_bridge.dsh.compaction import build_compaction_overlay
 
 logger = logging.getLogger(__name__)
 
@@ -159,18 +161,17 @@ def build_provider_entry(
     }
 
 
-def read_entry_config(
+def read_profile_entries(
     *,
     dsh_binary: str,
     profile: str,
-    entry_id: str,
     env: dict[str, str],
     cwd: Path,
     identity: LinuxIdentity,
-) -> Any:
-    """以目标 Linux 用户执行 ``dsh --profile <p> --dump-config``，返回指定行的 config。
+) -> list[dict[str, Any]]:
+    """以目标 Linux 用户执行 ``dsh --profile <p> --dump-config``，返回完整 entry-list。
 
-    行不存在或未配置时返回 ``None``；命令失败、超时或输出无法解析时抛
+    命令失败、超时或输出无法解析时抛
     ``RuntimeError``，由调用方决定降级策略。
     """
     command = [dsh_binary, "--profile", profile, "--dump-config"]
@@ -196,10 +197,9 @@ def read_entry_config(
         entries = load_entry_list(result.stdout)
     except yaml.YAMLError as exc:
         raise RuntimeError(f"{' '.join(command)} 输出解析失败：{exc}") from exc
-    for entry in entries if isinstance(entries, list) else []:
-        if isinstance(entry, dict) and entry.get("id") == entry_id:
-            return entry.get("config")
-    return None
+    if not isinstance(entries, list) or any(not isinstance(row, dict) for row in entries):
+        raise RuntimeError("DSH 生效配置必须是 entry-list")
+    return entries
 
 
 def build_model_overlay(
@@ -259,20 +259,24 @@ def resolve_model_overlay(
     max_tokens: int = 0,
     config_reader: Any = None,
 ) -> list[dict[str, Any]] | None:
-    """读取当前生效的 ``llm-pi-ai`` 配置并构造合并后的模型覆盖条目。"""
+    """读取生效配置，合并模型供应商与实际压缩器的覆盖条目。"""
     if not base_url or not models:
         return None
-    reader = config_reader or read_entry_config
+    reader = config_reader or read_profile_entries
     try:
-        llm_config = reader(
+        entries = reader(
             dsh_binary=dsh_binary,
             profile=profile,
-            entry_id=LLM_ENTRY_ID,
             env=env,
             cwd=cwd,
             identity=identity,
         )
     except RuntimeError as exc:
+        if context_window:
+            logger.warning(
+                "DSH 压缩配置读取失败，拒绝启动 profile=%s dsh_home=%s", profile, dsh_home
+            )
+            raise ValidationError("DSH 压缩配置读取失败，无法应用托管预算，请检查 profile 配置") from exc
         logger.warning(
             "DSH 当前供应商配置读取失败，本次仅注入托管供应商（profile 文件不受影响）"
             " dsh_home=%s profile=%s 原因=%s",
@@ -280,8 +284,9 @@ def resolve_model_overlay(
             profile,
             exc,
         )
-        llm_config = None
-    return build_model_overlay(
+        entries = []
+    llm_config = next((e.get("config") for e in entries if e.get("id") == LLM_ENTRY_ID), None)
+    overlay = build_model_overlay(
         base_url=base_url,
         models=models,
         default_model=default_model,
@@ -290,6 +295,9 @@ def resolve_model_overlay(
         context_window=context_window,
         max_tokens=max_tokens,
     )
+    return [*(overlay or []), *build_compaction_overlay(
+        entries, models=models, context_window=context_window, max_tokens=max_tokens
+    )]
 
 
 def write_overlay(

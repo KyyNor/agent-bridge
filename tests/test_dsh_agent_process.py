@@ -34,9 +34,9 @@ pytestmark = pytest.mark.process
 _BASE_URL = os.environ.get("AGENT_BRIDGE_DSH_TEST_BASE_URL", "")
 _API_KEY = os.environ.get("AGENT_BRIDGE_DSH_TEST_API_KEY", "")
 _MODEL = os.environ.get("AGENT_BRIDGE_DSH_TEST_MODEL", "deepseek-flash")
-# conftest 会把 ``read_entry_config`` 替换为空桩；真实进程测试在导入时保留原实现，
+# conftest 会把 ``read_profile_entries`` 替换为空桩；真实进程测试在导入时保留原实现，
 # 以真实 ``dsh --dump-config`` 读取 acp profile 的生效配置。
-_REAL_CONFIG_READER = injection.read_entry_config
+_REAL_CONFIG_READER = injection.read_profile_entries
 
 requires_real_dsh = pytest.mark.skipif(
     not shutil.which("dsh") or not _BASE_URL or not _API_KEY,
