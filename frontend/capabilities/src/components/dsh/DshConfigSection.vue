@@ -51,7 +51,10 @@ const idleTimeoutValid = computed(
 )
 const modelsValid = computed(() => runtimeForm.value.models.every(item => item.trim().length > 0))
 // 0 表示不声明，由 DSH / Pi 沿用各自默认（DSH 262144、Pi 128000）。
-const contextWindowValid = computed(() => isTokenLimit(runtimeForm.value.context_window))
+const contextWindowValid = computed(() =>
+  isTokenLimit(runtimeForm.value.context_window) &&
+  (runtimeForm.value.context_window === 0 || runtimeForm.value.context_window > 35000),
+)
 // 单次输出上限，同样 0 = 不声明（DSH 32768、Pi 16384）。
 const maxTokensValid = computed(() => isTokenLimit(runtimeForm.value.max_tokens))
 const defaultModelValid = computed(
@@ -290,9 +293,9 @@ async function saveGroupConfig() {
               class="w-56 font-mono text-sm"
             />
             <div v-if="contextWindowValid" class="text-xs text-muted-foreground">
-              以 <code class="font-mono">contextWindow</code> 逐模型注入到上面列出的模型，DSH 与 Pi 同时生效；0 表示不声明，沿用各自默认（DSH 262144、Pi 128000）
+              以 <code class="font-mono">contextWindow</code> 逐模型注入到上面列出的模型，DSH 与 Pi 同时生效；0 表示不声明，沿用各自默认（DSH 262144、Pi 128000）。显式配置时，总压缩预留为窗口的 15%，至少 35,000 tokens；新启动的 DSH、Pi 及 Pi Web 会话生效
             </div>
-            <div v-else class="text-xs text-destructive">请输入 0-10000000 的整数</div>
+            <div v-else class="text-xs text-destructive">请输入 0 或 35001-10000000 的整数</div>
           </div>
         </div>
         <div class="grid grid-cols-[12rem_1fr] items-center gap-4">

@@ -336,6 +336,13 @@ DSH 专属语义（`dsh/`）：
   不改写 profile 文件）。代价：DSH 配置编辑器拒绝修改被命令行覆盖层接管的行，
   注入期间这两行在 DSH 设置界面中只读。API Key 只经 `AGENT_BRIDGE_DSH_API_KEY`
   环境变量传递，不落盘。
+- **托管压缩总预算**：显式窗口采用 `max(ceil(context_window × 15%), 35000)`，
+  窗口必须大于 35000；0 沿用上游。公共计算在 `agent_workspace/compaction.py`，
+  DSH 按模型扣除输出预留后设置额外余量，并在 `dsh/compaction.py` 合并实际 preset
+  内的压缩器；Pi Web/终端写按模型的 `compaction.modelOverrides`。DSH ACP 同样接入。
+  输出上限超过预算时保留上游提前压缩保护并警告，不改用户输出配置。
+  DSH dump 失败或压缩器缺失时，显式窗口拒绝启动，不能声称托管预算已生效。
+  配置下次启动生效，原生手动压缩模式与 Pi 项目级覆盖仍遵循上游语义。
 - **上下文长度与输出上限按模型逐条声明**（`dsh_runtime_config.context_window` 与
   `max_tokens`，0 = 不声明）：公共模型接入各带一个全局值，对 `available_models`
   里的每个模型写成 `contextWindow` / `maxTokens`，DSH（`llm-pi-ai`）与 Pi

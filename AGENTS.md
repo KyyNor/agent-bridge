@@ -53,6 +53,13 @@
 
 - 网页终端首版只支持个人范围：通过 `TERMINAL_ADAPTERS` 注册，复用 `WorkspaceRuntimeService`，不得为 Pi/DSH 写中心分支。Web/终端的配置、capability 与进程标记必须隔离。xterm 6.x 必须在 modern 和 legacy 构建中面向 Chrome 90 转译；不可把原包可下载误判为旧浏览器可运行。终端 WS 校验同源 Origin、登录与当前归属，只代理已登记的目标，不接受用户指定命令或端口。单会话单连接、重放有界、断线保留 120 秒、服务重启回收。会话结束必须显式收尾：Agent 退出时 bridge 先发结束帧再以 4000 关闭，代理在终端已回收/归属或能力平面失效时回 4001，禁止让 uvicorn 用 1000/1006 收尾（前端会误判成链路抖动）。前端对 4000/4001/4009/1008/1013 一律视为终态并提示关闭页面，只对链路异常做有限退避重试，且连接稳定存活 10 秒后才重置重试计数、重试前先探测 runtime 是否仍存活；不得恢复无上限自动重连。终端自动退出必须复用 `RuntimeProcessController` 完整回收后代树及 Linux 下按 `AGENT_BRIDGE_TERMINAL_SESSION` 随机会话标记匹配的孤儿，主 Agent 已退出也不得跳过；不得仅发进程组信号。DSH TUI 插件精确版本单独维护在 `dsh-tui-plugins.txt`，安装失败拒绝启动，不混装 Web 插件。终端必须先选择启动目录再显式启动，默认映射 Linux 用户 home；目录选择不得启动进程。文件侧栏通过目标 Linux 身份 helper 执行读写，以选定目录 fd 和设备/inode 快照限定根目录，拒绝软链和上级路径逃逸；上传原子发布且不覆盖同名文件，上传/下载单文件上限 32 MiB，禁止 root 直接读写用户文件。
 
+- 显式工作台上下文的总压缩预留统一为 `max(ceil(context_window * 15%), 35000)`，
+  0 沿用上游，非零必须大于 35000。DSH 的输出预留必须计入总预算，额外余量不能再
+  固定叠加 65536；输出上限大于预算时保留提前压缩保护并警告。覆盖实际 preset
+  内的压缩器时必须保留整份插件清单、用户策略和 YAML 标签；读取失败或找不到实例
+  必须明确失败。Pi Web/终端通过托管模型的 `compaction.modelOverrides` 接入，
+  不覆盖其他供应商策略。相关边界与合并测试见 `tests/test_workspace_compaction.py`。
+
 ## 时间处理规范
 
 - 禁止新增 `datetime.utcnow()`、naive UTC 或散落的 `datetime.now(...).isoformat()`。

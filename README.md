@@ -206,6 +206,28 @@ DSH 中自配的其他供应商与遗留 `settings.yaml` 中的供应商都会�
 `models.json` 失效**（连用户自有的 provider 一起丢失），因此非法值在保存配置时就被
 拒绝。留空或填 0 表示不声明该键；两个字段各自独立，互不影响。
 
+显式设置 `context_window` 时，托管模型统一采用总压缩预留
+`R = max(ceil(context_window × 15%), 35000)`，目标触发点为 `context_window - R`。
+例如窗口 200000 时在约 165000 tokens 触发，窗口 1000000 时在约 850000 tokens 触发。
+该规则覆盖 DSH Web/终端/ACP 与 Pi Web/终端；Pi 的独立 Coding Agent CLI 后端不使用
+这份工作台模型配置。填 0 沿用上游默认，非零窗口必须大于 35000。
+配置在工作台停止后重新启动时生效，运行中的实例不热更新。
+
+DSH 按托管供应商与模型写入 `modelPolicies`，把已声明的输出上限计入总预留，
+额外余量为 `max(R - max_tokens, 0)`，摘要输出上限单独设为 16384。
+当输出上限超过 R 或请求临时提高输出上限时，DSH 的输出空间保护会使压缩更早触发，
+并在启动配置注入阶段对已知冲突记录警告；不会静默降低管理员保存的输出上限。
+覆盖层必须合并实际 preset 内的压缩器及其余插件、用户策略和 YAML 标签，不能只改
+Web 中已禁用的顶层 `compaction-basic`。读取生效配置失败或找不到压缩器时，
+显式窗口的启动明确失败。已有手动压缩模式 `auto: false` 保持不变。
+
+Pi 将预留写入 `settings.json` 的
+`compaction.modelOverrides["agent-bridge/<模型>"].reserveTokens`，启用自动压缩，
+保留用户的近期历史预算及其他供应商设置。修改模型列表或清空窗口时移除旧托管预留。
+项目级 `.pi/settings.json` 仍遵循 Pi 的上游优先级，可以覆盖工作台的设置。
+可运行 `PYTHONPATH=src python scripts/verify-compaction.py --pi-root <pi-coding-agent 包目录>`，
+用已安装的 DSH profile 合成器与 Pi 设置解析器验证，无需调用模型。
+
 插件首装：插件名单内置于包内（`src/agent_bridge/dsh/dsh-plugins.txt`，随版本
 发布；每行一个 spec，如 `@scope/name@0.4.8`，支持 `#` 注释；全部钉住精确
 版本以保证同一版本各部署插件集一致，升级插件即改版本号随版本部署）。插件在 **web 进程启动之前**

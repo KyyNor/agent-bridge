@@ -167,6 +167,8 @@ class PiWorkspaceAdapter:
             uid=identity.uid,
             gid=identity.gid,
             default_model=default_model,
+            models=models,
+            context_window=int(model_binding.get("context_window") or 0),
         )
         token = workspace.capability.token if (
             workspace is not None and workspace.capability is not None

@@ -440,7 +440,7 @@ def test_model_overlay_declares_token_limits_per_model(service, home, monkeypatc
     configure_runtime(service, context_window=262144, max_tokens=32768)
     config_dir = home / "groupa" / ".config" / "dsh" / "user1"
     config_dir.mkdir(parents=True)
-    monkeypatch.setattr(injection, "read_entry_config", lambda **kwargs: None)
+    monkeypatch.setattr(injection, "read_profile_entries", lambda **kwargs: [{"id": "compaction-basic", "name": "@deepseek-ai/dsh-compaction-basic"}])
 
     path = service.dsh._write_model_overlay(
         config_dir,
@@ -540,16 +540,16 @@ def test_model_overlay_preserves_user_providers_and_js_expressions(service, home
 
     def fake_reader(**kwargs):
         calls.append(kwargs)
-        return injection.load_entry_list(
+        return [{"id": "llm-pi-ai", "config": injection.load_entry_list(
             "providers:\n"
             "  user-own:\n"
             "    baseURL: http://user/v1\n"
             "  agent-bridge:\n"
             "    baseURL: http://stale/v1\n"
             "cacheDir: !!js dshHomePath('llm-cache')\n"
-        )
+        )}]
 
-    monkeypatch.setattr(injection, "read_entry_config", fake_reader)
+    monkeypatch.setattr(injection, "read_profile_entries", fake_reader)
     path = service.dsh._write_model_overlay(
         config_dir,
         types.SimpleNamespace(uid=os.getuid(), gid=os.getgid(), home=home / "groupa"),
@@ -558,7 +558,7 @@ def test_model_overlay_preserves_user_providers_and_js_expressions(service, home
         dsh_binary="dsh",
     )
 
-    assert calls and calls[0]["profile"] == "web" and calls[0]["entry_id"] == "llm-pi-ai"
+    assert calls and calls[0]["profile"] == "web"
     entries = {
         entry["id"]: entry["config"]
         for entry in injection.load_entry_list(path.read_text(encoding="utf-8"))
@@ -600,7 +600,7 @@ def test_model_overlay_falls_back_to_managed_provider_when_dump_fails(service, h
     def broken_reader(**_kwargs):
         raise RuntimeError("dsh --dump-config 退出码 1")
 
-    monkeypatch.setattr(injection, "read_entry_config", broken_reader)
+    monkeypatch.setattr(injection, "read_profile_entries", broken_reader)
     with caplog.at_level(logging.WARNING, logger="agent_bridge.dsh.injection"):
         path = service.dsh._write_model_overlay(
             config_dir,
