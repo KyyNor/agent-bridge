@@ -47,13 +47,13 @@ const workflowDays = ref<DailyWorkflowMetric[]>(buildDailyWorkflowMetrics())
 const toolCallsByDay = ref<Record<ToolCategoryKey, number[]>>(emptyToolTrend())
 const recentToolActivity = ref<Record<ToolCategoryKey, RecentToolActivity>>(emptyRecentActivity())
 
-const knowledgeCards = computed(() => [
-  { key: 'documents' as const, label: '文档知识', hint: '已纳管文档', route: 'knowledge', icon: BookOpen },
-  { key: 'code' as const, label: '代码知识', hint: '已接入仓库', route: 'code-repos', icon: Braces },
-  { key: 'memory' as const, label: '记忆区块', hint: '可用记忆区块', route: 'memory', icon: Brain },
-  { key: 'ledger' as const, label: '业务台账', hint: '已维护台账', route: 'business-ledgers', icon: Database },
-  { key: 'capability' as const, label: '能力接入', hint: '已接入服务', route: 'services', icon: Plug },
-])
+const knowledgeCards = [
+  { key: 'documents', label: '文档知识', unit: '份文档', route: 'knowledge', icon: BookOpen },
+  { key: 'code', label: '代码知识', unit: '个仓库', route: 'code-repos', icon: Braces },
+  { key: 'memory', label: '记忆区块', unit: '个区块', route: 'memory', icon: Brain },
+  { key: 'ledger', label: '业务台账', unit: '张台账', route: 'business-ledgers', icon: Database },
+  { key: 'capability', label: '能力接入', unit: '个服务', route: 'services', icon: Plug },
+] as const
 
 const toolCategories = [
   { key: 'documents' as const, label: '文档工具', icon: BookOpen },
@@ -229,29 +229,25 @@ onMounted(() => { void refresh() })
 
     <section>
       <div class="mb-3 flex items-baseline justify-between gap-4">
-        <div>
-          <h2 class="text-sm font-semibold text-foreground">知识资产</h2>
-          <p class="mt-1 text-xs text-muted-foreground">按领域查看已纳管的资源总量</p>
-        </div>
+        <h2 class="text-sm font-semibold text-foreground">知识资产</h2>
         <span class="shrink-0 text-xs text-muted-foreground">{{ refreshedAt ? '刚刚更新' : '等待更新' }}</span>
       </div>
-      <div class="grid grid-cols-1 divide-y rounded-lg border border-border bg-card shadow-card sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-5">
+      <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <button
           v-for="item in knowledgeCards"
           :key="item.key"
           type="button"
-          class="group min-w-0 px-4 py-4 text-left transition-colors hover:bg-accent/45 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
+          class="group min-w-0 rounded-lg border border-border bg-card p-4 text-left shadow-card transition-colors hover:bg-accent/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           @click="goto(item.route)"
         >
-          <div class="flex items-start justify-between gap-3">
-            <component :is="item.icon" :size="19" class="mt-0.5 shrink-0 text-primary" :stroke-width="1.65" />
-            <ArrowUpRight :size="15" class="shrink-0 text-primary opacity-0 transition-opacity group-hover:opacity-100" />
+          <div class="flex items-center gap-2">
+            <component :is="item.icon" :size="16" class="shrink-0 text-muted-foreground" aria-hidden="true" />
+            <span class="flex-1 text-sm font-medium">{{ item.label }}</span>
+            <ArrowUpRight :size="15" class="shrink-0 text-muted-foreground group-hover:text-primary" aria-hidden="true" />
           </div>
-          <div class="mt-5 text-[11px] font-medium text-muted-foreground">{{ item.label }}</div>
-          <div class="mt-1.5 text-2xl font-semibold leading-none tabular-nums text-foreground">{{ assetTotals[item.key].toLocaleString() }}</div>
-          <div class="mt-2 flex items-center justify-between gap-2">
-            <span class="truncate text-xs text-muted-foreground">{{ item.hint }}</span>
-            <span class="shrink-0 text-xs font-medium text-primary">查看</span>
+          <div class="mt-3 flex flex-wrap items-baseline gap-x-1.5 gap-y-1">
+            <span class="text-2xl font-semibold leading-none tabular-nums text-foreground">{{ assetTotals[item.key].toLocaleString() }}</span>
+            <span class="text-xs text-muted-foreground">{{ item.unit }}</span>
           </div>
         </button>
       </div>

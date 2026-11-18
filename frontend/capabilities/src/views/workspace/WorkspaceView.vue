@@ -62,15 +62,11 @@ const sharedSupported = computed(() => descriptor.value ? descriptor.value.suppo
 const agentOptions = computed<Option<WorkspaceAgent>[]>(() => agents.value.map(item => ({
   value: item.agent,
   label: item.display_name || workspaceAgentLabel(item.agent),
-  sublabel: item.agent,
-  description: item.agent === DEFAULT_WORKSPACE_AGENT
-    ? 'DeepSeek Harness Web 工作台，内置终端与插件生态'
-    : 'Pi Agent 编码工作台，按托管版本清单启动',
 })))
 const scopeOptions = computed<Option<WorkspaceScope>[]>(() => {
   const options: Option<WorkspaceScope>[] = [
-    { value: 'personal', label: '个人', description: '独立工作台，只保留你自己的 session 与记忆' },
-    { value: 'shared', label: '小组', description: '同组成员共享同一个工作台、session 与记忆' },
+    { value: 'personal', label: '个人', description: '独立工作台、会话与记忆' },
+    { value: 'shared', label: '小组', description: '与同组成员共享工作台、会话与记忆' },
   ]
   return sharedSupported.value && mode.value === 'web' ? options : options.filter(option => option.value === 'personal')
 })
@@ -78,7 +74,7 @@ const profileOptions = computed<Option<string>[]>(() => [
   {
     value: '',
     label: '不使用能力平面',
-    description: `不向 ${agentLabel.value} 注入任何 MCP 能力，仅使用工作台自身的模型与工具`,
+    description: '仅使用工作台自带的模型与工具',
   },
   ...activeProfiles.value.map(profile => ({
     value: profile.profile_key,
@@ -205,93 +201,76 @@ async function stopRuntime() {
   <div v-else class="space-y-4">
     <!-- 当前工作台状态 -->
     <Card>
-      <CardContent class="space-y-4 p-5">
-        <div class="flex items-center justify-between gap-4">
-          <div>
-            <div class="text-sm font-medium">{{ workspaceTitle(agent, scope) }}</div>
-            <div class="mt-1 text-xs text-muted-foreground">
-              工作台在服务器上以你所属小组的 Linux 用户身份运行，经站内反向代理访问，浏览器地址始终是 Agent Bridge。
+      <CardContent class="p-5">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div class="min-w-0 space-y-2">
+            <div class="flex flex-wrap items-center gap-2" role="status">
+              <h2 class="text-sm font-semibold">{{ workspaceTitle(agent, scope) }}</h2>
+              <StatusBadge
+                :status="running ? 'running' : 'disabled'"
+                :label="runtime ? WORKSPACE_STATUS_LABELS[runtime.status] || runtime.status : '未知'"
+              />
+            </div>
+            <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground empty:hidden">
+              <span v-if="runtime?.linux_user">运行身份：<span class="font-mono">{{ runtime.linux_user }}</span>（小组 Linux 用户）</span>
+              <span v-if="runtime?.profile_key">当前能力平面：<span class="font-mono">{{ runtime.profile_key }}</span></span>
+              <span v-if="runtime?.last_access_at">最近访问：{{ formatLocalDatetime(runtime.last_access_at) }}</span>
+              <span v-if="running">空闲 {{ runtime?.idle_minutes ?? 0 }} 分钟（长期未使用会自动回收）</span>
             </div>
           </div>
-          <Button variant="outline" size="sm" @click="loadRuntime()">刷新</Button>
+          <div class="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" @click="loadRuntime()">刷新</Button>
+            <Button v-if="running" variant="outline" size="sm" :disabled="stopping" @click="stopRuntime()">
+              {{ stopping ? '停止中...' : `停止 ${agentLabel} 工作台` }}
+            </Button>
+          </div>
         </div>
-        <div class="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-          <StatusBadge
-            :status="running ? 'running' : 'disabled'"
-            :label="runtime ? WORKSPACE_STATUS_LABELS[runtime.status] || runtime.status : '未知'"
-          />
-          <span v-if="runtime?.linux_user">Linux 用户：<span class="font-mono">{{ runtime.linux_user }}</span></span>
-          <span v-if="scope === 'shared' && runtime?.linux_user">
-            共享工作空间：<span class="font-mono">{{ runtime.linux_user }}</span>
-          </span>
-          <span v-if="runtime?.profile_key">当前能力平面：<span class="font-mono">{{ runtime.profile_key }}</span></span>
-          <span v-if="runtime?.last_access_at">最近访问：{{ formatLocalDatetime(runtime.last_access_at) }}</span>
-          <span v-if="running">空闲 {{ runtime?.idle_minutes ?? 0 }} 分钟（长期未使用会自动回收）</span>
-        </div>
-        <div class="flex items-center gap-3">
-          <Button v-if="running" variant="outline" size="sm" :disabled="stopping" @click="stopRuntime()">
-            {{ stopping ? '停止中...' : `停止 ${agentLabel} 工作台` }}
-          </Button>
-          <span v-if="scope === 'shared'" class="text-xs text-muted-foreground">
-            停止共享工作台会影响同组其他成员
-          </span>
-          <span v-if="actionError" class="text-xs text-destructive">{{ actionError }}</span>
-        </div>
+        <p v-if="scope === 'shared' && running" class="mt-2 text-xs text-muted-foreground">停止共享工作台会影响同组其他成员</p>
+        <p v-if="actionError" role="alert" class="mt-2 text-xs text-destructive">{{ actionError }}</p>
       </CardContent>
     </Card>
 
     <!-- Agent、范围与能力平面选择 -->
     <Card>
-      <CardContent class="space-y-4 p-5">
-        <div>
-          <div class="text-sm font-medium">Coding Agent</div>
-          <div class="mt-1 text-xs text-muted-foreground">
-            选择工作台由哪个 Coding Agent 承载；两种 Agent 都支持个人与小组范围，能力平面注入方式一致。
-          </div>
+      <CardContent class="space-y-5 p-5">
+        <div class="grid gap-5 xl:grid-cols-2">
+          <fieldset class="min-w-0">
+            <legend class="mb-2 text-sm font-medium">Coding Agent</legend>
+            <WorkspaceOptionGrid v-model="agent" name="workspace-agent" :options="agentOptions" />
+          </fieldset>
+          <fieldset class="min-w-0">
+            <legend class="mb-2 text-sm font-medium">界面</legend>
+            <div class="flex flex-wrap items-center gap-2">
+              <Button variant="outline" :aria-pressed="mode === 'web'" class="aria-pressed:border-primary aria-pressed:bg-primary/5" :disabled="!!webUnavailableReason" :aria-describedby="webUnavailableReason ? 'workspace-web-unavailable' : undefined" @click="mode = 'web'">Web 工作台</Button>
+              <Button variant="outline" :aria-pressed="mode === 'terminal'" class="aria-pressed:border-primary aria-pressed:bg-primary/5" @click="mode = 'terminal'">网页终端</Button>
+              <p v-if="webUnavailableReason" id="workspace-web-unavailable" class="text-xs text-warning-soft-fg">{{ webUnavailableReason }}</p>
+            </div>
+            <p v-if="mode === 'terminal'" class="mt-2 text-xs text-muted-foreground">终端仅支持个人范围。每个 Agent 一个会话，同时只允许一个页面输入。</p>
+          </fieldset>
         </div>
-        <WorkspaceOptionGrid v-model="agent" :options="agentOptions" />
 
-        <div class="border-t border-border pt-4">
-          <div class="text-sm font-medium">工作空间范围</div>
-          <div class="mt-1 text-xs text-muted-foreground">
-            个人使用独立工作台；小组与同组成员共享同一个 Runtime、session 与记忆（按所属小组映射的 Linux 用户确定）。
+        <div class="grid gap-5 border-t border-border pt-5 xl:grid-cols-2">
+          <fieldset class="min-w-0">
+            <legend class="mb-2 text-sm font-medium">工作空间范围</legend>
+            <WorkspaceOptionGrid v-model="scope" name="workspace-scope" :options="scopeOptions" />
+          </fieldset>
+          <div class="min-w-0">
+            <ErrorState v-if="profilesError" title="无法加载能力平面" :description="profilesError" compact>
+              <Button variant="outline" size="sm" @click="loadProfiles()">重试</Button>
+            </ErrorState>
+            <fieldset v-else :disabled="profileLocked">
+              <legend class="mb-2 text-sm font-medium">能力平面</legend>
+              <p class="mb-2 text-xs text-muted-foreground">通过 MCP 提供 Agent Bridge 的工具与知识。</p>
+              <p v-if="profileLocked" class="mb-2 text-xs text-muted-foreground">共享工作台的能力平面已锁定。</p>
+              <WorkspaceOptionGrid v-model="selectedProfile" name="workspace-profile" :options="profileOptions" stacked />
+            </fieldset>
           </div>
         </div>
-        <WorkspaceOptionGrid v-model="scope" :options="scopeOptions" />
-
-        <div class="border-t border-border pt-4">
-          <div class="flex items-center justify-between">
-            <div class="text-sm font-medium">选择能力平面</div>
-            <span v-if="profileLocked" class="rounded-full bg-muted px-2 py-px text-xs text-muted-foreground">
-              共享工作台运行中，已锁定为当前能力平面
-            </span>
-          </div>
-          <div class="mt-1 text-xs text-muted-foreground">
-            能力平面决定工作台内可用的 Agent Bridge 工具与知识能力，以 MCP 形式注入；不选择则进入不带任何 MCP 的工作台。
-          </div>
-        </div>
-        <div v-if="profilesError" class="space-y-2">
-          <ErrorState title="无法加载能力平面" :description="profilesError" compact>
-            <Button variant="outline" size="sm" @click="loadProfiles()">重试</Button>
-          </ErrorState>
-        </div>
-        <div v-else class="space-y-2" :class="{ 'pointer-events-none opacity-60': profileLocked }">
-          <WorkspaceOptionGrid v-model="selectedProfile" :options="profileOptions" stacked />
-        </div>
-        <div class="space-y-2 border-t border-border pt-4">
-          <div class="text-sm font-medium">界面</div>
-          <div class="flex flex-wrap items-center gap-2">
-            <Button :variant="mode === 'web' ? 'default' : 'outline'" :disabled="!!webUnavailableReason" :aria-describedby="webUnavailableReason ? 'workspace-web-unavailable' : undefined" @click="mode = 'web'">Web 工作台</Button>
-            <Button :variant="mode === 'terminal' ? 'default' : 'outline'" @click="mode = 'terminal'">网页终端</Button>
-            <p v-if="webUnavailableReason" id="workspace-web-unavailable" class="text-xs text-warning-soft-fg">{{ webUnavailableReason }}</p>
-          </div>
-          <p v-if="mode === 'terminal'" class="text-xs text-muted-foreground">终端仅支持个人范围；每个 Agent 一个会话，同时只允许一个页面输入。</p>
-        </div>
-        <div class="flex items-center gap-3">
+        <div class="flex flex-wrap items-center gap-3 border-t border-border pt-5">
           <Button size="sm" @click="openWorkspace()">
-            <ExternalLink :size="14" class="mr-1" />进入 {{ agentLabel }}
+            <ExternalLink :size="14" aria-hidden="true" />进入 {{ agentLabel }}
           </Button>
-          <span class="text-xs text-muted-foreground">将在新标签页打开全屏工作台；工作台未运行时启动约需十秒</span>
+          <span class="text-xs text-muted-foreground">在新标签页打开。工作台未运行时，启动约需 10 秒。</span>
         </div>
       </CardContent>
     </Card>

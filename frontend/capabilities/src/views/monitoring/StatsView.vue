@@ -75,7 +75,7 @@ const pagedStats = computed(() => paginate(stats.value, page.value, pageSize.val
 <template>
   <div class="space-y-5">
     <!-- Summary Cards -->
-    <div class="grid grid-cols-4 gap-4">
+    <div class="grid gap-3 sm:grid-cols-3">
       <Card class="p-4">
         <div class="text-[13px] font-medium text-muted-foreground">总调用次数</div>
         <div class="mt-1 text-[24px] font-bold leading-tight tabular-nums text-foreground">{{ totalCount }}</div>
@@ -87,10 +87,6 @@ const pagedStats = computed(() => paginate(stats.value, page.value, pageSize.val
       <Card class="p-4">
         <div class="text-[13px] font-medium text-muted-foreground">最高频次</div>
         <div class="mt-1 text-[24px] font-bold leading-tight tabular-nums text-foreground">{{ maxCount }}</div>
-      </Card>
-      <Card class="p-4">
-        <div class="text-[13px] font-medium text-muted-foreground">当前维度</div>
-        <div class="mt-1 text-[24px] font-bold leading-tight text-foreground">{{ dimensions.find(d => d.key === dimension)?.label }}</div>
       </Card>
     </div>
 

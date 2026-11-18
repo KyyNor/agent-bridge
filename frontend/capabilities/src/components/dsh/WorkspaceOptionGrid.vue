@@ -14,6 +14,7 @@ export interface WorkspaceOption<T extends string = string> {
 defineProps<{
   modelValue: T
   options: WorkspaceOption<T>[]
+  name: string
   /** 每个选项独占一行（列表型，如能力平面）。 */
   stacked?: boolean
 }>()
@@ -22,24 +23,32 @@ const emit = defineEmits<{ (event: 'update:modelValue', value: T): void }>()
 </script>
 
 <template>
-  <div class="grid gap-2" :class="stacked ? 'sm:grid-cols-1' : 'sm:grid-cols-2'">
-    <button
-      v-for="option in options"
-      :key="option.value"
-      type="button"
-      :class="[
-        'rounded-lg border px-4 py-3 text-left transition-colors',
-        modelValue === option.value ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted',
-      ]"
-      @click="emit('update:modelValue', option.value)"
-    >
-      <div class="text-sm font-medium">{{ option.label }}</div>
-      <div v-if="option.sublabel" class="mt-0.5 font-mono text-xs text-muted-foreground">
-        {{ option.sublabel }}
-      </div>
-      <div v-if="option.description" class="mt-1 text-xs text-muted-foreground">
-        {{ option.description }}
-      </div>
-    </button>
+  <div class="grid gap-2" :class="{ 'sm:grid-cols-2': !stacked }">
+    <label v-for="option in options" :key="option.value" class="relative flex min-w-0">
+      <input
+        type="radio"
+        class="peer sr-only"
+        :name="name"
+        :value="option.value"
+        :checked="modelValue === option.value"
+        @change="emit('update:modelValue', option.value)"
+      />
+      <span class="flex w-full cursor-pointer items-start gap-2.5 rounded-lg border border-border px-3 py-2.5 transition-colors hover:bg-muted peer-checked:border-primary peer-checked:bg-primary/5 peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2 peer-disabled:cursor-not-allowed peer-disabled:opacity-60">
+        <span
+          aria-hidden="true"
+          class="mt-[3px] size-3.5 shrink-0 rounded-full"
+          :class="modelValue === option.value ? 'border-[4px] border-primary' : 'border border-muted-foreground'"
+        />
+        <span class="min-w-0">
+          <span class="block break-words text-sm font-medium">{{ option.label }}</span>
+          <span v-if="option.sublabel" class="mt-0.5 block break-all font-mono text-xs text-muted-foreground">
+            {{ option.sublabel }}
+          </span>
+          <span v-if="option.description" class="mt-1 block text-xs text-muted-foreground">
+            {{ option.description }}
+          </span>
+        </span>
+      </span>
+    </label>
   </div>
 </template>

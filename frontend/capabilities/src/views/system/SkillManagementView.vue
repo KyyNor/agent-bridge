@@ -192,7 +192,6 @@ function safeUrl(value: string): string | null {
         <CardContent class="p-0">
           <div class="border-b px-4 py-3">
             <div class="text-sm font-medium text-foreground">内置 Skill</div>
-            <div class="text-xs text-muted-foreground">{{ skills.length }} 个可配置项</div>
           </div>
           <div v-if="loading" class="px-4 py-8 text-sm text-muted-foreground">加载中</div>
           <div v-else-if="!skills.length" class="px-4 py-8 text-sm text-muted-foreground">暂无 Skill</div>

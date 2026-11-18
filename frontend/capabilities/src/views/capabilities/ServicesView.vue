@@ -548,8 +548,9 @@ const toolTypeOptions = [
           <tbody>
             <tr v-for="s in pagedServices" :key="serviceCountKey(s)" class="border-b border-border/60">
               <td class="px-4 py-3">
-                <span class="text-[13px] font-medium text-foreground">{{ s.service_key }}</span>
-                <div class="mt-0.5 text-xs text-muted-foreground">{{ s.description || s.name }}</div>
+                <span class="block break-words text-sm font-medium text-foreground">{{ s.name || s.service_key }}</span>
+                <div v-if="s.name && s.name !== s.service_key" class="mt-0.5 break-all font-mono text-xs text-muted-foreground">{{ s.service_key }}</div>
+                <p v-if="s.description" class="mt-1 text-xs text-muted-foreground">{{ s.description }}</p>
               </td>
               <td class="px-4 py-3">
                 <CategoryBadge kind="source" :value="s.source_type" />

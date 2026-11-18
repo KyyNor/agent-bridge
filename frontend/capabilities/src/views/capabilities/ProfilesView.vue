@@ -196,15 +196,15 @@ async function handleDetailSaved() {
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">能力平面</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">状态</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">归属组</th>
-              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Allow</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">允许规则</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">操作</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="profile in pagedProfiles" :key="profile.profile_key" class="border-b border-border/60">
               <td class="min-w-0 px-4 py-3">
-                <span class="block break-all text-[13px] font-medium text-foreground">{{ profile.profile_key }}</span>
-                <div class="mt-0.5 break-all text-xs text-muted-foreground">{{ profile.name }}</div>
+                <span class="block break-words text-sm font-medium text-foreground">{{ profile.name || profile.profile_key }}</span>
+                <div v-if="profile.name && profile.name !== profile.profile_key" class="mt-0.5 break-all font-mono text-xs text-muted-foreground">{{ profile.profile_key }}</div>
               </td>
               <td class="px-4 py-3">
                 <StatusBadge v-if="profile.status === 'active'" status="enabled" />

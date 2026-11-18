@@ -590,31 +590,30 @@ async function refreshProfileDoc(raiseError = false) {
 
         <!-- Memory Binding -->
         <section class="space-y-3 rounded-lg border border-border p-4">
-          <div class="flex flex-wrap items-start justify-between gap-2">
-            <div>
-              <h3 class="text-sm font-medium text-foreground">记忆</h3>
-              <p class="mt-1 text-xs text-muted-foreground">为此能力平面绑定一个 active memory block。</p>
-            </div>
-            <Badge v-if="profileMemory?.block_key" variant="outline" class="max-w-full break-all">
-              {{ profileMemory.block_key }}
-            </Badge>
-            <Badge v-else variant="secondary" class="text-muted-foreground">未绑定</Badge>
+          <div>
+            <label for="profile-memory-block" class="text-sm font-medium text-foreground">记忆区块</label>
+            <p id="profile-memory-help" class="mt-1 text-xs text-muted-foreground">选择此能力平面在工作台使用的记忆区块。</p>
           </div>
           <div v-if="memoryError" class="rounded-md bg-destructive-soft px-3 py-2 text-xs text-destructive">
             {{ memoryError }}
           </div>
           <select
+            id="profile-memory-block"
+            aria-describedby="profile-memory-help"
             v-model="pendingMemoryBlock"
             :disabled="!!memoryError"
             class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
           >
             <option value="">未绑定</option>
+            <option v-if="pendingMemoryBlock && !activeMemoryBlocks.some(block => block.block_key === pendingMemoryBlock)" :value="pendingMemoryBlock" disabled>
+              {{ pendingMemoryBlock }}（不可用）
+            </option>
             <option v-for="block in activeMemoryBlocks" :key="block.block_key" :value="block.block_key">
               {{ block.name }} ({{ block.block_key }})
             </option>
           </select>
-          <p class="break-all text-xs text-muted-foreground">
-            在 Agent 工作台选择此能力平面并启动 DSH 或 Pi。旧客户端配置可用 agent-bridge profile unuse 卸载。
+          <p v-if="pendingMemoryBlock !== (profileMemory?.block_key || '')" class="break-all text-xs text-muted-foreground">
+            已保存：{{ profileMemory?.block_key || '未绑定' }}
           </p>
         </section>
 

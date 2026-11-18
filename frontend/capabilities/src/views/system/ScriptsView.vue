@@ -882,12 +882,6 @@ def main(envelope):
 
     <Card data-tour="scripts-list">
       <CardContent class="p-0">
-        <div class="flex items-center justify-between gap-3 border-b px-4 py-3">
-          <div>
-            <div class="text-sm font-medium text-foreground">脚本</div>
-            <div class="text-xs text-muted-foreground">{{ scripts.length }} 个</div>
-          </div>
-        </div>
         <div v-if="loading" class="px-4 py-8 text-sm text-muted-foreground">加载中</div>
         <div v-else-if="!scripts.length" class="px-4 py-8 text-sm text-muted-foreground">暂无脚本</div>
         <div v-else class="divide-y">
@@ -895,12 +889,14 @@ def main(envelope):
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
                 <span class="truncate text-sm font-medium text-foreground">{{ item.name }}</span>
-                <Badge variant="outline">{{ statusLabel(item.status) }}</Badge>
-                <Badge variant="outline">{{ item.language }}</Badge>
+                <StatusBadge :status="item.status === 'active' ? 'enabled' : 'disabled'" :label="statusLabel(item.status)" />
                 <Badge v-if="isBuiltInScriptFamily(item)" variant="secondary" :class="sourceBadgeClass(item.source)">{{ sourceLabel(item.source) }}</Badge>
               </div>
-              <div class="mt-1 truncate font-mono text-xs text-muted-foreground">{{ item.script_key }}</div>
-              <p class="mt-1 line-clamp-2 text-xs text-muted-foreground">{{ item.description || item.code_preview || '无描述' }}</p>
+              <div class="mt-1 flex min-w-0 flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground">
+                <span class="break-all font-mono">{{ item.script_key }}</span>
+                <span>{{ item.language }}</span>
+              </div>
+              <p v-if="item.description || item.code_preview" class="mt-1 line-clamp-2 text-xs text-muted-foreground">{{ item.description || item.code_preview }}</p>
             </div>
             <div class="text-xs text-muted-foreground">
               <div>归属：{{ ownerLabel(item) }}</div>
