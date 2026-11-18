@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { currentWebWorkspaceSupport, type WorkspaceMode } from '../../lib/workspaceBrowser'
+import { currentWebWorkspaceUnavailableReason, type WorkspaceMode } from '../../lib/workspaceBrowser'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ExternalLink } from '@lucide/vue'
@@ -41,8 +41,8 @@ const profilesError = ref('')
 const selectedProfile = ref('')
 const agent = ref<WorkspaceAgent>(DEFAULT_WORKSPACE_AGENT)
 const scope = ref<WorkspaceScope>('personal')
-const webSupported = currentWebWorkspaceSupport()
-const mode = ref<WorkspaceMode>(webSupported ? 'web' : 'terminal')
+const webUnavailableReason = currentWebWorkspaceUnavailableReason()
+const mode = ref<WorkspaceMode>(webUnavailableReason ? 'terminal' : 'web')
 const runtime = ref<DshRuntimeStatus | null>(null)
 const actionError = ref('')
 const stopping = ref(false)
@@ -280,11 +280,11 @@ async function stopRuntime() {
         </div>
         <div class="space-y-2 border-t border-border pt-4">
           <div class="text-sm font-medium">界面</div>
-          <div class="flex gap-2">
-            <Button :variant="mode === 'web' ? 'default' : 'outline'" :disabled="!webSupported" @click="mode = 'web'">Web 工作台</Button>
+          <div class="flex flex-wrap items-center gap-2">
+            <Button :variant="mode === 'web' ? 'default' : 'outline'" :disabled="!!webUnavailableReason" :aria-describedby="webUnavailableReason ? 'workspace-web-unavailable' : undefined" @click="mode = 'web'">Web 工作台</Button>
             <Button :variant="mode === 'terminal' ? 'default' : 'outline'" @click="mode = 'terminal'">网页终端</Button>
+            <p v-if="webUnavailableReason" id="workspace-web-unavailable" class="text-xs text-warning-soft-fg">{{ webUnavailableReason }}</p>
           </div>
-          <p v-if="!webSupported" class="text-xs text-muted-foreground">当前浏览器不满足 Web 工作台要求（Chrome 111+ 或同等能力），请使用网页终端。</p>
           <p v-if="mode === 'terminal'" class="text-xs text-muted-foreground">终端仅支持个人范围；每个 Agent 一个会话，同时只允许一个页面输入。</p>
         </div>
         <div class="flex items-center gap-3">

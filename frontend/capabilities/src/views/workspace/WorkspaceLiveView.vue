@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { currentWebWorkspaceSupport, normalizeWorkspaceMode } from '../../lib/workspaceBrowser'
+import { currentWebWorkspaceUnavailableReason, normalizeWorkspaceMode } from '../../lib/workspaceBrowser'
 import WorkspaceTerminal from '../../components/dsh/WorkspaceTerminal.vue'
 import TerminalDirectoryPicker from '../../components/dsh/TerminalDirectoryPicker.vue'
 import WorkspaceFiles from '../../components/dsh/WorkspaceFiles.vue'
@@ -61,7 +61,8 @@ async function enterWorkspace(directory?: string) {
   errorMessage.value = ''
   stopKeepAlive()
   try {
-    if (mode === 'web' && !currentWebWorkspaceSupport()) throw new Error('当前浏览器不支持 Web 工作台，请返回入口选择网页终端。')
+    const webUnavailableReason = mode === 'web' ? currentWebWorkspaceUnavailableReason() : null
+    if (webUnavailableReason) throw new Error(`${webUnavailableReason}请返回入口选择网页终端。`)
     if (mode === 'terminal' && scope.value !== 'personal') throw new Error('网页终端目前仅支持个人范围。')
     const result = mode === 'terminal'
       ? await api.startTerminal(agent.value, workingDirectory.value, requestedProfile || null)

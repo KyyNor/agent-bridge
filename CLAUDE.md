@@ -267,7 +267,8 @@ setsid/TIOCSCTTY 在独立 Python helper 中完成，禁止 preexec_fn；本机 
 额外继承随机 `AGENT_BRIDGE_TERMINAL_SESSION` 标记，只匹配本会话且排除 bridge 本身；
 主 Agent 已退出也不得跳过清理。
 默认 DOM renderer；xterm 6.0.0 + fit 0.11.0 固定版本，modernTargets/build target
-均为 chrome90，不依赖运行时注入 API 垫片。Web 入口单独执行浏览器门禁。
+均为 chrome90，不依赖运行时注入 API 垫片。Web 入口和直达页共用 Chrome 111 基线
+与必要特性检测。入口在模式按钮右侧显示 Web 不可用的原因。
 
 DSH TUI 插件锁 `dsh/dsh-tui-plugins.txt` 与 Web 锁分开，profile=tui；适配器复用
 公共插件安装/指纹逻辑，但必需 TUI 插件缺失必须失败。社区 TUI 的 HOME/.dsh-tui
