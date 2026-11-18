@@ -334,7 +334,7 @@ DSH 专属语义（`dsh/`）：
   （0600），`{patch}` 按「模型在前、MCP 在后」展开为多个 `--patch`；ACP 与
   `acp` 路由行写入 run patch。DSH 的 patch **整体替换**行 config，且 `llm-pi-ai`
   只允许单实例（插入第二个实例会因内置供应商重复声明而激活失败），因此注入前
-  必须以目标 Linux 用户执行 `dsh --profile <web|acp> --dump-config` 读取该行生效
+  必须以目标 Linux 用户执行 `dsh --profile <web|tui|acp> --dump-config` 读取该行生效
   配置，只合并 `agent-bridge` 供应商并保留 `!!js` 标签；遗留 `settings.yaml`
   或 `.imported` 中的用户供应商同样合并。读取失败只注入托管供应商并告警（覆盖层
   不改写 profile 文件）。代价：DSH 配置编辑器拒绝修改被命令行覆盖层接管的行，
@@ -344,6 +344,8 @@ DSH 专属语义（`dsh/`）：
   窗口必须大于 35000；0 沿用上游。公共计算在 `agent_workspace/compaction.py`，
   DSH 按模型扣除输出预留后设置额外余量，并在 `dsh/compaction.py` 合并实际 preset
   内的压缩器；Pi Web/终端写按模型的 `compaction.modelOverrides`。DSH ACP 同样接入。
+  TUI 运行期注册的内置 preset 通过 `@deepseek-harness-tui/dsh-tui/preset-patch`
+  写入压缩器配置，保留已有覆盖和同名用户声明 preset。
   输出上限超过预算时保留上游提前压缩保护并警告，不改用户输出配置。
   DSH dump 失败或压缩器缺失时，显式窗口拒绝启动，不能声称托管预算已生效。
   配置下次启动生效，原生手动压缩模式与 Pi 项目级覆盖仍遵循上游语义。

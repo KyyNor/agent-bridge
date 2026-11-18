@@ -93,6 +93,46 @@ def test_zero_window_leaves_dsh_upstream_policy():
     assert build_compaction_overlay([], models=['m'], context_window=0, max_tokens=0) == []
 
 
+def test_dsh_tui_compaction_applies_to_runtime_presets_and_preserves_user_overrides():
+    entries = load_entry_list('''
+- id: dsh-tui
+  name: '@deepseek-harness-tui/dsh-tui'
+- id: dsh-tui-agent-preset-registry
+  name: '@deepseek-ai/dsh-agent-preset-registry'
+  disabled: !!js '!ctx.loader'
+- id: compaction-basic
+  name: '@deepseek-ai/dsh-compaction-basic'
+  disabled: true
+- id: user-standard
+  name: '@deepseek-harness-tui/dsh-tui/preset-patch'
+  config:
+    preset: standard
+    config:
+      compaction-basic:
+        auto: false
+        modelPolicies: [{provider: own, model: own-model, headroomTokens: 8192}]
+      tool-bash: {timeoutMs: 5000}
+''')
+    declared = profile_entries()[1]
+    declared['config']['id'] = 'ptc'
+    entries.append(declared)
+    original = deepcopy(entries)
+
+    patches = build_compaction_overlay(entries, models=['m'], context_window=200_000, max_tokens=32_768)
+    assert any(patch.get('id') == declared['id'] for patch in patches)
+    tui_rows = [row for patch in patches for row in patch.get('insert', [])]
+    assert {row['config']['preset'] for row in tui_rows} == {'standard', 'minimal', 'cordis', 'liangshen'}
+    assert all(row['name'] == '@deepseek-harness-tui/dsh-tui/preset-patch' for row in tui_rows)
+    standard = next(row['config']['config'] for row in tui_rows if row['config']['preset'] == 'standard')
+    assert set(standard) == {'compaction-basic'}
+    assert standard['compaction-basic']['auto'] is False
+    preserved, managed = standard['compaction-basic']['modelPolicies']
+    assert preserved == {'provider': 'own', 'model': 'own-model', 'headroomTokens': 8192}
+    assert managed['provider'] == 'agent-bridge' and managed['model'] == 'm'
+    assert managed['headroomTokens'] == 2232
+    assert entries == original
+
+
 def test_pi_managed_models_keep_other_settings_and_clear_stale_reserve():
     existing = {'theme': 'dark', 'compaction': {'keepRecentTokens': 12_000, 'modelOverrides': {
         'own/m': {'reserveTokens': 4000},

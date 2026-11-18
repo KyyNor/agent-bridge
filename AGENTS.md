@@ -59,7 +59,9 @@
   0 沿用上游，非零必须大于 35000。DSH 的输出预留必须计入总预算，额外余量不能再
   固定叠加 65536；输出上限大于预算时保留提前压缩保护并警告。覆盖实际 preset
   内的压缩器时必须保留整份插件清单、用户策略和 YAML 标签；读取失败或找不到实例
-  必须明确失败。Pi Web/终端通过托管模型的 `compaction.modelOverrides` 接入，
+  必须明确失败。TUI 运行期注册的内置 preset 使用上游公开的 `preset-patch`，合并
+  已有压缩器配置。同名的用户声明 preset 走常规合并路径。Pi Web/终端通过托管模型的
+  `compaction.modelOverrides` 接入，
   不覆盖其他供应商策略。相关边界与合并测试见 `tests/test_workspace_compaction.py`。
 
 ## 时间处理规范
