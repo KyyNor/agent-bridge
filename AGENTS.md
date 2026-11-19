@@ -27,6 +27,8 @@
 - Mock 后端只能由显式 `type = "mock"` 使用，不得作为未知或缺失配置的静默回退。
 - CodeGraph CLI/MCP 是同一正式后端的两种调用通道，统一通过 `CodeGraphBackend` 使用。
 - 文档知识库上传同步策略按后端分为 `immediate` / `scheduled` / `paused`。新库未显式设置的目标随当前默认检索后端计算，默认后端为 `scheduled`、其余为 `paused`。切换默认后端时保留显式策略，存量库继承旧布尔配置。手动与定时同步跳过 `paused` 目标并保留待办；指定后端时建库、补排、领取和恢复均限定在该后端。
+- 文档解析状态由 `DocumentReconciliationBackend` 提供，按文档版本、知识库和后端保存。后台每 6 小时核对解析状态，常规上传调度独立处理待办。状态核对只读远端，核对后重新确认目标仍启用，再回写或发起重试。移动产生的上传也记录发送指纹。结果不明确时，先核对实际发送的文件指纹和远端路径，唯一匹配才恢复关联。确认缺失后才能重传。有当前版本待办时，旧版上传任务不得再次发送当前版本。
+- 文档原件下载允许知识库归属组和平台管理员操作。接口检查文档在请求库内的有效关联，并从本地归档返回当前版本。个人 API Key 只授权文档列表、上传和移除。
 - 知识库默认检索配置的后端选项来自登录可读的 `GET /api/v1/backends-catalog` 投影（slug/backend_type/runtime_status/supports_agents，不含接入配置与密钥），Weknora Agent 列表 `GET /api/v1/backends/{slug}/agents` 登录即可读（响应已脱敏）；后端管理 payload（`GET /backends`）、agent-types 与创建 Agent 仍管理员专属。前端保存默认检索配置时，后端类型无法判定必须保留已保存的 `default_agent_id`，不得强制清空；Agent 列表加载失败要给出明确提示与重试。
 - 禁止为 CodeGraph 恢复 SQLite 隐式文本索引降级；后端缺失或索引未就绪必须明确失败。
 - 仓库文件读取和文件列表基于 Git 镜像，不应依赖 CodeGraph 后端。

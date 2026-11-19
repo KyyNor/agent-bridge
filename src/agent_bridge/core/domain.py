@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Callable, Protocol, runtime_checkable
 
 
 class AgentBridgeError(Exception):
@@ -107,6 +107,26 @@ class BackendDocStatus:
 
 
 @dataclass(frozen=True)
+class DocumentUploadFingerprint:
+    checksum: str
+    size: int
+
+
+@dataclass(frozen=True)
+class MatchedBackendDocument:
+    id: str
+    status: BackendDocStatus
+
+
+class DocumentStatusUncertain(RuntimeError):
+    """远端可能已经接收了文件，重新上传前需要核对。"""
+
+
+class RemoteKnowledgeBaseMissing(RuntimeError):
+    """远端明确确认知识库不存在。"""
+
+
+@dataclass(frozen=True)
 class BackendCapabilities:
     supports_folders: bool
     supports_agents: bool = False
@@ -167,6 +187,29 @@ class BackendAdapter(Protocol):
     def get_status(self, backend_kb_id: str, backend_doc_id: str) -> BackendDocStatus: ...
     def retrieve(self, backend_kb_id: str, question: str, top_k: int = 6) -> list[RetrievalResult]: ...
     def ask(self, backend_kb_id: str, question: str, chat_id: str | None = None, session_id: str | None = None, agent_id: str | None = None) -> tuple[AskResult, str]: ...
+
+
+@runtime_checkable
+class DocumentReconciliationBackend(BackendAdapter, Protocol):
+    """能够核对异步解析，以及认领应答丢失的上传。"""
+
+    def upload_tracked(
+        self,
+        backend_kb_id: str,
+        file_path: Path,
+        remote_path: str,
+        before_upload: Callable[[DocumentUploadFingerprint], None],
+        *,
+        replace_backend_doc_id: str | None = None,
+    ) -> str: ...
+
+    def find_uploaded_document(
+        self,
+        backend_kb_id: str,
+        remote_path: str,
+        original_file: Path,
+        fingerprint: DocumentUploadFingerprint | None,
+    ) -> MatchedBackendDocument | None: ...
 
 
 @runtime_checkable

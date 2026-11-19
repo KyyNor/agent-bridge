@@ -11,6 +11,9 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+from agent_bridge.app.document_paths import split_document_path
+from agent_bridge.core.domain import NotFound
+
 logger = logging.getLogger(__name__)
 
 
@@ -19,6 +22,12 @@ class ArchivedFile:
     content_hash: str
     file_size: int
     archive_path: Path
+
+
+@dataclass(frozen=True)
+class DocumentDownload:
+    path: Path
+    filename: str
 
 
 class ArchiveStorage:
@@ -68,6 +77,19 @@ class ArchiveStorage:
 
     def remove(self, archive_path: Path) -> None:
         archive_path.unlink(missing_ok=True)
+
+    def for_download(self, archive_path: str, original_filename: str) -> DocumentDownload:
+        _, filename = split_document_path(original_filename)
+        root = self.archive_dir.resolve()
+        relative_path = Path(archive_path).absolute()
+        try:
+            expected_path = root / relative_path.relative_to(self.archive_dir.absolute())
+            path = expected_path.resolve(strict=True)
+            if path != expected_path or not path.is_relative_to(root) or not path.is_file():
+                raise ValueError("归档路径无效")
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise NotFound("文档原文件不可用") from exc
+        return DocumentDownload(path=path, filename=filename)
 
     @staticmethod
     def _sha256(path: Path) -> str:

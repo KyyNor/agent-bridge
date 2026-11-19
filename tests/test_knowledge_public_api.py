@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+from urllib.parse import unquote
 
 import pytest
 from fastapi.testclient import TestClient
@@ -108,6 +110,46 @@ def test_schema_has_exact_three_operations_and_limits(api_setup):
     assert client.post(path, headers=auth(token), files={'file': ('bad.exe', b'x')}).status_code == 400
     response = client.post(path, headers=auth(token), files={'file': ('large.md', b'x' * (32 * 1024 * 1024 + 1))})
     assert response.status_code == 413
+
+
+def test_logged_in_document_download_returns_current_original_from_requested_kb(api_setup):
+    client, svc = api_setup
+    alice = {"X-Agent-Bridge-User": "alice"}
+    bob = {"X-Agent-Bridge-User": "bob"}
+    uploaded = client.post(
+        "/api/v1/docs", headers=alice, data={"kb": "docs-a"},
+        files={"file": ("项目手册.md", b"# First version", "text/markdown")},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    slug = uploaded.json()["slug"]
+    path = f"/api/v1/kbs/docs-a/docs/{slug}/download"
+
+    original = client.get(path, headers=alice)
+    assert original.content == b"# First version"
+    assert unquote(original.headers["content-disposition"]) == "attachment; filename*=utf-8''项目手册.md"
+    assert original.headers["cache-control"] == "private, no-store"
+    assert client.get(f"/api/v1/kbs/docs-a2/docs/{slug}/download", headers=alice).status_code == 404
+    assert client.get(path, headers=auth(key(client, "alice"))).status_code == 401
+
+    svc.update_kb_visibility("alice", "docs-a", visibility="shared")
+    assert client.get(f"/api/v1/docs/{slug}", headers=bob).status_code == 200
+    assert client.get(path, headers=bob).status_code == 403
+    updated = client.post(
+        f"/api/v1/docs/{slug}/versions", headers=alice,
+        files={"file": ("项目手册-v2.md", b"# Current version", "text/markdown")},
+    )
+    assert updated.status_code == 200, updated.text
+    current = client.get(path, headers=alice)
+    assert current.content == b"# Current version"
+    assert "项目手册-v2.md" in unquote(current.headers["content-disposition"])
+
+    version = svc.store.get_current_document_version(uploaded.json()["id"])
+    archive_path = Path(version["archive_path"])
+    archive_path.unlink()
+    assert client.get(path, headers=alice).status_code == 404
+    original_archive = svc.store.list_versions(uploaded.json()["id"])[0]["archive_path"]
+    archive_path.symlink_to(original_archive)
+    assert client.get(path, headers=alice).status_code == 404
 
 
 def test_admin_elevation_cannot_create_shared_or_persistent_admin_key(api_setup):

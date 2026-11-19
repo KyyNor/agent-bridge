@@ -2,6 +2,7 @@
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 
 from agent_bridge.api.schemas import (
     AskRequest,
@@ -235,6 +236,18 @@ def create_knowledge_routes(service, actor, save_upload, upload_filename):
         finally:
             upload_path.unlink(missing_ok=True)
 
+    @router.get("/kbs/{kb_slug}/docs/{doc_slug}/download", response_class=FileResponse)
+    def download_document(
+        kb_slug: str, doc_slug: str, current_actor: str = Depends(actor)
+    ) -> FileResponse:
+        download = service.download_document(current_actor, kb_slug, doc_slug)
+        return FileResponse(
+            download.path,
+            filename=download.filename,
+            media_type="application/octet-stream",
+            headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+        )
+
     @router.post("/kbs/{kb_slug}/docs/{doc_slug}/delete")
     def remove_document_from_kb(
         kb_slug: str,
@@ -284,8 +297,11 @@ def create_knowledge_routes(service, actor, save_upload, upload_filename):
         return service.sync(current_actor, all_users=payload.all_users, backend=backend)
 
     @router.post("/kbs/{kb_slug}/sync")
-    def sync_kb(kb_slug: str, backend: str | None = None, current_actor: str = Depends(actor)) -> dict[str, int]:
-        return service.sync_kb(current_actor, kb_slug, backend=backend)
+    def sync_kb(
+        kb_slug: str, backend: str | None = None, refresh_status: bool = True,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, int]:
+        return service.sync_kb(current_actor, kb_slug, backend=backend, refresh_status=refresh_status)
 
     @router.get("/search")
     def search(q: str, kb: str, backend: str | None = None, top_k: int = 6, profile_key: str | None = None, current_actor: str = Depends(actor)) -> dict[str, Any]:

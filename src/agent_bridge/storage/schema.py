@@ -187,6 +187,7 @@ CREATE TABLE IF NOT EXISTS sync_jobs (
   version_id INTEGER REFERENCES document_versions(id) ON DELETE SET NULL,
   status TEXT NOT NULL DEFAULT 'pending',
   error TEXT,
+  upload_attempt TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -200,6 +201,8 @@ CREATE TABLE IF NOT EXISTS sync_states (
   chunk_count INTEGER,
   progress REAL,
   backend_error TEXT,
+  status_version_id INTEGER,
+  last_checked_at TEXT,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (doc_id, kb_id, backend_slug)
 );

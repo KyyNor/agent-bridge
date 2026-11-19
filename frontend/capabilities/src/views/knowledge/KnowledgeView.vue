@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Plus, RotateCw, Upload, File, Folder, Archive, Trash2, ArrowLeft } from '@lucide/vue'
+import { Plus, RotateCw, Upload, Trash2, ArrowLeft } from '@lucide/vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../../api/client'
@@ -8,7 +8,6 @@ import type { AccessActorContext, KnowledgeBaseSummary, Document, KnowledgeFolde
 import { formatLocalDatetime } from '../../lib/time'
 import { Card, CardContent } from '../../components/ui/card'
 import { Badge } from '../../components/ui/badge'
-import StatusBadge from '../../components/StatusBadge.vue'
 import ResourceVisibilitySelect from '../../components/ResourceVisibilitySelect.vue'
 import ResourceScopeBadge from '../../components/ResourceScopeBadge.vue'
 import KbVisibilityCell from '../../components/knowledge/KbVisibilityCell.vue'
@@ -19,6 +18,7 @@ import PaginationBar from '../../components/PaginationBar.vue'
 import FolderTree from '../../components/knowledge/FolderTree.vue'
 import KnowledgeDefaultBackendPanel from '../../components/knowledge/KnowledgeDefaultBackendPanel.vue'
 import KnowledgeSyncPolicyPanel from '../../components/knowledge/KnowledgeSyncPolicyPanel.vue'
+import KnowledgeDocumentsTable from '../../components/knowledge/KnowledgeDocumentsTable.vue'
 import KnowledgeDocumentDetailDialog from '../../components/knowledge/KnowledgeDocumentDetailDialog.vue'
 import KnowledgePlaneDialog from '../../components/knowledge/KnowledgePlaneDialog.vue'
 import KnowledgeRepoSourcesPanel from '../../components/knowledge/KnowledgeRepoSourcesPanel.vue'
@@ -411,6 +411,46 @@ async function refreshKnowledgeDetail(preferredFolderId?: number | null) {
   }
 }
 
+let statusRefreshTimer = 0
+let statusRefreshBusy = false
+onMounted(() => {
+  statusRefreshTimer = window.setInterval(() => { void refreshVisibleSyncStatuses() }, 30_000)
+})
+onBeforeUnmount(() => window.clearInterval(statusRefreshTimer))
+
+async function refreshVisibleSyncStatuses() {
+  const kb = detailKb.value
+  const tab = detailTab.value
+  if (!kb || statusRefreshBusy || detailLoading.value || browseLoading.value || document.hidden) return
+  const isCurrent = () => props.routeKey === kb.slug && detailTab.value === tab && detailKb.value === kb
+  statusRefreshBusy = true
+  try {
+    if (tab === 'sync') {
+      const jobs = detailSyncJobs.value
+      if (!jobs.some(job => ['pending', 'running', 'failed'].includes(job.status))) return
+      const latest = await api.getKbSyncStatus(kb.slug)
+      if (isCurrent() && detailSyncJobs.value === jobs) detailSyncJobs.value = latest.jobs
+    } else if (tab === 'docs') {
+      const docs = detailDocs.value
+      const browse = detailBrowse.value
+      if (docs.length === 0) return
+      const folderId = !showingAllDocuments.value && browse?.context.kind === 'folder'
+        ? browse.context.id : undefined
+      const latest = await api.listDocs(kb.slug, undefined, folderId)
+      if (!isCurrent() || detailDocs.value !== docs || detailBrowse.value !== browse) return
+      const statuses = new Map(latest.map(doc => [doc.slug, doc.sync_status]))
+      for (const doc of docs) doc.sync_status = statuses.get(doc.slug) ?? doc.sync_status
+      for (const entry of browse?.entries ?? []) {
+        if (entry.kind === 'document') entry.sync_status = statuses.get(entry.slug) ?? entry.sync_status
+      }
+    }
+  } catch {
+    // 刷新失败时保留正在查看的文档、选择和上次核对结果。
+  } finally {
+    statusRefreshBusy = false
+  }
+}
+
 async function selectFolder(folderId: number | null) {
   if (!detailKb.value) return
   showingAllDocuments.value = folderId === null
@@ -674,6 +714,13 @@ function openDocumentDetail(slug: string) {
   docDetailSlug.value = slug
 }
 
+function openDocumentPlacement(slug: string, mode: 'move' | 'attach') {
+  const found = detailDocs.value.find(doc => doc.slug === slug)
+  if (!found) return
+  if (mode === 'move') void openPlaceDialog(found)
+  else void openAttachDialog(found)
+}
+
 async function deleteDoc(slug: string, docTitle: string) {
   if (!detailKb.value) return
   const ok = await confirm({
@@ -730,29 +777,6 @@ async function updateKnowledgeDefaults(defaults: { default_backend_slug: string 
 async function updateKnowledgeSyncPolicy() {
   if (!detailKb.value) return
   await refreshDetailKbSummary()
-}
-// 同步/任务 status → StatusBadge 语义状态
-function syncBadgeStatus(status?: string | null): 'success' | 'error' | 'disabled' {
-  if (status === 'synced' || status === 'succeeded' || status === 'success') return 'success'
-  if (status === 'sync_failed' || status === 'failed' || status === 'error') return 'error'
-  return 'disabled'
-}
-
-function syncBadgeLabel(status?: string | null) {
-  const labels: Record<string, string> = {
-    not_synced: '未同步',
-    synced: '已同步',
-    sync_failed: '同步失败',
-    delete_pending: '待删除',
-    delete_failed: '删除失败',
-    pending: '待处理',
-    running: '同步中',
-    succeeded: '已完成',
-    failed: '失败',
-    success: '成功',
-    error: '错误',
-  }
-  return labels[status || ''] || status || '未知'
 }
 </script>
 
@@ -944,96 +968,24 @@ function syncBadgeLabel(status?: string | null) {
             <div v-if="browseLoading" class="rounded-lg border border-dashed border-border py-10 text-center text-sm text-muted-foreground">目录加载中...</div>
             <div v-else-if="browseError && !showingAllDocuments" class="rounded-lg border border-destructive/30 bg-destructive-soft px-3 py-3 text-sm text-destructive-soft-fg">{{ browseError }}</div>
             <div v-else-if="!showingAllDocuments && browseEntries.length === 0" class="rounded-lg border border-dashed border-border py-10 text-center text-sm text-muted-foreground">暂无子条目</div>
-            <div v-else-if="!showingAllDocuments" class="min-h-0 max-h-[calc(100vh-420px)] overflow-x-auto overflow-y-auto rounded-lg border border-border">
-              <table class="w-full">
-                <thead><tr class="border-b border-border">
-                  <th class="px-3 py-2 text-left" style="width: 28px;">
-                    <input type="checkbox" class="size-4 rounded" :checked="allDocsSelected"
-                      :indeterminate.prop="someDocsSelected && !allDocsSelected" @change="toggleAllDocs" />
-                  </th>
-                  <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">标题</th>
-                  <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">目录</th>
-                  <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">版本</th>
-                  <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">状态</th>
-                  <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground"></th>
-                </tr></thead>
-                <tbody>
-                  <template v-for="entry in browseEntries" :key="`${entry.kind}-${entry.id}`">
-                    <tr v-if="entry.kind !== 'document'" class="border-b border-border/60">
-                      <td colspan="6" class="px-3 py-2">
-                        <button type="button" class="flex w-full items-center gap-2 text-left" @click="enterBrowseEntry(entry)">
-                          <Archive v-if="entry.kind === 'zip'" :size="16" class="shrink-0 text-warning" />
-                          <Folder v-else :size="16" class="shrink-0 text-primary/80" />
-                          <span class="min-w-0 flex-1 truncate text-sm font-medium" :title="entry.relative_path">{{ entry.name }}</span>
-                          <Badge variant="outline" class="shrink-0 text-[10px]">{{ entry.kind === 'zip' ? 'ZIP' : '文件夹' }}</Badge>
-                          <span class="shrink-0 text-xs text-muted-foreground">{{ entry.child_count }} 个文件</span>
-                        </button>
-                      </td>
-                    </tr>
-                    <tr v-else-if="entry.kind === 'document'" class="border-b border-border/60">
-                      <td class="px-3 py-2">
-                        <input type="checkbox" class="size-4 rounded" :value="entry.slug"
-                          :checked="selectedDocSlugs.has(entry.slug)" @change="toggleDocSelected(entry.slug)" />
-                      </td>
-                      <td class="px-3 py-2 text-sm font-medium" :title="entry.relative_path">{{ entry.title }}</td>
-                      <td class="max-w-[180px] truncate px-3 py-2 text-xs text-muted-foreground" :title="entry.relative_path">{{ entry.name }}</td>
-                      <td class="px-3 py-2 text-xs tabular-nums">v{{ entry.version_no || 0 }}</td>
-                      <td class="px-3 py-2">
-                        <StatusBadge
-                          :status="syncBadgeStatus(entry.sync_status)"
-                          :label="syncBadgeLabel(entry.sync_status || entry.status)" />
-                      </td>
-                      <td class="px-3 py-2">
-                        <div class="flex justify-end gap-1">
-                          <Button variant="ghost" size="sm" class="h-7 text-xs" @click="openDocumentDetail(entry.slug)">详情</Button>
-                          <Button variant="ghost" size="sm" class="h-7 text-xs" @click="openPlaceDialog(documentFromBrowseEntry(entry))" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">移动</Button>
-                          <Button v-if="otherKnowledgeBases.length > 0" variant="ghost" size="sm" class="h-7 text-xs" @click="openAttachDialog(documentFromBrowseEntry(entry))" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">关联</Button>
-                          <Button variant="ghost" size="sm" class="h-7 text-xs text-destructive hover:text-destructive" @click="deleteDoc(entry.slug, entry.title)" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">删除</Button>
-                        </div>
-                      </td>
-                    </tr>
-                  </template>
-                </tbody>
-              </table>
-            </div>
-            <div v-else-if="detailDocs.length === 0" class="rounded-lg border border-dashed border-border py-10 text-center text-sm text-muted-foreground">暂无文档</div>
-            <div v-else class="min-h-0 max-h-[calc(100vh-420px)] overflow-x-auto overflow-y-auto rounded-lg border border-border">
-              <table class="w-full">
-                <thead><tr class="border-b border-border">
-                  <th class="px-3 py-2 text-left" style="width: 28px;">
-                    <input type="checkbox" class="size-4 rounded" :checked="allDocsSelected"
-                      :indeterminate.prop="someDocsSelected && !allDocsSelected" @change="toggleAllDocs" />
-                  </th>
-                  <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">标题</th>
-                  <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">目录</th>
-                  <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">版本</th>
-                  <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">状态</th>
-                  <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground"></th>
-                </tr></thead>
-                <tbody><tr v-for="d in detailDocs" :key="d.slug" class="border-b border-border/60">
-                  <td class="px-3 py-2">
-                    <input type="checkbox" class="size-4 rounded" :value="d.slug"
-                      :checked="selectedDocSlugs.has(d.slug)" @change="toggleDocSelected(d.slug)" />
-                  </td>
-                  <td class="px-3 py-2 text-sm font-medium">{{ d.title }}</td>
-                  <td class="max-w-[180px] truncate px-3 py-2 text-xs text-muted-foreground" :title="d.folder_path || '根目录'">{{ d.folder_path || '根目录' }}</td>
-                  <td class="px-3 py-2 text-xs tabular-nums">v{{ d.current_version_no || 0 }}</td>
-                  <td class="px-3 py-2">
-                    <StatusBadge
-                      :status="syncBadgeStatus(d.sync_status)"
-                      :label="syncBadgeLabel(d.sync_status || d.status)" />
-                  </td>
-                  <td class="px-3 py-2">
-                    <div class="flex justify-end gap-1">
-                      <Button variant="ghost" size="sm" class="h-7 text-xs" @click="openDocumentDetail(d.slug)">详情</Button>
-                      <Button variant="ghost" size="sm" class="h-7 text-xs" @click="openPlaceDialog(d)" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">移动</Button>
-                      <Button v-if="otherKnowledgeBases.length > 0" variant="ghost" size="sm" class="h-7 text-xs" @click="openAttachDialog(d)" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">关联</Button>
-                      <Button variant="ghost" size="sm" class="h-7 text-xs text-destructive hover:text-destructive" @click="deleteDoc(d.slug, d.title)" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">删除</Button>
-                    </div>
-                  </td>
-                </tr></tbody>
-              </table>
-            </div>
+            <div v-else-if="showingAllDocuments && detailDocs.length === 0" class="rounded-lg border border-dashed border-border py-10 text-center text-sm text-muted-foreground">暂无文档</div>
+            <KnowledgeDocumentsTable
+              v-else
+              :kb-slug="detailKb.slug"
+              :rows="showingAllDocuments ? detailDocs : browseEntries"
+              :selected="selectedDocSlugs"
+              :all-selected="allDocsSelected"
+              :some-selected="someDocsSelected"
+              :read-only="detailReadOnly"
+              :can-attach="otherKnowledgeBases.length > 0"
+              @enter="enterBrowseEntry"
+              @select="toggleDocSelected"
+              @select-all="toggleAllDocs"
+              @detail="openDocumentDetail"
+              @move="openDocumentPlacement($event, 'move')"
+              @attach="openDocumentPlacement($event, 'attach')"
+              @remove="deleteDoc"
+            />
           </section>
         </div>
 

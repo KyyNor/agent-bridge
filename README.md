@@ -480,6 +480,10 @@ Draft 2020-12 Schema 中的 `$defs` 及其本地 `$ref` 会自动转换为 Draft
 
 例如，设 Weknora 为默认检索后端，并让其他后端暂不同步。API 可用 `PUT /api/v1/kbs/team-docs/sync-policy` 提交 `{"backend_sync_policies":{"weknora":"scheduled","ragflow":"paused"}}`，也可用 `POST /api/v1/kbs/team-docs/sync?backend=weknora` 立即处理 Weknora 的待办。
 
+Bridge 每 6 小时分批向 Weknora 核对待处理和失败的文档。文档列表会显示「解析中」「解析失败」「待核对」或「已同步」。在 Weknora 手动重新解析成功后，Bridge 会更新状态。也可以在知识库的「同步」页点「立即同步」主动核对。上传返回 HTTP 500 或超时时，重试前先检查同一远端库中有无匹配当前版本的文件。
+
+在知识库的目录视图或「全部文档」中，点击文件行的「下载」可取得当前版本原件。归属组成员和平台管理员可下载本地已归档的文件，远端同步失败时也可用。ZIP 展开后的文件可逐个下载。
+
 知识库详情的「默认检索后端」对归属组普通用户开放编辑：后端与 Weknora Agent 选项来自登录可读的目录接口（`GET /api/v1/backends-catalog`、`GET /api/v1/backends/{slug}/agents`），不需要平台管理员权限。Agent 列表加载失败会显示明确提示并可重试；此时保存不会清空已配置的默认 Agent。
 
 当前部署模型是内部可信 VM，不提供互联网级认证。浏览器身份来自总账户系统换取的会话 Cookie；CLI、MCP 与 Agent 进程身份来自受信的 Linux 用户名 Header。部署方必须限制监听地址、网络访问和反向代理边界，并禁止外部请求直接进入 CLI Header 信任通道。
@@ -551,7 +555,7 @@ tests/                         # 后端测试
 
 ### 知识库文档 API
 
-进入知识库详情，点击“API 接入”，可查看调用示例和 OpenAPI 定义、下载当前知识库的
+进入知识库详情，点击“API 接入”。选择「列出」「上传」或「删除」，然后点击「复制命令」。这里也可以下载当前知识库的
 OpenAPI JSON，并生成或重置自己的 API Key。每个用户只有一把 Key，跨知识库通用，
 访问范围和读写权限与该用户当前权限一致。完整值只在生成/重置后显示，关闭弹窗后
 只显示掩码；重置使旧 Key 立即失效。数据库只保存随机 Key 的 SHA-256 摘要。

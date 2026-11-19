@@ -1,15 +1,25 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import shutil
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 
-from agent_bridge.core.domain import AskResult, BackendCapabilities, BackendDocStatus, RetrievalResult
+from agent_bridge.core.domain import (
+    AskResult,
+    BackendCapabilities,
+    BackendDocStatus,
+    DocumentStatusUncertain,
+    DocumentUploadFingerprint,
+    MatchedBackendDocument,
+    RemoteKnowledgeBaseMissing,
+    RetrievalResult,
+)
 from agent_bridge.knowledge_management.docs_knowledge.backends._office_convert import (
     convert_via_soffice,
     mislabeled_legacy_office_suffix,
@@ -40,8 +50,9 @@ def _map_parse_status(status: str) -> str:
         "completed": "completed",
         "failed": "failed",
         "cancelled": "failed",
+        "deleting": "not_found",
     }
-    return mapping.get(status, status or "unknown")
+    return mapping.get(status, "unknown")
 
 
 class WeknoraBackend:
@@ -102,7 +113,7 @@ class WeknoraBackend:
             method,
             f"{self.base_url}{path}",
             headers=headers,
-            timeout=self.timeout,
+            timeout=kwargs.pop("timeout", self.timeout),
             **kwargs,
         )
 
@@ -221,12 +232,35 @@ class WeknoraBackend:
         remote_path: str | None = None,
     ) -> str:
         remote_filename = self._remote_filename(filename, remote_path)
+        return self._upload_document(backend_kb_id, file_path, remote_filename)
+
+    def upload_tracked(
+        self,
+        backend_kb_id: str,
+        file_path: Path,
+        remote_path: str,
+        before_upload: Callable[[DocumentUploadFingerprint], None],
+        *,
+        replace_backend_doc_id: str | None = None,
+    ) -> str:
+        remote_filename = self._remote_filename(remote_path, None)
+        if replace_backend_doc_id is not None:
+            self.delete(backend_kb_id, replace_backend_doc_id)
+        return self._upload_document(backend_kb_id, file_path, remote_filename, before_upload)
+
+    def _upload_document(
+        self,
+        backend_kb_id: str,
+        file_path: Path,
+        remote_filename: str,
+        before_upload: Callable[[DocumentUploadFingerprint], None] | None = None,
+    ) -> str:
         legacy_suffix = mislabeled_legacy_office_suffix(
             file_path,
             Path(remote_filename).suffix,
         )
         if legacy_suffix is None:
-            return self._upload_file(backend_kb_id, file_path, remote_filename)
+            return self._upload_file(backend_kb_id, file_path, remote_filename, before_upload)
 
         logger.info(
             "检测到 Office 扩展名与内容不符，开始 LibreOffice 转换 file=%s declared=%s actual=%s",
@@ -243,18 +277,43 @@ class WeknoraBackend:
                 Path(remote_filename).suffix.lower(),
                 working_dir,
             )
-            return self._upload_file(backend_kb_id, converted, remote_filename)
+            return self._upload_file(backend_kb_id, converted, remote_filename, before_upload)
 
-    def _upload_file(self, backend_kb_id: str, file_path: Path, remote_filename: str) -> str:
+    @staticmethod
+    def _file_fingerprint(file_path: Path) -> DocumentUploadFingerprint:
+        with file_path.open("rb") as handle:
+            checksum = hashlib.file_digest(handle, lambda: hashlib.md5(usedforsecurity=False)).hexdigest()
+        return DocumentUploadFingerprint(checksum=checksum, size=file_path.stat().st_size)
+
+    def _upload_file(
+        self,
+        backend_kb_id: str,
+        file_path: Path,
+        remote_filename: str,
+        before_upload: Callable[[DocumentUploadFingerprint], None] | None,
+    ) -> str:
         with file_path.open("rb") as file_handle:
-            response = self._request(
-                "POST",
-                f"/api/v1/knowledge-bases/{backend_kb_id}/knowledge/file",
-                data={"fileName": remote_filename, "channel": "api"},
-                files={"file": (remote_filename, file_handle)},
-            )
+            if before_upload is not None:
+                before_upload(self._file_fingerprint(file_path))
+            try:
+                response = self._request(
+                    "POST",
+                    f"/api/v1/knowledge-bases/{backend_kb_id}/knowledge/file",
+                    data={"fileName": remote_filename, "channel": "api"},
+                    files={"file": (remote_filename, file_handle)},
+                )
+            except httpx.RequestError as exc:
+                raise DocumentStatusUncertain("Weknora 上传应答未收到，待核对") from exc
+        if response.status_code == 409 or response.status_code >= 500:
+            raise DocumentStatusUncertain(f"Weknora 上传返回 HTTP {response.status_code}，待核对")
         self._raise(response)
-        return self._data(response)["id"]
+        try:
+            doc_id = self._data(response)["id"]
+        except (TypeError, KeyError, ValueError) as exc:
+            raise DocumentStatusUncertain("Weknora 上传应答缺少文档 ID，待核对") from exc
+        if not isinstance(doc_id, str) or not doc_id:
+            raise DocumentStatusUncertain("Weknora 上传应答缺少文档 ID，待核对")
+        return doc_id
 
     def move(
         self,
@@ -298,13 +357,25 @@ class WeknoraBackend:
     def get_status(
         self, backend_kb_id: str, backend_doc_id: str
     ) -> BackendDocStatus:
-        response = self._request("GET", f"/api/v1/knowledge/{backend_doc_id}")
+        response = self._request(
+            "GET", f"/api/v1/knowledge/{backend_doc_id}", timeout=min(self.timeout, 5),
+        )
         if response.status_code == 404:
             return BackendDocStatus(status="not_found")
         self._raise(response)
-        data = self._data(response) or {}
-        raw_status = data.get("parse_status", "pending")
-        status = _map_parse_status(raw_status)
+        data = self._data(response)
+        if not isinstance(data, dict):
+            raise DocumentStatusUncertain("Weknora 文档详情格式无效")
+        if data.get("id") not in {None, backend_doc_id}:
+            raise DocumentStatusUncertain("Weknora 返回的文档 ID 不匹配")
+        if data.get("knowledge_base_id") not in {None, backend_kb_id}:
+            raise DocumentStatusUncertain("Weknora 文档所属知识库不匹配")
+        return self._document_status(data)
+
+    @staticmethod
+    def _document_status(data: dict[str, Any]) -> BackendDocStatus:
+        raw_status = data.get("parse_status")
+        status = _map_parse_status(raw_status) if isinstance(raw_status, str) else "unknown"
         progress = 1.0 if status == "completed" else None
         return BackendDocStatus(
             status=status,
@@ -312,6 +383,83 @@ class WeknoraBackend:
             progress=progress,
             error_message=data.get("error_message") or None,
         )
+
+    def find_uploaded_document(
+        self,
+        backend_kb_id: str,
+        remote_path: str,
+        original_file: Path,
+        fingerprint: DocumentUploadFingerprint | None,
+    ) -> MatchedBackendDocument | None:
+        """仅认领目标库中路径和已发送内容都吻合的唯一条目。"""
+        filename = remote_path.rsplit("/", 1)[-1]
+        if fingerprint is None and not mislabeled_legacy_office_suffix(original_file, Path(filename).suffix):
+            fingerprint = self._file_fingerprint(original_file)
+
+        matches: dict[str, BackendDocStatus] = {}
+        page_size = 100
+        seen_count = 0
+        for page in range(1, 6):
+            response = self._request(
+                "GET",
+                f"/api/v1/knowledge-bases/{backend_kb_id}/knowledge",
+                params={"page": page, "page_size": page_size, "keyword": filename},
+                timeout=min(self.timeout, 5),
+            )
+            if response.status_code == 404:
+                try:
+                    error = response.json()
+                except ValueError:
+                    error = None
+                if (
+                    isinstance(error, dict) and error.get("code") in (1003, "1003")
+                    or "knowledge base not found" in response.text.lower()
+                ):
+                    raise RemoteKnowledgeBaseMissing("Weknora 知识库不存在，HTTP 404")
+            self._raise(response)
+            payload = response.json()
+            rows = payload.get("data") if isinstance(payload, dict) else None
+            total = payload.get("total") if isinstance(payload, dict) else None
+            if rows is None and total == 0:
+                rows = []
+            if not isinstance(rows, list) or type(total) is not int or total < 0:
+                raise DocumentStatusUncertain("Weknora 未返回可核对的分页文档列表")
+            for row in rows:
+                if not isinstance(row, dict):
+                    raise DocumentStatusUncertain("Weknora 文档列表包含无效条目")
+                if row.get("knowledge_base_id") not in {None, backend_kb_id}:
+                    raise DocumentStatusUncertain("Weknora 文档所属知识库不匹配")
+                name = row.get("file_name")
+                if not isinstance(name, str) or not name:
+                    continue
+                folder = row.get("folder_path") or ""
+                path = f"{folder}/{name}" if folder and "/" not in name else name
+                if path != remote_path or row.get("parse_status") == "deleting":
+                    continue
+                if fingerprint is None:
+                    raise DocumentStatusUncertain("同路径的远端文件缺少可核对的原发送指纹")
+                checksum, size = row.get("file_hash"), row.get("file_size")
+                if not isinstance(checksum, str) or not checksum or type(size) is not int:
+                    raise DocumentStatusUncertain("Weknora 同路径条目缺少可核对的文件指纹")
+                if checksum.lower() != fingerprint.checksum or size != fingerprint.size:
+                    continue
+                doc_id = row.get("id")
+                if not isinstance(doc_id, str) or not doc_id:
+                    raise DocumentStatusUncertain("Weknora 匹配条目缺少文档 ID")
+                matches[doc_id] = self._document_status(row)
+            seen_count += len(rows)
+            if len(matches) > 1:
+                raise DocumentStatusUncertain("Weknora 有多个符合当前版本的文档")
+            if seen_count >= total:
+                break
+            if not rows:
+                raise DocumentStatusUncertain("Weknora 分页结果不完整")
+        else:
+            raise DocumentStatusUncertain("Weknora 同名文档过多，当前轮次无法确认")
+        if matches:
+            doc_id, status = next(iter(matches.items()))
+            return MatchedBackendDocument(id=doc_id, status=status)
+        return None
 
     def retrieve(
         self, backend_kb_id: str, question: str, top_k: int = 6

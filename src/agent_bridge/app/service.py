@@ -19,7 +19,7 @@ from agent_bridge.access_control.resources import (
     create_scoped_resource_registry,
 )
 from agent_bridge.access_control.resources import ScopedResourceType
-from agent_bridge.knowledge_management.docs_knowledge.archive import ArchiveStorage
+from agent_bridge.knowledge_management.docs_knowledge.archive import ArchiveStorage, DocumentDownload
 from agent_bridge.knowledge_management.docs_knowledge.ingest import DocumentIngestService
 from agent_bridge.knowledge_management.docs_knowledge.repo_sync import GitRepoSyncService
 from agent_bridge.knowledge_management.docs_knowledge.sync_runner import SyncJobRunner
@@ -169,7 +169,7 @@ class _IngestFacade:
         return self._service._remove_new_archive_files(existing_files)
 
     def trigger_sync(self, actor: str) -> None:
-        self._service.sync(actor=actor, all_users=False)
+        self._service.sync(actor=actor, all_users=False, refresh_status=False)
 
 
 class _SyncRunnerFacade:
@@ -187,6 +187,9 @@ class _SyncRunnerFacade:
         self, kb_id: int | None = None, backend: str | None = None
     ) -> list[tuple[int, str]]:
         return self._service.align_backends(kb_id=kb_id, backend=backend)
+
+    def is_sync_target_enabled(self, kb_id: int, backend: str, remote_kb_id: str) -> bool:
+        return self._service.docs_knowledge.is_sync_target_enabled(kb_id, backend, remote_kb_id)
 
 
 class _RepoSyncFacade:
@@ -1226,6 +1229,16 @@ class AgentBridgeService:
         doc["sync_states"] = sync_states
         return doc
 
+    def download_document(self, actor: str, kb_slug: str, doc_slug: str) -> DocumentDownload:
+        kb = self._require_kb_admin_visible(actor, kb_slug)
+        doc = self.store.get_document_by_slug(doc_slug)
+        if doc is None or self.store.get_document_placement(doc["id"], kb["id"]) is None:
+            raise NotFound("当前知识库中的文档不存在")
+        version = self.store.get_current_document_version(doc["id"])
+        if version is None:
+            raise NotFound("文档原文件不可用")
+        return self.archive.for_download(version["archive_path"], version["original_filename"])
+
     def get_doc_for_kb(self, actor: str, kb_slug: str, doc_slug: str, *, profile_key: str | None = None) -> dict[str, Any]:
         kb = self._require_kb_runtime_allowed(actor, kb_slug, profile_key)
         doc = self.store.get_document_by_slug(doc_slug)
@@ -1272,7 +1285,7 @@ class AgentBridgeService:
                         )
         self.store.soft_delete_document(doc["id"])
         if not later:
-            self.sync(actor=actor, all_users=False)
+            self.sync(actor=actor, all_users=False, refresh_status=False)
         return {"slug": doc_slug, "status": "deleted"}
 
     def sync(
@@ -1281,9 +1294,12 @@ class AgentBridgeService:
         all_users: bool,
         backend: str | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
+        *,
+        refresh_status: bool = True,
     ) -> dict[str, int]:
         return self._sync_runner.sync(
-            actor, all_users, backend=backend, progress_callback=progress_callback
+            actor, all_users, backend=backend, progress_callback=progress_callback,
+            refresh_status=refresh_status,
         )
 
     def sync_kb(
@@ -1292,6 +1308,8 @@ class AgentBridgeService:
         kb_slug: str,
         backend: str | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
+        *,
+        refresh_status: bool = True,
     ) -> dict[str, int]:
         """仅处理指定知识库的同步任务。"""
         kb = self._require_kb_admin_visible(actor, kb_slug)
@@ -1301,14 +1319,18 @@ class AgentBridgeService:
             backend=backend,
             progress_callback=progress_callback,
             kb_id=int(kb["id"]),
+            refresh_status=refresh_status,
         )
+
+    def reconcile_document_statuses(self) -> None:
+        self._sync_runner.reconcile(self.docs_knowledge.reconciliation_targets())
 
     def _run_job(
         self,
         job: dict[str, Any],
         recovery_backend_kbs: dict[tuple[int, str], str] | None = None,
         recovered_job_keys: set[tuple[int, int, str]] | None = None,
-    ) -> bool:
+    ) -> bool | None:
         return self._sync_runner._run_job(job, recovery_backend_kbs, recovered_job_keys)
 
 

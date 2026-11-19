@@ -295,6 +295,40 @@ class DocsKnowledgeService:
                 eligible.append((kb["id"], slug))
         return eligible
 
+    def reconciliation_targets(self) -> list[tuple[int, str]]:
+        """返回已有远端库的启用目标，状态核对不会建库或补排上传。"""
+        registry = self.registry
+        configured = sorted(registry.list_slugs()) if registry else []
+        if not configured:
+            return []
+        targets = []
+        for kb in self.store.list_kbs():
+            retrieval_backend = default_retrieval_backend(kb, configured)
+            for target in self.store.list_backend_targets(kb["id"]):
+                if (
+                    target["slug"] in configured
+                    and target["status"] == "active"
+                    and target["backend_kb_id"]
+                    and resolve_sync_policy(kb, target, retrieval_backend) != "paused"
+                ):
+                    targets.append((kb["id"], target["slug"]))
+        return targets
+
+    def is_sync_target_enabled(self, kb_id: int, backend: str, remote_kb_id: str) -> bool:
+        registry = self.registry
+        configured = sorted(registry.list_slugs()) if registry else []
+        if backend not in configured:
+            return False
+        try:
+            kb = self.store.get_kb_by_id(kb_id)
+        except KeyError:
+            return False
+        target = next((item for item in self.store.list_backend_targets(kb_id) if item["slug"] == backend), None)
+        return bool(
+            target and target["status"] == "active" and target["backend_kb_id"] == remote_kb_id
+            and resolve_sync_policy(kb, target, default_retrieval_backend(kb, configured)) != "paused"
+        )
+
     def _repair_backend_kb(
         self, kb: dict[str, Any], backend_slug: str, adapter: BackendAdapter
     ) -> None:

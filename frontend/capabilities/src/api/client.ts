@@ -375,10 +375,14 @@ function postFormDataWithProgress<T>(
   })
 }
 
-async function getBlob(url: string, options: ApiRequestOptions = {}): Promise<Blob> {
+async function getBinaryResponse(url: string, options: ApiRequestOptions = {}): Promise<Response> {
   const r = await fetch(apiUrl(url), { headers: headers(), signal: options.signal })
   if (!r.ok) throw httpError(r.status, await r.text())
-  return r.blob()
+  return r
+}
+
+async function getBlob(url: string, options: ApiRequestOptions = {}): Promise<Blob> {
+  return (await getBinaryResponse(url, options)).blob()
 }
 
 export const api = {
@@ -1068,6 +1072,18 @@ export const api = {
     if (backend) qs.set('backend', backend)
     return get<DocumentDetail>(`/docs/${slug}${qs.toString() ? '?' + qs : ''}`)
   },
+  downloadKnowledgeDocument: async (kbSlug: string, docSlug: string) => {
+    const response = await getBinaryResponse(
+      `/kbs/${encodeURIComponent(kbSlug)}/docs/${encodeURIComponent(docSlug)}/download`,
+    )
+    const disposition = response.headers.get('Content-Disposition') || ''
+    const encoded = /filename\*=utf-8''([^;]+)/i.exec(disposition)?.[1]
+    const quoted = /filename="([^"]+)"/i.exec(disposition)?.[1]
+    return {
+      blob: await response.blob(),
+      filename: encoded ? decodeURIComponent(encoded) : quoted || docSlug,
+    }
+  },
   addDocument: (
     file: File,
     kbs: string[],
@@ -1107,9 +1123,10 @@ export const api = {
     if (backend) qs.set('backend', backend)
     return post<{ processed: number }>(`/sync${qs.toString() ? '?' + qs : ''}`, { all_users: allUsers })
   },
-  triggerKbSync: (kbSlug: string, backend?: string) => {
+  triggerKbSync: (kbSlug: string, backend?: string, options?: { refreshStatus: boolean }) => {
     const qs = new URLSearchParams()
     if (backend) qs.set('backend', backend)
+    if (options?.refreshStatus === false) qs.set('refresh_status', 'false')
     return post<{ processed: number }>(`/kbs/${encodeURIComponent(kbSlug)}/sync${qs.toString() ? '?' + qs : ''}`)
   },
   getSyncStatus: (backend?: string) => {

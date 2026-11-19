@@ -312,6 +312,9 @@ class KnowledgeFacadeMixin:
     def list_versions(self, doc_id: int) -> list[dict[str, Any]]:
         return self.knowledge.list_versions(doc_id=doc_id)
 
+    def get_current_document_version(self, doc_id: int) -> dict[str, Any] | None:
+        return self.knowledge.get_current_document_version(doc_id)
+
     def next_version_no(self, doc_id: int) -> int:
         return self.knowledge.next_version_no(doc_id=doc_id)
 
@@ -367,6 +370,37 @@ class KnowledgeFacadeMixin:
     def update_job_status(self, job_id: int, status: SyncJobStatus, error: str | None = None) -> None:
         return self.knowledge.update_job_status(job_id=job_id, status=status, error=error)
 
+    def record_job_upload_attempt(self, job_id: int, version_id: int, attempt: str) -> None:
+        self.knowledge.record_job_upload_attempt(job_id, version_id, attempt)
+
+    def claim_document_sync_job(self, job_id: int) -> bool:
+        return self.knowledge.claim_document_sync_job(job_id)
+
+    def cancel_duplicate_document_uploads(
+        self, doc_id: int, kb_id: int, backend: str, version_id: int, completed_job_id: int,
+    ) -> None:
+        self.knowledge.cancel_duplicate_document_uploads(doc_id, kb_id, backend, version_id, completed_job_id)
+
+    def recover_interrupted_document_uploads(self) -> int:
+        with self.transaction():
+            return self.knowledge.recover_interrupted_document_uploads()
+
+    def get_latest_document_sync_job(self, doc_id: int, kb_id: int, backend_slug: str) -> dict[str, Any] | None:
+        return self.knowledge.get_latest_document_sync_job(doc_id, kb_id, backend_slug)
+
+    def list_document_status_checks(
+        self, eligible_targets: list[tuple[int, str]], *, include_failed: bool, limit: int,
+    ) -> list[dict[str, Any]]:
+        return self.knowledge.list_document_status_checks(
+            eligible_targets, include_failed=include_failed, limit=limit,
+        )
+
+    def mark_document_status_checked(self, doc_id: int, kb_id: int, backend_slug: str) -> None:
+        self.knowledge.mark_document_status_checked(doc_id, kb_id, backend_slug)
+
+    def backend_document_is_linked(self, doc_id: int, kb_id: int, backend_slug: str, backend_doc_id: str) -> bool:
+        return self.knowledge.backend_document_is_linked(doc_id, kb_id, backend_slug, backend_doc_id)
+
     def cancel_runnable_create_update_jobs(self, doc_id: int, kb_id: int, backend_slug: str) -> dict[str, int]:
         return self.knowledge.cancel_runnable_create_update_jobs(doc_id=doc_id, kb_id=kb_id, backend_slug=backend_slug)
 
@@ -381,8 +415,13 @@ class KnowledgeFacadeMixin:
         chunk_count: int | None = None,
         progress: float | None = None,
         backend_error: str | None = None,
+        status_version_id: int | None = None,
     ) -> None:
-        return self.knowledge.upsert_sync_state(doc_id=doc_id, kb_id=kb_id, backend_slug=backend_slug, backend_doc_id=backend_doc_id, status=status, backend_status=backend_status, chunk_count=chunk_count, progress=progress, backend_error=backend_error)
+        return self.knowledge.upsert_sync_state(
+            doc_id=doc_id, kb_id=kb_id, backend_slug=backend_slug, backend_doc_id=backend_doc_id,
+            status=status, backend_status=backend_status, chunk_count=chunk_count, progress=progress,
+            backend_error=backend_error, status_version_id=status_version_id,
+        )
 
     def get_sync_state(self, doc_id: int, kb_id: int, backend_slug: str = "mock") -> dict[str, Any] | None:
         return self.knowledge.get_sync_state(doc_id=doc_id, kb_id=kb_id, backend_slug=backend_slug)

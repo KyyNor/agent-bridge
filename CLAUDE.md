@@ -101,6 +101,7 @@ Claude 执行适配和 SDK 已移除；新安装默认 DSH，遗留 Claude 配�
 
 - `AgentManagementBackend`：列出/创建后端 Agent 和类型预设；
 - `ManagedResourcesBackend`：初始化或修复后端托管资源；
+- `DocumentReconciliationBackend`：读取异步解析状态，按实际发送的文件指纹核对上传结果；
 - 基础 `BackendCapabilities` 只声明能力，不替代 Protocol 的真实实现检查。
 
 后端专属 HTTP、鉴权、错误解释和自愈逻辑放在对应 adapter。未知或缺失 adapter 必须明确报错；Mock 只在显式 `type="mock"` 时使用，不能兜底配置错误。
@@ -543,6 +544,12 @@ Agent 运行事件以 `agent_runs` 为统一查询基准。前端通过 `RunEven
 修改前端后执行 `npm run check`。生产构建输出到 `src/agent_bridge/static/capabilities/`，该目录被忽略；发布流程必须先构建前端再构建 wheel。管理后台使用 Vue Router History 路由，`/agent-bridge/` 下的深链接由 FastAPI 回退到前端入口；第一方 HTTP API 统一使用 `/api/v1/`，`/mcp` 与 `/health` 不加版本前缀。
 
 ## 文档同步检查
+
+Weknora 的上传任务在取得远端文档 ID 后完成，文档列表在后端确认解析完成后显示「已同步」。状态核对任务每 6 小时分批读取已启用目标，按知识库、后端和当前版本更新 `sync_states`。常规定时同步和上传后立即同步通过 `refresh_status=false` 关闭解析状态扫描。上传前在任务中记录实际发送的路径和文件指纹。HTTP 500、超时或进程中断后，重试先核对远端。知识库、目录、文件名和指纹唯一匹配时才能恢复关联。
+
+移动产生的上传沿用同一核对流程。启动恢复会重新开放中断的上传待办，包括没有发送指纹的旧任务。远端核对结束后，状态回写或重传前再次读取目标策略。
+
+文档下载由 `GET /api/v1/kbs/{kb_slug}/docs/{doc_slug}/download` 提供。路由校验归属组或平台管理员权限和文档关联，`ArchiveStorage` 从本地归档返回当前版本原件。
 
 知识库的后端目标在 `backend_targets.config_json.sync_policy` 保存显式策略（`immediate` / `scheduled` / `paused`）。新库未显式配置的目标随当前默认检索后端计算，默认后端定时同步，其余暂不同步。存量库沿用旧布尔值，`knowledge_bases.sync_on_upload` 保留兼容。同步前的远端建库、补排及领取任务共用同一后端范围，指定后端时不触碰其他目标，暂不同步时保留任务。上传队列只触发 `immediate`，HTTP 文档上传的 `later` 默认保持延后。
 

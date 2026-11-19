@@ -103,6 +103,9 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
         service.codegraph_scheduler.start()
         service.understand_scheduler.start()
         service.plugin_update_scheduler.start()
+        interrupted_uploads = service.store.recover_interrupted_document_uploads()
+        if interrupted_uploads:
+            logger.info("恢复待核对的文档上传任务 count=%s", interrupted_uploads)
         service.doc_sync_scheduler.start()
         service.workflow_scheduler.start()
         # data_retention_scheduler 已在首次升级迁移完成后启动（见上）。

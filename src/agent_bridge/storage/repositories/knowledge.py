@@ -14,6 +14,7 @@ from agent_bridge.core.domain import (
     SyncStateStatus,
     ValidationError,
 )
+from agent_bridge.core.timeutil import utc_iso
 from agent_bridge.storage.repositories.folders import FolderRepository
 from agent_bridge.storage.types import enum_value, row_to_dict
 
@@ -728,6 +729,18 @@ class KnowledgeRepository:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def get_current_document_version(self, doc_id: int) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT v.* FROM documents d
+                JOIN document_versions v ON v.id = d.current_version_id AND v.doc_id = d.id
+                WHERE d.id = ?
+                """,
+                (doc_id,),
+            ).fetchone()
+            return row_to_dict(row)
+
     def next_version_no(self, doc_id: int) -> int:
         with self._connect() as conn:
             row = conn.execute(
@@ -827,6 +840,10 @@ class KnowledgeRepository:
                   job.kb_id,
                   job.backend_slug,
                   job.operation,
+                  job.version_id,
+                  job.status AS job_status,
+                  job.error AS job_error,
+                  job.upload_attempt,
                   d.slug AS doc_slug,
                   d.title AS doc_title,
                   kb.slug AS kb_slug,
@@ -884,7 +901,8 @@ class KnowledgeRepository:
             rows = conn.execute(
                 """
                 SELECT
-                  job.*,
+                  job.id, job.doc_id, job.kb_id, job.backend_slug, job.operation,
+                  job.version_id, job.status, job.error, job.created_at, job.updated_at,
                   d.slug AS doc_slug,
                   d.title AS doc_title,
                   kb.slug AS kb_slug,
@@ -912,6 +930,140 @@ class KnowledgeRepository:
                 """,
                 (status.value, error, job_id),
             )
+
+    def record_job_upload_attempt(self, job_id: int, version_id: int, attempt: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE sync_jobs SET version_id = ?, upload_attempt = ? WHERE id = ?",
+                (version_id, attempt, job_id),
+            )
+
+    def claim_document_sync_job(self, job_id: int) -> bool:
+        with self._connect() as conn:
+            return conn.execute(
+                """
+                UPDATE sync_jobs SET status = 'running', error = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND status IN ('pending', 'failed')
+                """,
+                (job_id,),
+            ).rowcount == 1
+
+    def cancel_duplicate_document_uploads(
+        self, doc_id: int, kb_id: int, backend: str, version_id: int, completed_job_id: int,
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE sync_jobs
+                SET status = 'cancelled', error = '同一版本已同步', updated_at = CURRENT_TIMESTAMP
+                WHERE doc_id = ? AND kb_id = ? AND backend_slug = ? AND version_id = ? AND id != ?
+                  AND operation IN ('create', 'update') AND status IN ('pending', 'failed')
+                """,
+                (doc_id, kb_id, backend, version_id, completed_job_id),
+            )
+
+    def recover_interrupted_document_uploads(self) -> int:
+        error = "服务重启，上传结果待核对"
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO sync_states (doc_id, kb_id, backend_slug, status, backend_status,
+                                         backend_error, status_version_id)
+                SELECT doc_id, kb_id, backend_slug, 'sync_failed', 'unconfirmed', ?, version_id
+                FROM sync_jobs
+                WHERE status = 'running' AND operation IN ('create', 'update', 'move')
+                ORDER BY id
+                ON CONFLICT(doc_id, kb_id, backend_slug) DO UPDATE SET
+                    status = excluded.status, backend_status = excluded.backend_status,
+                    backend_error = excluded.backend_error, status_version_id = excluded.status_version_id,
+                    chunk_count = NULL, progress = NULL, last_checked_at = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (error,),
+            )
+            updated = conn.execute(
+                """
+                UPDATE sync_jobs SET status = 'failed', error = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE status = 'running' AND operation IN ('create', 'update', 'move')
+                """,
+                (error,),
+            )
+            return updated.rowcount
+
+    def get_latest_document_sync_job(self, doc_id: int, kb_id: int, backend_slug: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            return row_to_dict(conn.execute(
+                """
+                SELECT * FROM sync_jobs
+                WHERE doc_id = ? AND kb_id = ? AND backend_slug = ? AND status != 'cancelled'
+                ORDER BY id DESC LIMIT 1
+                """,
+                (doc_id, kb_id, backend_slug),
+            ).fetchone())
+
+    def list_document_status_checks(
+        self, eligible_targets: list[tuple[int, str]], *, include_failed: bool, limit: int,
+    ) -> list[dict[str, Any]]:
+        if not eligible_targets:
+            return []
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT s.*, t.backend_kb_id, job.id, job.status AS job_status,
+                       job.version_id, job.operation, job.error AS job_error, job.upload_attempt
+                FROM sync_states s
+                JOIN backend_targets t ON t.kb_id = s.kb_id AND t.slug = s.backend_slug
+                JOIN document_kbs dk ON dk.doc_id = s.doc_id AND dk.kb_id = s.kb_id AND dk.status = 'active'
+                JOIN documents d ON d.id = s.doc_id AND d.status = 'active'
+                LEFT JOIN sync_jobs job ON job.id = (
+                    SELECT j.id FROM sync_jobs j
+                    WHERE j.doc_id = s.doc_id AND j.kb_id = s.kb_id
+                      AND j.backend_slug = s.backend_slug AND j.status != 'cancelled'
+                    ORDER BY j.id DESC LIMIT 1
+                )
+                WHERE (s.kb_id, s.backend_slug) IN (
+                    SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]')
+                    FROM json_each(?)
+                )
+                  AND (
+                    (s.status = 'synced' AND s.backend_doc_id IS NOT NULL
+                     AND COALESCE(s.backend_status, '') != 'completed'
+                     AND (s.status_version_id = d.current_version_id
+                          OR (s.status_version_id IS NULL
+                              AND (job.version_id IS NULL OR job.version_id = d.current_version_id)))
+                     AND (job.id IS NULL OR job.status = 'succeeded'))
+                    OR (? AND s.status = 'sync_failed' AND job.status = 'failed'
+                        AND job.operation IN ('create', 'update', 'move')
+                        AND job.version_id = d.current_version_id
+                        AND (s.backend_status = 'unconfirmed'
+                             OR job.error GLOB '*API error 5[0-9][0-9]*'
+                             OR job.error GLOB '*API error 409*'
+                             OR lower(job.error) LIKE '%timed out%'))
+                  )
+                ORDER BY s.last_checked_at, s.doc_id, s.kb_id, s.backend_slug
+                LIMIT ?
+                """,
+                (json.dumps(eligible_targets), include_failed, limit),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def mark_document_status_checked(self, doc_id: int, kb_id: int, backend_slug: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE sync_states SET last_checked_at = ? WHERE doc_id = ? AND kb_id = ? AND backend_slug = ?",
+                (utc_iso(), doc_id, kb_id, backend_slug),
+            )
+
+    def backend_document_is_linked(self, doc_id: int, kb_id: int, backend_slug: str, backend_doc_id: str) -> bool:
+        with self._connect() as conn:
+            return conn.execute(
+                """
+                SELECT 1 FROM sync_states
+                WHERE kb_id = ? AND backend_slug = ? AND backend_doc_id = ? AND doc_id != ?
+                LIMIT 1
+                """,
+                (kb_id, backend_slug, backend_doc_id, doc_id),
+            ).fetchone() is not None
 
     def cancel_runnable_create_update_jobs(self, doc_id: int, kb_id: int, backend_slug: str) -> dict[str, int]:
         with self._connect() as conn:
@@ -986,7 +1138,8 @@ class KnowledgeRepository:
             rows = conn.execute(
                 """
                 SELECT
-                  job.*,
+                  job.id, job.doc_id, job.kb_id, job.backend_slug, job.operation,
+                  job.version_id, job.status, job.error, job.created_at, job.updated_at,
                   d.slug AS doc_slug,
                   d.title AS doc_title,
                   kb.slug AS kb_slug,
@@ -1017,12 +1170,13 @@ class KnowledgeRepository:
         chunk_count: int | None = None,
         progress: float | None = None,
         backend_error: str | None = None,
+        status_version_id: int | None = None,
     ) -> None:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO sync_states (doc_id, kb_id, backend_slug, backend_doc_id, status, backend_status, chunk_count, progress, backend_error)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO sync_states (doc_id, kb_id, backend_slug, backend_doc_id, status, backend_status, chunk_count, progress, backend_error, status_version_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(doc_id, kb_id, backend_slug) DO UPDATE SET
                   backend_doc_id = excluded.backend_doc_id,
                   status = excluded.status,
@@ -1030,9 +1184,11 @@ class KnowledgeRepository:
                   chunk_count = excluded.chunk_count,
                   progress = excluded.progress,
                   backend_error = excluded.backend_error,
+                  status_version_id = excluded.status_version_id,
                   updated_at = CURRENT_TIMESTAMP
                 """,
-                (doc_id, kb_id, backend_slug, backend_doc_id, status.value, backend_status, chunk_count, progress, backend_error),
+                (doc_id, kb_id, backend_slug, backend_doc_id, status.value, backend_status, chunk_count, progress,
+                 backend_error, status_version_id),
             )
 
     def get_sync_state(self, doc_id: int, kb_id: int, backend_slug: str = "mock") -> dict[str, Any] | None:
@@ -1073,7 +1229,7 @@ class KnowledgeRepository:
                     SELECT doc_id FROM sync_jobs
                     WHERE kb_id = ? AND backend_slug = ?
                       AND status IN ('pending', 'running', 'failed')
-                      AND operation IN ('create', 'update')
+                      AND operation IN ('create', 'update', 'move')
                   )
                 """,
                 (backend_slug, backend_slug, kb_id, kb_id, backend_slug),
@@ -1111,7 +1267,14 @@ class KnowledgeRepository:
                   folder_tree.name AS folder_name,
                   folder_tree.path AS folder_path,
                   v.version_no AS current_version_no,
-                  COALESCE(s.status, ?) AS sync_status
+                  CASE
+                    WHEN s.status_version_id != d.current_version_id THEN 'not_synced'
+                    WHEN s.status = 'synced' AND s.backend_status IN ('pending', 'parsing') THEN 'parsing'
+                    WHEN s.status = 'synced' AND s.backend_status = 'failed' THEN 'parse_failed'
+                    WHEN s.status = 'synced' AND s.backend_status IN ('not_found', 'unknown') THEN 'sync_unconfirmed'
+                    WHEN s.status = 'sync_failed' AND s.backend_status = 'unconfirmed' THEN 'sync_unconfirmed'
+                    ELSE COALESCE(s.status, ?)
+                  END AS sync_status
                 FROM document_kbs dk
                 JOIN documents d ON d.id = dk.doc_id
                 JOIN knowledge_bases kb ON kb.id = dk.kb_id
@@ -1146,7 +1309,10 @@ class KnowledgeRepository:
                 """
                 SELECT
                   COUNT(*) AS document_count,
-                  SUM(CASE WHEN COALESCE(s.status, ?) = ? THEN 1 ELSE 0 END) AS sync_failed_count
+                  SUM(CASE WHEN (s.status_version_id IS NULL OR s.status_version_id = d.current_version_id)
+                           AND (COALESCE(s.status, ?) = ?
+                                OR (s.status = 'synced' AND s.backend_status = 'failed'))
+                           THEN 1 ELSE 0 END) AS sync_failed_count
                 FROM document_kbs dk
                 JOIN documents d ON d.id = dk.doc_id
                 JOIN knowledge_bases kb ON kb.id = dk.kb_id

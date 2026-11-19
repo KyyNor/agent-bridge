@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { api } from '../../api/client'
 import type { SyncJob } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
+import { syncBadgeLabel, syncBadgeStatus } from '../../lib/knowledgeSyncStatus'
 import StatusBadge from '../StatusBadge.vue'
 import { Button } from '../ui/button'
 import { SHARED_RESOURCE_READ_ONLY_HINT } from '../../lib/resourceAccess'
@@ -15,20 +16,6 @@ const props = defineProps<{
 }>()
 
 const syncing = ref(false)
-
-function badgeStatus(status?: string | null): 'success' | 'error' | 'disabled' {
-  if (status === 'synced' || status === 'succeeded' || status === 'success') return 'success'
-  if (status === 'sync_failed' || status === 'failed' || status === 'error') return 'error'
-  return 'disabled'
-}
-
-function badgeLabel(status?: string | null) {
-  const labels: Record<string, string> = {
-    not_synced: '未同步', synced: '已同步', sync_failed: '同步失败', delete_pending: '待删除', delete_failed: '删除失败',
-    pending: '待处理', running: '同步中', succeeded: '已完成', failed: '失败', success: '成功', error: '错误',
-  }
-  return labels[status || ''] || status || '未知'
-}
 
 async function triggerSync() {
   syncing.value = true
@@ -62,7 +49,7 @@ async function triggerSync() {
       <tbody><tr v-for="job in jobs" :key="job.id" class="border-b border-border/60">
         <td class="px-3 py-2 text-sm">{{ job.doc_title }}</td>
         <td class="px-3 py-2 text-xs">{{ job.operation }}</td>
-        <td class="px-3 py-2"><StatusBadge :status="badgeStatus(job.status)" :label="badgeLabel(job.status)" /></td>
+        <td class="px-3 py-2"><StatusBadge :status="syncBadgeStatus(job.status)" :label="syncBadgeLabel(job.status)" /></td>
         <td class="px-3 py-2 text-xs text-muted-foreground">{{ job.backend_slug }}</td>
         <td class="px-3 py-2 max-w-[200px] overflow-hidden text-ellipsis text-xs text-destructive" :title="job.error ?? ''">{{ job.error || '—' }}</td>
         <td class="px-3 py-2 whitespace-nowrap text-xs text-muted-foreground">{{ formatLocalDatetime(job.updated_at) }}</td>

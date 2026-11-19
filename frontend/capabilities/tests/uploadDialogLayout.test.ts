@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { syncBadgeLabel } from '../src/lib/knowledgeSyncStatus'
 
 const root = resolve(import.meta.dirname, '..')
 const uploadDialog = () => readFileSync(resolve(root, 'src/components/knowledge/KnowledgeUploadDialog.vue'), 'utf-8')
@@ -77,15 +78,16 @@ test('upload dialog uses a shared queue index with at most three async workers',
 test('batch upload starts one pass per backend configured for immediate sync', () => {
   const uploadFunction = uploadQueue().slice(uploadQueue().indexOf('async function uploadDocuments'))
   assert.match(uploadFunction, /kb\.backend_targets\.filter\(target => target\.status === 'active' && target\.sync_policy === 'immediate'\)/)
-  assert.match(uploadFunction, /api\.triggerKbSync\(kb\.slug, target\.slug\)/)
+  assert.match(uploadFunction, /api\.triggerKbSync\(kb\.slug, target\.slug, \{ refreshStatus: false \}\)/)
   assert.match(uploadFunction, /已入库，等待定时同步/)
 })
 
 test('knowledge sync badges translate backend states into user-facing labels', () => {
-  const file = readFileSync(resolve(root, 'src/views/knowledge/KnowledgeView.vue'), 'utf-8')
-  assert.match(file, /function syncBadgeLabel\(/)
-  assert.match(file, /not_synced:\s*'未同步'/)
-  assert.match(file, /sync_failed:\s*'同步失败'/)
+  assert.equal(syncBadgeLabel('not_synced'), '未同步')
+  assert.equal(syncBadgeLabel('sync_failed'), '同步失败')
+  assert.equal(syncBadgeLabel('sync_unconfirmed'), '待核对')
+  assert.equal(syncBadgeLabel('parsing'), '解析中')
+  assert.equal(syncBadgeLabel('parse_failed'), '解析失败')
 })
 
 test('knowledge folder pane exposes a bounded desktop resizer and keeps mobile layout responsive', () => {
@@ -117,17 +119,18 @@ test('knowledge browse API contract is typed and builds mutually exclusive conte
 })
 
 test('knowledge browse renders ZIP and virtual folders with distinct icons and document-only actions', () => {
-  const file = readFileSync(resolve(root, 'src/views/knowledge/KnowledgeView.vue'), 'utf-8')
-  const documentsTab = file.slice(file.indexOf('<!-- Documents Tab -->'))
-  assert.match(file, /import \{[^}]*Archive[^}]*\} from '@lucide\/vue'/)
-  assert.match(documentsTab, /entry\.kind === 'zip'/)
-  assert.match(documentsTab, /<Archive/)
-  assert.match(documentsTab, /<Folder/)
-  assert.match(documentsTab, /entry\.kind === 'document'/)
-  assert.match(documentsTab, /openDocumentDetail\(/)
-  assert.match(documentsTab, /openPlaceDialog\(/)
-  assert.match(documentsTab, /openAttachDialog\(/)
-  assert.match(documentsTab, /deleteDoc\(/)
+  const table = readFileSync(resolve(root, 'src/components/knowledge/KnowledgeDocumentsTable.vue'), 'utf-8')
+  const folderRow = table.slice(table.indexOf("<tr v-if=\"'kind' in entry"), table.indexOf('<tr v-else class='))
+  const documentRow = table.slice(table.indexOf('<tr v-else class='))
+  assert.match(folderRow, /entry\.kind === 'zip'/)
+  assert.match(folderRow, /<Archive/)
+  assert.match(folderRow, /<Folder/)
+  assert.doesNotMatch(folderRow, /下载|移动|关联|详情|删除/)
+  assert.match(documentRow, /emit\('detail'/)
+  assert.match(documentRow, /emit\('move'/)
+  assert.match(documentRow, /emit\('attach'/)
+  assert.match(documentRow, /emit\('remove'/)
+  assert.match(documentRow, /downloadDocument\(entry\.slug\)/)
 })
 
 test('knowledge browse panes keep folder and document lists at a fixed height with internal scrolling', () => {

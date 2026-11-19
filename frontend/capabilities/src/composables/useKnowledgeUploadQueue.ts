@@ -232,7 +232,9 @@ export function useKnowledgeUploadQueue({
           if (uploadFiles.value[index]?.status === 'success') updateUploadItem(index, { stage: `正在同步：${immediateTargets.map(target => target.slug).join('、')}` })
         })
         try {
-          const results = await Promise.allSettled(immediateTargets.map(target => api.triggerKbSync(kb.slug, target.slug)))
+          const results = await Promise.allSettled(
+            immediateTargets.map(target => api.triggerKbSync(kb.slug, target.slug, { refreshStatus: false })),
+          )
           if (results.some(result => result.status === 'rejected')) throw new Error('部分后端同步未启动')
         } catch {
           syncStartError = '文件已入库，但部分后端同步未启动，请稍后点击“立即同步”。'
