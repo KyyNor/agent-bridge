@@ -2,6 +2,7 @@
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 
 from agent_bridge.api.schemas import (
     AskRequest,
@@ -234,6 +235,18 @@ def create_knowledge_routes(service, actor, save_upload, upload_filename):
             return service.update_document(current_actor, doc_slug, upload_path, later, original_filename=upload_filename(file))
         finally:
             upload_path.unlink(missing_ok=True)
+
+    @router.get("/kbs/{kb_slug}/docs/{doc_slug}/download", response_class=FileResponse)
+    def download_document(
+        kb_slug: str, doc_slug: str, current_actor: str = Depends(actor)
+    ) -> FileResponse:
+        download = service.download_document(current_actor, kb_slug, doc_slug)
+        return FileResponse(
+            download.path,
+            filename=download.filename,
+            media_type="application/octet-stream",
+            headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+        )
 
     @router.post("/kbs/{kb_slug}/docs/{doc_slug}/delete")
     def remove_document_from_kb(

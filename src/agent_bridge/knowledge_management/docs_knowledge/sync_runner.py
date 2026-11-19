@@ -10,19 +10,23 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
+from threading import Lock
 from typing import Any, Callable, Protocol
 
-from agent_bridge.app.document_paths import (
-    join_backend_path,
-    normalize_relative_document_path,
-)
 from agent_bridge.core.domain import (
+    BackendDocStatus,
+    DocumentReconciliationBackend,
+    DocumentStatusUncertain,
     NotFound,
     Operation,
     SyncJobStatus,
     SyncStateStatus,
     require_admin_user,
+)
+from agent_bridge.knowledge_management.docs_knowledge.status_reconciliation import (
+    DocumentStatusReconciler,
+    SyncUploadSource,
+    needs_upload_check,
 )
 from agent_bridge.storage.sqlite import SQLiteStore
 
@@ -51,6 +55,8 @@ class SyncJobRunner:
         self.store = store
         self.admins = admins
         self._facade = facade
+        self._lock = Lock()
+        self._reconciler = DocumentStatusReconciler(store)
 
     def sync(
         self,
@@ -62,10 +68,42 @@ class SyncJobRunner:
     ) -> dict[str, int]:
         if kb_id is None:
             require_admin_user(actor, self.admins)
+        with self._lock:
+            return self._sync(backend, progress_callback, kb_id)
+
+    def reconcile(self, eligible_targets: list[tuple[int, str]]) -> None:
+        if self._lock.acquire(blocking=False):
+            try:
+                self._reconcile(eligible_targets, include_failed=True)
+            finally:
+                self._lock.release()
+
+    def _reconcile(self, eligible_targets: list[tuple[int, str]], *, include_failed: bool) -> None:
+        adapters = {}
+        for slug in {slug for _, slug in eligible_targets}:
+            try:
+                adapter = self._facade.get_adapter(slug)
+            except NotFound:
+                logger.warning("文档状态核对跳过未配置的后端 backend=%s", slug)
+                continue
+            if isinstance(adapter, DocumentReconciliationBackend):
+                adapters[slug] = adapter
+        self._reconciler.check(
+            {(kb_id, slug): adapters[slug] for kb_id, slug in eligible_targets if slug in adapters},
+            include_failed=include_failed,
+        )
+
+    def _sync(
+        self,
+        backend: str | None,
+        progress_callback: Callable[[dict[str, Any]], None] | None,
+        kb_id: int | None,
+    ) -> dict[str, int]:
         # A target may have been created by an older migration without its
         # remote ID.  Repair it before taking the job snapshot so that the
         # sync path never needs to use the local KB slug as a remote ID.
         eligible_targets = self._facade.align_backends(kb_id=kb_id, backend=backend)
+        self._reconcile(eligible_targets, include_failed=False)
         jobs = self.store.list_runnable_jobs(
             actor=None,
             backend_slug=backend,
@@ -167,6 +205,7 @@ class SyncJobRunner:
         adapter = None
         supports_folders = False
         placement: dict[str, Any] | None = None
+        source: SyncUploadSource | None = None
         previous_sync_state = self.store.get_sync_state(
             job["doc_id"], job["kb_id"], job["backend_slug"]
         )
@@ -199,37 +238,15 @@ class SyncJobRunner:
                 if placement is None:
                     raise NotFound("document knowledge-base placement not found")
 
-                archive_path = job.get("archive_path")
-                filename = job.get("original_filename") or job["doc_slug"]
-                current_document = self.store.get_document_by_id(job["doc_id"], include_deleted=True)
-                if current_document and current_document.get("current_version_id"):
-                    current_version = next(
-                        (
-                            version
-                            for version in self.store.list_versions(job["doc_id"])
-                            if version["id"] == current_document["current_version_id"]
-                        ),
-                        None,
-                    )
-                    if current_version is not None:
-                        archive_path = current_version["archive_path"]
-                        filename = current_version["original_filename"]
-                if not archive_path:
+                version = self.store.get_current_document_version(job["doc_id"])
+                if version is None:
                     raise NotFound("document archive not found")
-
                 folder_path = placement.get("folder_path") or ""
-                normalized_filename = normalize_relative_document_path(filename)
-                upload_filename = Path(normalized_filename).name
-                remote_filename = (
-                    normalized_filename
-                    if placement.get("archive_entry_id") is not None
-                    else upload_filename
-                )
-                remote_path = (
-                    join_backend_path(folder_path, remote_filename)
-                    if supports_folders
-                    else None
-                )
+                source = SyncUploadSource.from_version(version, placement)
+                remote_path = source.remote_path if supports_folders else None
+                tracks_status = isinstance(adapter, DocumentReconciliationBackend)
+                observation = BackendDocStatus(status="pending") if tracks_status else None
+                matched = None
                 if job["operation"] == Operation.move.value:
                     old_backend_doc_id = (
                         previous_sync_state.get("backend_doc_id") if previous_sync_state else None
@@ -242,39 +259,57 @@ class SyncJobRunner:
                     backend_doc_id = move_method(
                         backend_kb_id=backend_kb_id,
                         backend_doc_id=old_backend_doc_id,
-                        file_path=Path(archive_path),
-                        filename=upload_filename,
+                        file_path=source.file_path,
+                        filename=source.filename,
                         remote_path=remote_path,
                     )
+                elif tracks_status:
+                    if needs_upload_check(job, (previous_sync_state or {}).get("backend_status")):
+                        matched = self._reconciler.find_uploaded_document(
+                            adapter, job, backend_kb_id, source,
+                        )
+                    if matched is not None:
+                        backend_doc_id = matched.id
+                        observation = matched.status
+                    else:
+                        backend_doc_id = adapter.upload_tracked(
+                            backend_kb_id, source.file_path, source.remote_path,
+                            lambda fingerprint: self._reconciler.record_upload_attempt(job, source, fingerprint),
+                        )
                 else:
                     upload_kwargs: dict[str, Any] = {
                         "backend_kb_id": backend_kb_id,
                         "doc_slug": job["doc_slug"],
-                        "file_path": Path(archive_path),
-                        "filename": upload_filename,
+                        "file_path": source.file_path,
+                        "filename": source.filename,
                     }
                     if supports_folders:
                         upload_kwargs["remote_path"] = remote_path
                     backend_doc_id = adapter.upload(**upload_kwargs)
 
-                if supports_folders:
-                    self.store.upsert_backend_folder_mapping(
-                        job["kb_id"],
-                        job["backend_slug"],
-                        placement["folder_id"],
-                        folder_path,
-                        folder_path,
-                        status="synced",
-                        error=None,
-                    )
-                self.store.upsert_sync_state(
-                    job["doc_id"],
-                    job["kb_id"],
-                    job["backend_slug"],
-                    backend_doc_id,
-                    SyncStateStatus.synced,
-                )
-            self.store.update_job_status(job["id"], SyncJobStatus.succeeded)
+                key = (job["doc_id"], job["kb_id"], job["backend_slug"])
+                with self.store.transaction():
+                    if matched is not None and (
+                        self.store.get_current_document_version(job["doc_id"]) != version
+                        or self.store.get_document_placement(job["doc_id"], job["kb_id"]) != placement
+                    ):
+                        raise DocumentStatusUncertain("核对期间文档版本或目录发生变化")
+                    if supports_folders:
+                        self.store.upsert_backend_folder_mapping(
+                            job["kb_id"], job["backend_slug"], placement["folder_id"],
+                            folder_path, folder_path, status="synced", error=None,
+                        )
+                    if observation is not None:
+                        self._reconciler.save_remote_status(
+                            key, backend_doc_id, observation, source.version_id, recovered=matched is not None,
+                        )
+                    else:
+                        self.store.upsert_sync_state(*key, backend_doc_id, SyncStateStatus.synced)
+                    if matched is not None:
+                        logger.info("重试前已核对远端上传 job=%s backend=%s 状态=%s", job["id"], backend, observation.status)
+                    self.store.update_job_status(job["id"], SyncJobStatus.succeeded)
+            if job["operation"] == "delete":
+                self.store.update_job_status(job["id"], SyncJobStatus.succeeded)
             logger.info("文档同步任务 #%d: 成功", job["id"])
             return True
         except Exception as exc:
@@ -331,20 +366,26 @@ class SyncJobRunner:
                     )
                 except Exception:
                     logger.warning("保存后端目录映射失败: job=%s", job.get("id"), exc_info=True)
+            upload_uncertain = isinstance(exc, DocumentStatusUncertain) and op in {
+                Operation.create.value, Operation.update.value,
+            }
             failed_backend_doc_id = (
                 previous_sync_state.get("backend_doc_id")
-                if job["operation"] == Operation.move.value and previous_sync_state
+                if (op == Operation.move.value or upload_uncertain) and previous_sync_state
                 else None
             )
-            self.store.upsert_sync_state(
-                job["doc_id"],
-                job["kb_id"],
-                job["backend_slug"],
-                failed_backend_doc_id,
-                failed_status,
-                backend_error=str(exc),
-            )
-            self.store.update_job_status(job["id"], SyncJobStatus.failed, error=str(exc))
+            with self.store.transaction():
+                self.store.upsert_sync_state(
+                    job["doc_id"],
+                    job["kb_id"],
+                    job["backend_slug"],
+                    failed_backend_doc_id,
+                    failed_status,
+                    backend_status="unconfirmed" if upload_uncertain else None,
+                    backend_error=str(exc),
+                    status_version_id=source.version_id if upload_uncertain and source else None,
+                )
+                self.store.update_job_status(job["id"], SyncJobStatus.failed, error=str(exc))
             return False
 
     @staticmethod

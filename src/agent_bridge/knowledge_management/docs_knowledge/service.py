@@ -295,6 +295,25 @@ class DocsKnowledgeService:
                 eligible.append((kb["id"], slug))
         return eligible
 
+    def reconciliation_targets(self) -> list[tuple[int, str]]:
+        """返回已有远端库的启用目标，状态核对不会建库或补排上传。"""
+        registry = self.registry
+        configured = sorted(registry.list_slugs()) if registry else []
+        if not configured:
+            return []
+        targets = []
+        for kb in self.store.list_kbs():
+            retrieval_backend = default_retrieval_backend(kb, configured)
+            for target in self.store.list_backend_targets(kb["id"]):
+                if (
+                    target["slug"] in configured
+                    and target["status"] == "active"
+                    and target["backend_kb_id"]
+                    and resolve_sync_policy(kb, target, retrieval_backend) != "paused"
+                ):
+                    targets.append((kb["id"], target["slug"]))
+        return targets
+
     def _repair_backend_kb(
         self, kb: dict[str, Any], backend_slug: str, adapter: BackendAdapter
     ) -> None:

@@ -543,7 +543,18 @@ def apply_followup_schema(store: Any, conn: sqlite3.Connection) -> None:
             "chunk_count": "INTEGER",
             "progress": "REAL",
             "backend_error": "TEXT",
+            "status_version_id": "INTEGER",
+            "last_checked_at": "TEXT",
         },
+    )
+    store._ensure_columns(conn, "sync_jobs", {"upload_attempt": "TEXT"})
+    ensure_query_index(
+        conn,
+        "idx_sync_jobs_document_target",
+        """
+        CREATE INDEX IF NOT EXISTS idx_sync_jobs_document_target
+        ON sync_jobs(doc_id, kb_id, backend_slug, id DESC)
+        """,
     )
 
     store._ensure_columns(

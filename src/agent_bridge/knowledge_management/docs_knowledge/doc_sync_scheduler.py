@@ -46,7 +46,16 @@ class DocSyncScheduler(BaseCronScheduler):
             logger.warning("DocSync 本轮未注册定时任务,文档同步暂停直到 cron 修复")
             return
         self._scheduler.add_job(self._run_sync, trigger=trigger, id="doc_sync")
+        self._scheduler.add_job(
+            self._run_status_reconciliation, trigger="interval", minutes=5, id="doc_sync_status",
+        )
         logger.debug("已调度文档同步 cron: %s", self._current_cron)
+
+    def _run_status_reconciliation(self) -> None:
+        try:
+            self._service.reconcile_document_statuses()
+        except Exception:
+            logger.exception("文档状态后台核对失败")
 
     def _run_sync(self) -> None:
         """cron 触发的同步入口，由同步服务筛选可执行目标并重试失败任务。"""
