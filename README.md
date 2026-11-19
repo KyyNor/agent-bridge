@@ -480,7 +480,7 @@ Draft 2020-12 Schema 中的 `$defs` 及其本地 `$ref` 会自动转换为 Draft
 
 例如，设 Weknora 为默认检索后端，并让其他后端暂不同步。API 可用 `PUT /api/v1/kbs/team-docs/sync-policy` 提交 `{"backend_sync_policies":{"weknora":"scheduled","ragflow":"paused"}}`，也可用 `POST /api/v1/kbs/team-docs/sync?backend=weknora` 立即处理 Weknora 的待办。
 
-Bridge 每 5 分钟分批向 Weknora 核对待处理和失败的文档。文档列表会显示「解析中」「解析失败」「待核对」或「已同步」。在 Weknora 手动重新解析成功后，Bridge 会更新状态。上传返回 HTTP 500 或超时时，重试前先检查同一远端库中有无匹配当前版本的文件。
+Bridge 每 6 小时分批向 Weknora 核对待处理和失败的文档。文档列表会显示「解析中」「解析失败」「待核对」或「已同步」。在 Weknora 手动重新解析成功后，Bridge 会更新状态。也可以在知识库的「同步」页点「立即同步」主动核对。上传返回 HTTP 500 或超时时，重试前先检查同一远端库中有无匹配当前版本的文件。
 
 在知识库的目录视图或「全部文档」中，点击文件行的「下载」可取得当前版本原件。归属组成员和平台管理员可下载本地已归档的文件，远端同步失败时也可用。ZIP 展开后的文件可逐个下载。
 

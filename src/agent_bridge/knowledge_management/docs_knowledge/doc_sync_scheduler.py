@@ -47,7 +47,7 @@ class DocSyncScheduler(BaseCronScheduler):
             return
         self._scheduler.add_job(self._run_sync, trigger=trigger, id="doc_sync")
         self._scheduler.add_job(
-            self._run_status_reconciliation, trigger="interval", minutes=5, id="doc_sync_status",
+            self._run_status_reconciliation, trigger="interval", hours=6, id="doc_sync_status",
         )
         logger.debug("已调度文档同步 cron: %s", self._current_cron)
 
@@ -74,7 +74,9 @@ class DocSyncScheduler(BaseCronScheduler):
         }
         try:
             self._sync_repo_sources()
-            result = self._service.sync(admin, all_users=True, progress_callback=self._update_progress)
+            result = self._service.sync(
+                admin, all_users=True, progress_callback=self._update_progress, refresh_status=False,
+            )
             if self._current_run is not None:
                 self._current_run.update({
                     "status": "succeeded",

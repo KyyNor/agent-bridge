@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
 from agent_bridge.knowledge_management.code_knowledge.scheduler import CodeGraphScheduler
@@ -37,9 +38,10 @@ class _CodeStore(_SyncConfigStore):
 
 def test_doc_sync_scheduler_records_job_progress() -> None:
     class Service:
-        def sync(self, actor: str, all_users: bool, progress_callback) -> dict[str, int]:
+        def sync(self, actor: str, all_users: bool, progress_callback, *, refresh_status: bool) -> dict[str, int]:
             assert actor == "root"
             assert all_users is True
+            assert refresh_status is False
             progress_callback({"total": 2, "processed": 0, "succeeded": 0, "failed": 0})
             progress_callback({
                 "total": 2,
@@ -60,6 +62,16 @@ def test_doc_sync_scheduler_records_job_progress() -> None:
     assert status["last_run"]["succeeded"] == 2
     assert status["last_run"]["failed"] == 0
     assert status["current_run"] is None
+
+
+def test_doc_sync_scheduler_registers_six_hour_status_check() -> None:
+    scheduler = DocSyncScheduler(object(), _SyncConfigStore(), {"root"})
+    scheduler.start()
+    try:
+        status_job = scheduler._scheduler.get_job("doc_sync_status")
+        assert status_job.trigger.interval == timedelta(hours=6)
+    finally:
+        scheduler.stop()
 
 
 def test_code_sync_scheduler_exposes_latest_run_progress_in_status() -> None:
@@ -199,7 +211,7 @@ def test_run_sync_runs_git_diff_phase_before_drain() -> None:
         def sync_kb_repo_source_changes(self, actor, kb_slug, repo_key):
             calls.append(f"diff:{kb_slug}:{repo_key}")
 
-        def sync(self, actor, all_users, progress_callback):
+        def sync(self, actor, all_users, progress_callback, *, refresh_status):
             calls.append("drain")
             return {"processed": 0, "succeeded": 0, "failed": 0}
 
@@ -217,7 +229,7 @@ def test_run_sync_isolates_failing_source_and_still_drains() -> None:
             if repo_key == "r-bad":
                 raise RuntimeError("boom")
 
-        def sync(self, actor, all_users, progress_callback):
+        def sync(self, actor, all_users, progress_callback, *, refresh_status):
             return {"processed": 0, "succeeded": 0, "failed": 0}
 
     store = _RepoSourceStore()

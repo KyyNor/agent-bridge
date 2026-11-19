@@ -1123,9 +1123,10 @@ export const api = {
     if (backend) qs.set('backend', backend)
     return post<{ processed: number }>(`/sync${qs.toString() ? '?' + qs : ''}`, { all_users: allUsers })
   },
-  triggerKbSync: (kbSlug: string, backend?: string) => {
+  triggerKbSync: (kbSlug: string, backend?: string, options?: { refreshStatus: boolean }) => {
     const qs = new URLSearchParams()
     if (backend) qs.set('backend', backend)
+    if (options?.refreshStatus === false) qs.set('refresh_status', 'false')
     return post<{ processed: number }>(`/kbs/${encodeURIComponent(kbSlug)}/sync${qs.toString() ? '?' + qs : ''}`)
   },
   getSyncStatus: (backend?: string) => {

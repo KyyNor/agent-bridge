@@ -169,7 +169,7 @@ class _IngestFacade:
         return self._service._remove_new_archive_files(existing_files)
 
     def trigger_sync(self, actor: str) -> None:
-        self._service.sync(actor=actor, all_users=False)
+        self._service.sync(actor=actor, all_users=False, refresh_status=False)
 
 
 class _SyncRunnerFacade:
@@ -1285,7 +1285,7 @@ class AgentBridgeService:
                         )
         self.store.soft_delete_document(doc["id"])
         if not later:
-            self.sync(actor=actor, all_users=False)
+            self.sync(actor=actor, all_users=False, refresh_status=False)
         return {"slug": doc_slug, "status": "deleted"}
 
     def sync(
@@ -1294,9 +1294,12 @@ class AgentBridgeService:
         all_users: bool,
         backend: str | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
+        *,
+        refresh_status: bool = True,
     ) -> dict[str, int]:
         return self._sync_runner.sync(
-            actor, all_users, backend=backend, progress_callback=progress_callback
+            actor, all_users, backend=backend, progress_callback=progress_callback,
+            refresh_status=refresh_status,
         )
 
     def sync_kb(
@@ -1305,6 +1308,8 @@ class AgentBridgeService:
         kb_slug: str,
         backend: str | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
+        *,
+        refresh_status: bool = True,
     ) -> dict[str, int]:
         """仅处理指定知识库的同步任务。"""
         kb = self._require_kb_admin_visible(actor, kb_slug)
@@ -1314,6 +1319,7 @@ class AgentBridgeService:
             backend=backend,
             progress_callback=progress_callback,
             kb_id=int(kb["id"]),
+            refresh_status=refresh_status,
         )
 
     def reconcile_document_statuses(self) -> None:

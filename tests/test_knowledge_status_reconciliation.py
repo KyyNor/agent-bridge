@@ -90,6 +90,31 @@ def test_background_tracks_parse_failure_and_manual_reparse_without_reupload(kno
     assert upload.call_count == 1
 
 
+def test_automatic_upload_passes_leave_parse_status_to_its_own_schedule(knowledge, respx_mock):
+    client, service, _, _ = knowledge
+    upload = respx_mock.post(f"{_REMOTE_KB}/knowledge/file").mock(
+        return_value=httpx.Response(201, json={"data": {"id": "file-1"}}),
+    )
+    status = respx_mock.get(f"{_BASE_URL}/api/v1/knowledge/file-1").mock(
+        return_value=httpx.Response(200, json={"data": {"parse_status": "completed"}}),
+    )
+    service.doc_sync_scheduler._run_sync()
+    assert upload.call_count == 1
+    assert _document_status(client) == "parsing"
+
+    service.doc_sync_scheduler._run_sync()
+    immediate = client.post(
+        "/api/v1/kbs/guides/sync?backend=remote&refresh_status=false", headers=_ACTOR,
+    )
+    assert immediate.status_code == 200
+    assert status.call_count == 0
+    assert _document_status(client) == "parsing"
+
+    assert _sync(client)["processed"] == 0
+    assert status.call_count == 1
+    assert _document_status(client) == "synced"
+
+
 @pytest.mark.parametrize("background", [True, False], ids=["background", "manual-sync"])
 def test_upload_500_with_remote_receipt_is_reconciled_without_second_post(knowledge, respx_mock, background):
     client, service, _, doc = knowledge

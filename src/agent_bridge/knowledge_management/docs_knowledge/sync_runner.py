@@ -72,18 +72,17 @@ class SyncJobRunner:
         backend: str | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
         kb_id: int | None = None,
+        *,
+        refresh_status: bool = True,
     ) -> dict[str, int]:
         if kb_id is None:
             require_admin_user(actor, self.admins)
         with self._lock:
-            return self._sync(backend, progress_callback, kb_id)
+            return self._sync(backend, progress_callback, kb_id, refresh_status=refresh_status)
 
     def reconcile(self, eligible_targets: list[tuple[int, str]]) -> None:
-        if self._lock.acquire(blocking=False):
-            try:
-                self._reconcile(eligible_targets, include_failed=True)
-            finally:
-                self._lock.release()
+        with self._lock:
+            self._reconcile(eligible_targets, include_failed=True)
 
     def _reconcile(self, eligible_targets: list[tuple[int, str]], *, include_failed: bool) -> None:
         adapters = {}
@@ -105,12 +104,15 @@ class SyncJobRunner:
         backend: str | None,
         progress_callback: Callable[[dict[str, Any]], None] | None,
         kb_id: int | None,
+        *,
+        refresh_status: bool,
     ) -> dict[str, int]:
         # A target may have been created by an older migration without its
         # remote ID.  Repair it before taking the job snapshot so that the
         # sync path never needs to use the local KB slug as a remote ID.
         eligible_targets = self._facade.align_backends(kb_id=kb_id, backend=backend)
-        self._reconcile(eligible_targets, include_failed=False)
+        if refresh_status:
+            self._reconcile(eligible_targets, include_failed=False)
         jobs = self.store.list_runnable_jobs(
             actor=None,
             backend_slug=backend,
