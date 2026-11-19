@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useWorkflowOutputImpacts } from '../../composables/useWorkflowOutputImpacts'
 import { collectOutputImpact, outputImpactIssues } from '../../lib/workflowOutputImpact'
 import { useRouter } from 'vue-router'
-import { ArrowLeft, Download, FolderOutput, GitBranch, HelpCircle, ListTodo, Maximize2, MoreHorizontal, Play, Plus, Save, Upload, WandSparkles, X } from '@lucide/vue'
+import { ArrowLeft, Download, FolderOutput, GitBranch, HelpCircle, ListTodo, Maximize2, MoreHorizontal, Play, Plus, RefreshCw, Save, Upload, WandSparkles, X } from '@lucide/vue'
 import { api, beginWorkflowValidationRun, finishWorkflowValidationRun, hasBlockingWorkflowValidationErrors, invalidateWorkflowValidationRun, isCurrentWorkflowValidationRun, workflowValidationErrorMessage, workflowValidationIssuesFor } from '../../api/client'
 import type { AccessActorContext, ProjectProfile, WorkflowArtifact, WorkflowDefinition, WorkflowDraft, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowRunSummary, WorkflowSubagentDetail, WorkflowTask, WorkflowTaskImportPreview, WorkflowImportPreview, WorkflowImportTargetMode, AgentRun, AgentBackendCatalog, ManagedScript, SkillPrompt, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowNodeRun, WorkflowNodeType, WorkflowValidationError, WorkflowType, WorkflowExecutionMode, WorkflowExecutionPlan } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
@@ -1132,8 +1132,11 @@ async function confirmClearWorkflow() {
     </div>
 
     <template v-if="routeMode === 'list'">
-    <!-- 页头操作：新建与导入工作流进 #ph-actions（仅列表态） -->
     <Teleport v-if="routeMode === 'list'" to="#ph-actions" defer>
+      <Button variant="outline" size="lg" :disabled="runsLoading" @click="loadRunOverviews()">
+        <RefreshCw :size="14" aria-hidden="true" />
+        {{ runsLoading ? '刷新中' : '刷新运行状态' }}
+      </Button>
       <Button data-tour="workflow-import" variant="outline" size="lg" @click="openWorkflowImport()">
         <Upload :size="14" />
         导入工作流
@@ -1150,13 +1153,6 @@ async function confirmClearWorkflow() {
 
     <Card data-tour="workflow-list">
       <CardContent class="p-0">
-        <div class="flex items-center justify-between gap-3 border-b px-4 py-3">
-          <div>
-            <div class="text-sm font-medium text-foreground">工作流</div>
-            <div class="text-xs text-muted-foreground">{{ workflows.length }} 个定义</div>
-          </div>
-          <Button variant="outline" size="sm" :disabled="runsLoading" @click="loadRunOverviews()">{{ runsLoading ? '刷新中' : '刷新运行状态' }}</Button>
-        </div>
         <div v-if="loading" class="px-4 py-8 text-sm text-muted-foreground">加载中</div>
         <div v-else-if="!workflows.length" class="px-4 py-8 text-sm text-muted-foreground">暂无工作流</div>
         <div v-else class="divide-y">
@@ -1170,7 +1166,7 @@ async function confirmClearWorkflow() {
                 <GroupBadge :group-key="item.owner_group_key" />
               </div>
               <div class="mt-1 truncate font-mono text-xs text-muted-foreground">{{ item.workflow_key }}</div>
-              <p class="mt-1 line-clamp-2 text-xs text-muted-foreground">{{ item.description || '无描述' }}</p>
+              <p v-if="item.description" class="mt-1 line-clamp-2 text-xs text-muted-foreground">{{ item.description }}</p>
             </div>
             <div class="text-xs text-muted-foreground">
               <div class="truncate">{{ profileName(item.profile_key) }}</div>

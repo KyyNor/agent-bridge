@@ -209,6 +209,9 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
 
 ## Agent 工作台（Workspace Runtime）
 
+工作台入口使用原生单选控件选择 Agent、范围和能力平面。共享实例锁定能力平面时，
+选择组同时禁用鼠标与键盘修改。
+
 「Agent 工作台」托管多个 Coding Agent 的交互式 Web 实例，当前支持
 **DeepSeek Harness（DSH）** 与 **Pi Agent**。架构分两层：
 

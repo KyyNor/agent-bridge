@@ -118,7 +118,8 @@ Pi  个人：/agent-workspace-pi/        Pi  小组：/agent-workspace-pi-shared
 与设备/inode 快照防止软链、`..` 和根目录替换逃逸。文件根不会随 Agent 自行 cd 改变。
 
 
-进入「Agent 工作台」可选择 Web 或网页终端。Web 界面要求 Chrome 111+ 或同等
+进入「Agent 工作台」后，先选择 Coding Agent 和界面，再选择工作空间范围与能力平面。
+Web 界面要求 Chrome 111+ 或同等
 浏览器能力。浏览器不满足要求时默认选择网页终端，模式按钮右侧显示原因。
 直接打开 Web 链接也会显示原因并提示使用终端。终端仅开放
 个人范围，每种 Agent 每人一个会话，同时只允许一个页面连接；关闭或断线后保留

@@ -6,7 +6,6 @@ import { api } from '../../api/client'
 import type { AccessActorContext, BusinessLedger, BusinessLedgerRecords, ProjectProfile } from '../../api/types'
 import { businessLedgerRecordFormValues } from '../../lib/businessLedger'
 import { confirm } from '../../composables/useConfirm'
-import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/dialog'
@@ -131,11 +130,84 @@ watch(() => props.routeKey, load)
       <Card v-if="ledgers.length"><CardContent class="p-0"><div class="overflow-x-auto"><table v-if="ledgers.length" class="w-full"><thead><tr class="border-b border-border"><th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">台账</th><th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">描述</th><th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">范围</th><th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">字段</th><th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">数据</th><th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground" /></tr></thead><tbody><tr v-for="item in ledgers" :key="item.ledger_key" class="border-b border-border/60 last:border-b-0"><td class="px-4 py-3"><div class="text-sm font-medium">{{ item.name }}</div><div class="font-mono text-xs text-muted-foreground">{{ item.ledger_key }}</div></td><td class="max-w-[360px] px-4 py-3 text-sm text-muted-foreground"><div class="truncate">{{ item.description || '暂无描述' }}</div></td><td class="px-4 py-3"><ResourceScopeBadge :resource="item" :read-only="ledgerReadOnly(item)" /></td><td class="whitespace-nowrap px-4 py-3 text-sm">{{ item.fields.length }} 字段</td><td class="whitespace-nowrap px-4 py-3 text-sm">{{ item.record_count }} 行</td><td class="px-4 py-3"><div class="flex gap-2"><Button variant="outline" size="sm" class="h-8 text-xs" @click="navigateTo(`business-ledgers/${item.ledger_key}`)">浏览</Button><Button variant="outline" size="sm" class="h-8 text-xs" @click="navigateTo(`business-ledgers/${item.ledger_key}/edit`)" :disabled="ledgerReadOnly(item)" :title="ledgerReadOnly(item) ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">编辑</Button><Button variant="ghost" size="sm" class="h-8 gap-1.5 text-xs text-destructive" @click="deleteLedgerItem(item)" :disabled="ledgerReadOnly(item)" :title="ledgerReadOnly(item) ? SHARED_RESOURCE_READ_ONLY_HINT : undefined"><Trash2 :size="14" />删除</Button></div></td></tr></tbody></table></div></CardContent></Card>
     </template>
     <main v-else-if="ledger" class="flex min-h-[calc(100vh-8rem)] min-w-0 flex-col space-y-4">
-      <div class="flex shrink-0 flex-wrap items-start gap-3"><Button variant="ghost" size="sm" class="-ml-2 mt-0.5" @click="navigateTo('business-ledgers')"><ArrowLeft :size="16" />返回业务台账</Button><div class="min-w-0 flex-1 border-l border-border pl-3"><h1 class="truncate text-lg font-semibold">{{ ledger.name }}</h1><p class="truncate text-xs text-muted-foreground">{{ ledger.ledger_key }}</p></div><div class="flex flex-wrap gap-2"><Button variant="outline" size="sm" @click="openPlaneDialog" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined"><Settings2 :size="15" />能力平面</Button><Button variant="outline" size="sm" @click="navigateTo(`business-ledgers/${ledger.ledger_key}/edit`)" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined"><Pencil :size="15" />编辑定义</Button><Button variant="destructive" size="sm" @click="deleteLedger" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined"><Trash2 :size="15" />删除</Button></div></div>
+      <div class="flex shrink-0 flex-wrap items-start justify-between gap-3">
+        <div class="flex min-w-0 items-start gap-2">
+          <Button variant="ghost" size="sm" class="shrink-0 px-2" @click="navigateTo('business-ledgers')">
+            <ArrowLeft :size="16" aria-hidden="true" />返回业务台账
+          </Button>
+          <div class="min-w-0">
+            <h1 class="break-words text-lg font-semibold">{{ ledger.name }}</h1>
+            <p class="break-all font-mono text-xs text-muted-foreground">{{ ledger.ledger_key }}</p>
+            <p v-if="ledger.description" class="mt-1 text-sm text-muted-foreground">{{ ledger.description }}</p>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" @click="openPlaneDialog" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">
+            <Settings2 :size="15" />能力平面
+          </Button>
+          <Button variant="outline" size="sm" @click="navigateTo(`business-ledgers/${ledger.ledger_key}/edit`)" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">
+            <Pencil :size="15" />编辑定义
+          </Button>
+          <Button variant="destructive" size="sm" @click="deleteLedger" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">
+            <Trash2 :size="15" />删除
+          </Button>
+        </div>
+      </div>
       <div v-if="detailReadOnly" class="rounded-md border border-warning/30 bg-warning-soft px-3 py-3 text-sm text-warning-soft-fg">{{ SHARED_RESOURCE_READ_ONLY_HINT }}</div>
       <div v-if="error" class="rounded-lg bg-destructive-soft p-3 text-sm text-destructive">{{ error }}</div>
-      <Card><CardContent class="p-5"><p class="text-sm text-muted-foreground">{{ ledger.description || '暂无描述' }}</p><div class="mt-4 flex flex-wrap gap-2"><Badge v-for="field in ledger.fields" :key="field.field_key" variant="outline">{{ field.name }} · {{ field.field_type }}</Badge></div></CardContent></Card>
-      <Card class="min-h-0 flex-1"><CardContent class="p-0"><div class="flex flex-wrap items-end justify-between gap-3 border-b border-border p-4"><label class="w-full max-w-sm text-sm">关键词<Input v-model="keyword" class="mt-1" @keyup.enter="loadRecords" /></label><div class="flex flex-wrap gap-2"><Button variant="outline" size="sm" @click="loadRecords">查询</Button><Button variant="outline" size="sm" @click="openImportDialog" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined"><FileUp :size="15" />导入 Excel</Button><Button variant="outline" size="sm" @click="exportLedger"><Download :size="15" />导出 Excel</Button><Button size="sm" @click="openCreateRecord" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined"><Plus :size="15" />新增数据</Button></div></div><div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr class="border-b text-left text-muted-foreground"><th class="p-3">#</th><th v-for="field in ledger.fields" :key="field.field_key" class="p-3">{{ field.name }}</th><th class="p-3" /></tr></thead><tbody><tr v-if="!records?.items.length"><td :colspan="ledger.fields.length + 2" class="p-8 text-center text-sm text-muted-foreground">暂无数据</td></tr><tr v-for="row in records?.items" :key="row.record_id" class="border-b border-border/60"><td class="p-3 font-mono text-xs">{{ row.record_id.slice(0, 8) }}</td><td v-for="field in ledger.fields" :key="field.field_key" class="p-3">{{ row.values[field.field_key] ?? '—' }}</td><td class="p-3"><div class="flex gap-1"><Button size="sm" variant="ghost" @click="editRecord(row)" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : '编辑数据'"><Pencil :size="14" /></Button><Button size="sm" variant="ghost" @click="deleteRecord(row.record_id)" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : '删除数据'"><Trash2 :size="14" /></Button></div></td></tr></tbody></table></div></CardContent></Card>
+
+      <Card class="min-h-0 flex-1">
+        <CardContent class="p-0">
+          <div class="flex flex-wrap items-end justify-between gap-3 border-b border-border p-4">
+            <form class="flex w-full max-w-sm items-end gap-2" @submit.prevent="loadRecords">
+              <label class="min-w-0 flex-1 text-sm">关键词<Input v-model="keyword" class="mt-1" /></label>
+              <Button type="submit" variant="outline" size="sm">查询</Button>
+            </form>
+            <div class="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" @click="openImportDialog" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">
+                <FileUp :size="15" />导入 Excel
+              </Button>
+              <Button variant="outline" size="sm" @click="exportLedger"><Download :size="15" />导出 Excel</Button>
+              <Button size="sm" @click="openCreateRecord" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">
+                <Plus :size="15" />新增数据
+              </Button>
+            </div>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="border-b text-left text-xs text-muted-foreground">
+                  <th scope="col" class="px-4 py-3 font-medium">记录 ID</th>
+                  <th v-for="field in ledger.fields" :key="field.field_key" scope="col" class="px-4 py-3 font-medium">
+                    {{ field.name }}
+                    <span class="mt-0.5 block font-mono font-normal">{{ field.field_type }}</span>
+                  </th>
+                  <th scope="col" class="px-4 py-3 font-medium"><span class="sr-only">操作</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-if="!records?.items.length">
+                  <td :colspan="ledger.fields.length + 2" class="p-8 text-center text-sm text-muted-foreground">暂无数据</td>
+                </tr>
+                <tr v-for="row in records?.items" :key="row.record_id" class="border-b border-border/60">
+                  <td class="px-4 py-3 font-mono text-xs" :title="row.record_id">{{ row.record_id.slice(0, 8) }}</td>
+                  <td v-for="field in ledger.fields" :key="field.field_key" class="px-4 py-3">{{ row.values[field.field_key] ?? '—' }}</td>
+                  <td class="px-4 py-3">
+                    <div class="flex gap-1">
+                      <Button size="sm" variant="ghost" aria-label="编辑数据" @click="editRecord(row)" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : '编辑数据'">
+                        <Pencil :size="14" aria-hidden="true" />
+                      </Button>
+                      <Button size="sm" variant="ghost" aria-label="删除数据" @click="deleteRecord(row.record_id)" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : '删除数据'">
+                        <Trash2 :size="14" aria-hidden="true" />
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
     </main>
     <Dialog v-model:open="showRecordDialog"><DialogContent class="max-h-[85vh] max-w-2xl overflow-y-auto"><DialogHeader><DialogTitle>{{ editingRecordId ? '编辑数据' : '新增数据' }}</DialogTitle></DialogHeader><div v-if="ledger" class="grid gap-3 md:grid-cols-2"><label v-for="field in ledger.fields" :key="field.field_key" class="text-sm"><span class="mb-1 block text-muted-foreground">{{ field.name }}<span v-if="field.required" class="text-destructive"> *</span></span><select v-if="field.field_type === 'enum'" v-model="recordValues[field.field_key]" class="h-9 w-full rounded-md border border-input bg-background px-2"><option value="">请选择</option><option v-for="value in field.enum_values" :key="value">{{ value }}</option></select><Input v-else v-model="recordValues[field.field_key]" :type="field.field_type === 'number' ? 'number' : field.field_type === 'date' ? 'date' : field.field_type === 'datetime' ? 'datetime-local' : 'text'" /></label></div><DialogFooter><Button variant="outline" @click="showRecordDialog = false">取消</Button><Button :disabled="recordSaving" @click="saveRecord">{{ recordSaving ? '保存中...' : '保存' }}</Button></DialogFooter></DialogContent></Dialog>
     <Dialog v-model:open="showImportDialog"><DialogContent class="sm:max-w-[560px]"><DialogHeader><DialogTitle>导入 Excel</DialogTitle></DialogHeader><div class="space-y-4"><p class="text-sm text-muted-foreground">列名会按字段标识或字段名称自动匹配。请先预览并确认导入结果。</p><div class="flex flex-col gap-3 rounded-md border border-border bg-muted/20 p-3 sm:flex-row sm:items-end sm:justify-between"><div class="min-w-0 flex-1"><label for="business-ledger-import-file" class="text-sm font-medium">选择 Excel 文件</label><input id="business-ledger-import-file" class="mt-2 h-9 w-full cursor-pointer rounded-sm border border-input bg-transparent px-2.5 py-1 text-sm file:mr-2 file:border-0 file:bg-transparent file:font-medium" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" :disabled="importing" @change="chooseFile" /><p class="mt-1.5 text-xs text-muted-foreground">仅支持 .xlsx 文件，建议先下载模板填写。</p></div><Button type="button" variant="outline" :disabled="importing" @click="downloadImportTemplate">下载模板</Button></div><div v-if="importFile" class="text-xs text-muted-foreground">已选择：<span class="font-medium text-foreground">{{ importFile.name }}</span></div><div v-if="importPreview" class="rounded-md bg-muted p-3 text-sm">将导入 {{ importPreview.rows }} 行；错误 {{ importPreview.errors.length }} 行。<ul v-if="importPreview.errors.length" class="mt-2 list-disc pl-5 text-xs text-muted-foreground"><li v-for="item in importPreview.errors.slice(0, 5)" :key="item.row">第 {{ item.row }} 行：{{ item.error }}</li></ul></div></div><DialogFooter><Button variant="outline" @click="showImportDialog = false">取消</Button><Button v-if="importPreview" :disabled="importing" @click="confirmImport">{{ importing ? '导入中...' : '确认导入' }}</Button><Button v-else :disabled="!importFile || importing" @click="previewImport">{{ importing ? '预览中...' : '预览导入' }}</Button></DialogFooter></DialogContent></Dialog>

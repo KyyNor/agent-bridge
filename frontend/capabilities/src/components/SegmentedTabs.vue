@@ -29,6 +29,7 @@ function select(key: string) {
       v-for="tab in tabs"
       :key="tab.key"
       type="button"
+      :aria-pressed="modelValue === tab.key"
       :class="[
         'inline-flex h-7 items-center gap-1.5 rounded-sm px-3 text-[13px] font-medium transition-colors',
         modelValue === tab.key

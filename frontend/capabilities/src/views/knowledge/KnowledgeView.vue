@@ -110,19 +110,18 @@ const currentFolderBreadcrumbs = computed(() => {
   if (!currentFolder.value || !currentFolder.value.path) return [detailKb.value?.name || '根目录']
   return [detailKb.value?.name || '根目录', ...currentFolder.value.path.split('/').filter(Boolean)]
 })
-const browseContextLabel = computed(() => {
-  if (showingAllDocuments.value) return '全部文档'
-  if (browseContext.value?.kind === 'zip') return 'ZIP 压缩包'
-  if (browseContext.value?.archive_entry_id != null) return 'ZIP 内部目录'
-  return '真实目录'
-})
 const activeBackendType = computed(() => {
   const slug = detailKb.value?.default_backend_slug
   return backends.value.find(backend => backend.slug === slug)?.backend_type
     || detailKb.value?.backend_targets.find(target => target.status === 'active')?.backend_type
     || ''
 })
-const folderCapabilityLabel = computed(() => activeBackendType.value === 'weknora' ? '目录同步' : '本地分目录，后端平铺')
+const browseHint = computed(() => {
+  if (showingAllDocuments.value) return '汇总整个知识库，不能用作同步目录。'
+  if (browseContext.value?.kind === 'zip') return 'ZIP 压缩包'
+  if (browseContext.value?.archive_entry_id != null) return 'ZIP 内部目录'
+  return activeBackendType.value === 'weknora' ? '同步时保留目录结构。' : '同步时不保留目录结构。'
+})
 const folderDialogTitle = computed(() => {
   if (folderDialogMode.value === 'create') return '新建目录'
   if (folderDialogMode.value === 'rename') return `重命名目录「${folderDialogFolder.value?.name || ''}」`
@@ -835,25 +834,25 @@ function syncBadgeLabel(status?: string | null) {
         {{ routeError }}。请<button type="button" class="underline" @click="goList">返回列表</button>。
       </div>
 
-      <!-- Back button -->
-      <div v-else class="flex flex-wrap items-center justify-between gap-3">
-        <Button variant="ghost" size="sm" class="h-8 px-2" @click="goList">
-          <ArrowLeft :size="14" class="mr-1.5" />
-          返回
-        </Button>
-        <div data-tour="knowledge-detail-actions" class="flex flex-wrap gap-2">
-          <Button v-if="detailKb" variant="outline" size="sm" class="h-8 text-xs" @click="openUploadDialog(detailKb)" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">
+      <div v-else class="flex flex-wrap items-start justify-between gap-3">
+        <div class="flex min-w-0 items-start gap-2">
+          <Button variant="ghost" size="sm" class="h-8 shrink-0 px-2" @click="goList">
+            <ArrowLeft :size="14" class="mr-1.5" />
+            返回
+          </Button>
+          <div v-if="detailKb" class="min-w-0">
+            <h1 class="break-words text-lg font-semibold text-foreground">{{ detailKb.name }}</h1>
+            <p class="break-all font-mono text-xs text-muted-foreground">{{ detailKb.slug }}</p>
+          </div>
+        </div>
+        <div v-if="detailKb" data-tour="knowledge-detail-actions" class="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" @click="showApiDialog = true">API 接入</Button>
+          <Button variant="outline" size="sm" @click="openPlaneDialog(detailKb)" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">能力平面</Button>
+          <Button size="sm" @click="openUploadDialog(detailKb)" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">
             <Upload :size="12" class="mr-1" />
             上传
           </Button>
-          <Button v-if="detailKb" variant="outline" size="sm" class="h-8 text-xs" @click="openPlaneDialog(detailKb)" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">能力平面</Button>
         </div>
-      </div>
-
-      <!-- KB name header -->
-      <div v-if="detailKb && !routeError">
-        <div class="flex items-center justify-between gap-3"><h2 class="text-lg font-semibold text-foreground">{{ detailKb.name }}</h2><Button variant="outline" size="sm" @click="showApiDialog = true">API 接入</Button></div>
-        <p class="font-mono text-xs text-muted-foreground">{{ detailKb.slug }}</p>
       </div>
 
       <div v-if="detailKb && detailReadOnly" class="rounded-md border border-warning/30 bg-warning-soft px-3 py-3 text-sm text-warning-soft-fg">
@@ -927,12 +926,7 @@ function syncBadgeLabel(status?: string | null) {
                     <span class="truncate">{{ crumb }}</span>
                   </template>
                 </div>
-                <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  <span>{{ showingAllDocuments ? '全部文档是快捷查询，不作为目录同步路径' : '当前上下文仅显示直接子条目' }}</span>
-                  <span v-if="browseContext" class="text-muted-foreground">· {{ browseContext.name }}</span>
-                  <Badge variant="secondary" class="text-[10px]">{{ folderCapabilityLabel }}</Badge>
-                  <Badge variant="outline" class="text-[10px]">{{ browseContextLabel }}</Badge>
-                </div>
+                <p class="mt-1 text-xs text-muted-foreground">{{ browseHint }}</p>
               </div>
               <Button v-if="browseParent && !showingAllDocuments" variant="outline" size="sm" class="h-8 shrink-0 text-xs" @click="goBrowseParent">
                 <ArrowLeft :size="12" class="mr-1" />返回上一级
