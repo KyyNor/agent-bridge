@@ -418,26 +418,25 @@ class DocumentIngestService:
     ) -> dict[str, Any]:
         doc = self._facade.require_doc_admin_visible(actor, doc_slug)
         self._facade.validate_source(source)
-        kbs = self.store.get_document_kbs(doc["id"], active_only=True)
         display_name = original_filename or source.name
         archived = self.archive.store(source)
-        version = self.store.create_document_version(
-            doc_id=doc["id"],
-            original_filename=display_name,
-            content_hash=archived.content_hash,
-            file_size=archived.file_size,
-            mime_type=self._mime_type(display_name),
-            archive_path=str(archived.archive_path),
-            created_by=actor,
-        )
-        for kb in kbs:
-            targets = self.store.list_backend_targets(kb["id"])
-            for target in targets:
-                if target["status"] == "active":
-                    self.store.create_sync_job(
-                        doc["id"], kb["id"], Operation.update, version["id"],
-                        backend_slug=target["slug"],
-                    )
+        with self.store.transaction():
+            version = self.store.create_document_version(
+                doc_id=doc["id"],
+                original_filename=display_name,
+                content_hash=archived.content_hash,
+                file_size=archived.file_size,
+                mime_type=self._mime_type(display_name),
+                archive_path=str(archived.archive_path),
+                created_by=actor,
+            )
+            for kb in self.store.get_document_kbs(doc["id"], active_only=True):
+                for target in self.store.list_backend_targets(kb["id"]):
+                    if target["status"] == "active":
+                        self.store.create_sync_job(
+                            doc["id"], kb["id"], Operation.update, version["id"],
+                            backend_slug=target["slug"],
+                        )
         doc["current_version_no"] = version["version_no"]
         if not later:
             self._facade.trigger_sync(actor=actor)

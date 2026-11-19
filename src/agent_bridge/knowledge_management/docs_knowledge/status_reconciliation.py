@@ -8,7 +8,7 @@ import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from agent_bridge.app.document_paths import join_backend_path, normalize_relative_document_path
 from agent_bridge.core.domain import (
@@ -18,6 +18,7 @@ from agent_bridge.core.domain import (
     DocumentUploadFingerprint,
     MatchedBackendDocument,
     Operation,
+    RemoteKnowledgeBaseMissing,
     SyncJobStatus,
     SyncStateStatus,
 )
@@ -47,7 +48,7 @@ class SyncUploadSource:
 
 
 def needs_upload_check(job: dict[str, Any], backend_status: str | None) -> bool:
-    if job["operation"] not in {Operation.create.value, Operation.update.value}:
+    if job["operation"] not in {Operation.create.value, Operation.update.value, Operation.move.value}:
         return False
     if job.get("job_status") != SyncJobStatus.failed.value:
         return False
@@ -60,8 +61,11 @@ def needs_upload_check(job: dict[str, Any], backend_status: str | None) -> bool:
 
 
 class DocumentStatusReconciler:
-    def __init__(self, store: SQLiteStore) -> None:
+    def __init__(
+        self, store: SQLiteStore, is_sync_target_enabled: Callable[[int, str, str], bool],
+    ) -> None:
         self.store = store
+        self.is_sync_target_enabled = is_sync_target_enabled
 
     def record_upload_attempt(
         self, job: dict[str, Any], source: SyncUploadSource, fingerprint: DocumentUploadFingerprint,
@@ -86,7 +90,7 @@ class DocumentStatusReconciler:
                 if attempt["remote_path"] == source.remote_path:
                     fingerprint = DocumentUploadFingerprint(checksum=attempt["checksum"], size=attempt["size"])
             return adapter.find_uploaded_document(backend_kb_id, source.remote_path, source.file_path, fingerprint)
-        except DocumentStatusUncertain:
+        except (DocumentStatusUncertain, RemoteKnowledgeBaseMissing):
             raise
         except Exception as exc:
             raise DocumentStatusUncertain("暂时无法向后端核对上传结果") from exc
@@ -149,6 +153,8 @@ class DocumentStatusReconciler:
         if checked_version is not None and checked_version != version["id"]:
             return
         remote_kb_id = candidate["backend_kb_id"]
+        if not self.is_sync_target_enabled(kb_id, backend_slug, remote_kb_id):
+            return
         recovering = candidate["job_status"] == SyncJobStatus.failed.value
         if recovering:
             source = SyncUploadSource.from_version(version, placement)
@@ -161,16 +167,10 @@ class DocumentStatusReconciler:
 
         with self.store.transaction():
             latest = self.store.get_latest_document_sync_job(*key)
-            current_target = next(
-                (target for target in self.store.list_backend_targets(kb_id) if target["slug"] == backend_slug),
-                None,
-            )
             if (
                 (latest and (latest["id"], latest["status"])) !=
                 (None if job_id is None else (job_id, candidate["job_status"]))
-                or current_target is None
-                or current_target["status"] != "active"
-                or current_target["backend_kb_id"] != remote_kb_id
+                or not self.is_sync_target_enabled(kb_id, backend_slug, remote_kb_id)
                 or self.store.get_current_document_version(doc_id) != version
                 or self.store.get_document_placement(doc_id, kb_id) != placement
             ):
@@ -183,4 +183,5 @@ class DocumentStatusReconciler:
                     status="synced", error=None,
                 )
                 self.store.update_job_status(job_id, SyncJobStatus.succeeded)
+                self.store.cancel_duplicate_document_uploads(*key, version["id"], job_id)
                 logger.info("已核对远端上传 doc=%s kb=%s backend=%s job=%s 状态=%s", *key, job_id, match.status.status)

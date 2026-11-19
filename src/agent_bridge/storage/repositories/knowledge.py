@@ -938,6 +938,30 @@ class KnowledgeRepository:
                 (version_id, attempt, job_id),
             )
 
+    def claim_document_sync_job(self, job_id: int) -> bool:
+        with self._connect() as conn:
+            return conn.execute(
+                """
+                UPDATE sync_jobs SET status = 'running', error = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND status IN ('pending', 'failed')
+                """,
+                (job_id,),
+            ).rowcount == 1
+
+    def cancel_duplicate_document_uploads(
+        self, doc_id: int, kb_id: int, backend: str, version_id: int, completed_job_id: int,
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE sync_jobs
+                SET status = 'cancelled', error = '同一版本已同步', updated_at = CURRENT_TIMESTAMP
+                WHERE doc_id = ? AND kb_id = ? AND backend_slug = ? AND version_id = ? AND id != ?
+                  AND operation IN ('create', 'update') AND status IN ('pending', 'failed')
+                """,
+                (doc_id, kb_id, backend, version_id, completed_job_id),
+            )
+
     def recover_interrupted_document_uploads(self) -> int:
         error = "服务重启，上传结果待核对"
         with self._connect() as conn:
@@ -947,7 +971,8 @@ class KnowledgeRepository:
                                          backend_error, status_version_id)
                 SELECT doc_id, kb_id, backend_slug, 'sync_failed', 'unconfirmed', ?, version_id
                 FROM sync_jobs
-                WHERE status = 'running' AND upload_attempt IS NOT NULL
+                WHERE status = 'running' AND operation IN ('create', 'update', 'move')
+                ORDER BY id
                 ON CONFLICT(doc_id, kb_id, backend_slug) DO UPDATE SET
                     status = excluded.status, backend_status = excluded.backend_status,
                     backend_error = excluded.backend_error, status_version_id = excluded.status_version_id,
@@ -959,7 +984,7 @@ class KnowledgeRepository:
             updated = conn.execute(
                 """
                 UPDATE sync_jobs SET status = 'failed', error = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE status = 'running' AND upload_attempt IS NOT NULL
+                WHERE status = 'running' AND operation IN ('create', 'update', 'move')
                 """,
                 (error,),
             )
@@ -1008,7 +1033,7 @@ class KnowledgeRepository:
                               AND (job.version_id IS NULL OR job.version_id = d.current_version_id)))
                      AND (job.id IS NULL OR job.status = 'succeeded'))
                     OR (? AND s.status = 'sync_failed' AND job.status = 'failed'
-                        AND job.operation IN ('create', 'update')
+                        AND job.operation IN ('create', 'update', 'move')
                         AND job.version_id = d.current_version_id
                         AND (s.backend_status = 'unconfirmed'
                              OR job.error GLOB '*API error 5[0-9][0-9]*'
@@ -1204,7 +1229,7 @@ class KnowledgeRepository:
                     SELECT doc_id FROM sync_jobs
                     WHERE kb_id = ? AND backend_slug = ?
                       AND status IN ('pending', 'running', 'failed')
-                      AND operation IN ('create', 'update')
+                      AND operation IN ('create', 'update', 'move')
                   )
                 """,
                 (backend_slug, backend_slug, kb_id, kb_id, backend_slug),

@@ -411,7 +411,6 @@ async function refreshKnowledgeDetail(preferredFolderId?: number | null) {
   }
 }
 
-const observedSyncStatuses = new Set(['not_synced', 'sync_failed', 'sync_unconfirmed', 'parsing', 'parse_failed'])
 let statusRefreshTimer = 0
 let statusRefreshBusy = false
 onMounted(() => {
@@ -434,7 +433,7 @@ async function refreshVisibleSyncStatuses() {
     } else if (tab === 'docs') {
       const docs = detailDocs.value
       const browse = detailBrowse.value
-      if (!docs.some(doc => observedSyncStatuses.has(doc.sync_status))) return
+      if (docs.length === 0) return
       const folderId = !showingAllDocuments.value && browse?.context.kind === 'folder'
         ? browse.context.id : undefined
       const latest = await api.listDocs(kb.slug, undefined, folderId)

@@ -314,6 +314,21 @@ class DocsKnowledgeService:
                     targets.append((kb["id"], target["slug"]))
         return targets
 
+    def is_sync_target_enabled(self, kb_id: int, backend: str, remote_kb_id: str) -> bool:
+        registry = self.registry
+        configured = sorted(registry.list_slugs()) if registry else []
+        if backend not in configured:
+            return False
+        try:
+            kb = self.store.get_kb_by_id(kb_id)
+        except KeyError:
+            return False
+        target = next((item for item in self.store.list_backend_targets(kb_id) if item["slug"] == backend), None)
+        return bool(
+            target and target["status"] == "active" and target["backend_kb_id"] == remote_kb_id
+            and resolve_sync_policy(kb, target, default_retrieval_backend(kb, configured)) != "paused"
+        )
+
     def _repair_backend_kb(
         self, kb: dict[str, Any], backend_slug: str, adapter: BackendAdapter
     ) -> None:

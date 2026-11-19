@@ -188,6 +188,9 @@ class _SyncRunnerFacade:
     ) -> list[tuple[int, str]]:
         return self._service.align_backends(kb_id=kb_id, backend=backend)
 
+    def is_sync_target_enabled(self, kb_id: int, backend: str, remote_kb_id: str) -> bool:
+        return self._service.docs_knowledge.is_sync_target_enabled(kb_id, backend, remote_kb_id)
+
 
 class _RepoSyncFacade:
     """把门面中 repo_sync 需要的能力暴露给 GitRepoSyncService。"""
@@ -1321,7 +1324,7 @@ class AgentBridgeService:
         job: dict[str, Any],
         recovery_backend_kbs: dict[tuple[int, str], str] | None = None,
         recovered_job_keys: set[tuple[int, int, str]] | None = None,
-    ) -> bool:
+    ) -> bool | None:
         return self._sync_runner._run_job(job, recovery_backend_kbs, recovered_job_keys)
 
 

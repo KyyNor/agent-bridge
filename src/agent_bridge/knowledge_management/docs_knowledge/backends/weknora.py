@@ -17,6 +17,7 @@ from agent_bridge.core.domain import (
     DocumentStatusUncertain,
     DocumentUploadFingerprint,
     MatchedBackendDocument,
+    RemoteKnowledgeBaseMissing,
     RetrievalResult,
 )
 from agent_bridge.knowledge_management.docs_knowledge.backends._office_convert import (
@@ -239,8 +240,12 @@ class WeknoraBackend:
         file_path: Path,
         remote_path: str,
         before_upload: Callable[[DocumentUploadFingerprint], None],
+        *,
+        replace_backend_doc_id: str | None = None,
     ) -> str:
         remote_filename = self._remote_filename(remote_path, None)
+        if replace_backend_doc_id is not None:
+            self.delete(backend_kb_id, replace_backend_doc_id)
         return self._upload_document(backend_kb_id, file_path, remote_filename, before_upload)
 
     def _upload_document(
@@ -388,9 +393,7 @@ class WeknoraBackend:
     ) -> MatchedBackendDocument | None:
         """仅认领目标库中路径和已发送内容都吻合的唯一条目。"""
         filename = remote_path.rsplit("/", 1)[-1]
-        if fingerprint is None:
-            if mislabeled_legacy_office_suffix(original_file, Path(filename).suffix):
-                raise DocumentStatusUncertain("原上传已转换文件格式，缺少可核对的发送指纹")
+        if fingerprint is None and not mislabeled_legacy_office_suffix(original_file, Path(filename).suffix):
             fingerprint = self._file_fingerprint(original_file)
 
         matches: dict[str, BackendDocStatus] = {}
@@ -403,6 +406,16 @@ class WeknoraBackend:
                 params={"page": page, "page_size": page_size, "keyword": filename},
                 timeout=min(self.timeout, 5),
             )
+            if response.status_code == 404:
+                try:
+                    error = response.json()
+                except ValueError:
+                    error = None
+                if (
+                    isinstance(error, dict) and error.get("code") in (1003, "1003")
+                    or "knowledge base not found" in response.text.lower()
+                ):
+                    raise RemoteKnowledgeBaseMissing("Weknora 知识库不存在，HTTP 404")
             self._raise(response)
             payload = response.json()
             rows = payload.get("data") if isinstance(payload, dict) else None
@@ -423,6 +436,8 @@ class WeknoraBackend:
                 path = f"{folder}/{name}" if folder and "/" not in name else name
                 if path != remote_path or row.get("parse_status") == "deleting":
                     continue
+                if fingerprint is None:
+                    raise DocumentStatusUncertain("同路径的远端文件缺少可核对的原发送指纹")
                 checksum, size = row.get("file_hash"), row.get("file_size")
                 if not isinstance(checksum, str) or not checksum or type(size) is not int:
                     raise DocumentStatusUncertain("Weknora 同路径条目缺少可核对的文件指纹")

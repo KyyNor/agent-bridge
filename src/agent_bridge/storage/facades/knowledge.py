@@ -373,6 +373,14 @@ class KnowledgeFacadeMixin:
     def record_job_upload_attempt(self, job_id: int, version_id: int, attempt: str) -> None:
         self.knowledge.record_job_upload_attempt(job_id, version_id, attempt)
 
+    def claim_document_sync_job(self, job_id: int) -> bool:
+        return self.knowledge.claim_document_sync_job(job_id)
+
+    def cancel_duplicate_document_uploads(
+        self, doc_id: int, kb_id: int, backend: str, version_id: int, completed_job_id: int,
+    ) -> None:
+        self.knowledge.cancel_duplicate_document_uploads(doc_id, kb_id, backend, version_id, completed_job_id)
+
     def recover_interrupted_document_uploads(self) -> int:
         with self.transaction():
             return self.knowledge.recover_interrupted_document_uploads()

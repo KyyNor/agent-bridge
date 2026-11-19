@@ -155,3 +155,102 @@ def test_interrupted_upload_uses_persisted_fingerprint_after_restart(knowledge, 
     service.doc_sync_scheduler._run_status_reconciliation()
     assert _document_status(client) == "synced"
     assert upload.call_count == 1
+
+
+def test_restart_requeues_upload_without_fingerprint(knowledge, respx_mock):
+    client, service, _, _ = knowledge
+    job_id = service.kb_status("root", "guides")["jobs"][0]["id"]
+    service.store.update_job_status(job_id, SyncJobStatus.running)
+    respx_mock.get(host="weknora.test", path="/api/v1/knowledge-bases/kb-remote/knowledge").mock(
+        return_value=_list_response(),
+    )
+    upload = respx_mock.post(f"{_REMOTE_KB}/knowledge/file").mock(
+        return_value=httpx.Response(200, json={"data": {"id": "file-after-restart"}}),
+    )
+    assert service.store.recover_interrupted_document_uploads() == 1
+    assert _sync(client)["succeeded"] == 1
+    assert upload.call_count == 1
+
+
+def test_failed_old_upload_does_not_send_the_new_version_twice(knowledge, respx_mock):
+    client, service, source, doc = knowledge
+    upload = respx_mock.post(f"{_REMOTE_KB}/knowledge/file").mock(side_effect=[
+        httpx.Response(500),
+        httpx.Response(201, json={"data": {"id": "new-version"}}),
+    ])
+    respx_mock.get(f"{_BASE_URL}/api/v1/knowledge/new-version").mock(
+        return_value=httpx.Response(200, json={"data": {"parse_status": "completed"}}),
+    )
+    assert _sync(client)["failed"] == 1
+    source.write_bytes(b"# Updated file")
+    service.update_document("root", doc["slug"], source, later=True)
+    assert _sync(client)["succeeded"] == 1
+    assert _sync(client)["processed"] == 0
+    assert b"# Updated file" in upload.calls.last.request.content
+    assert upload.call_count == 2
+    assert [job["status"] for job in service.kb_status("root", "guides")["jobs"]] == ["cancelled", "succeeded"]
+
+
+def test_move_500_matches_destination_before_deleting_or_uploading_again(knowledge, respx_mock):
+    client, service, _, doc = knowledge
+    upload = respx_mock.post(f"{_REMOTE_KB}/knowledge/file").mock(side_effect=[
+        httpx.Response(201, json={"data": {"id": "old-location"}}),
+        httpx.Response(500),
+    ])
+    delete = respx_mock.delete(f"{_BASE_URL}/api/v1/knowledge/old-location").mock(
+        return_value=httpx.Response(204),
+    )
+    lookup = respx_mock.get(host="weknora.test", path="/api/v1/knowledge-bases/kb-remote/knowledge").mock(
+        return_value=_list_response(_remote_document("new-location", folder="destination")),
+    )
+    assert _sync(client)["succeeded"] == 1
+    destination = service.create_folder("root", "guides", name="destination")
+    service.place_document("root", doc["slug"], "guides", destination["id"])
+    assert _sync(client)["failed"] == 1
+    assert _document_status(client) == "sync_unconfirmed"
+    assert _sync(client)["succeeded"] == 1
+    assert _document_status(client) == "synced"
+    assert lookup.call_count == delete.call_count == 1
+    assert upload.call_count == 2
+    assert service.get_doc("root", doc["slug"])["sync_states"][0]["backend_doc_id"] == "new-location"
+
+
+@pytest.mark.parametrize("background", [False, True], ids=["retry", "background"])
+def test_target_paused_during_lookup_retains_backlog_and_state(knowledge, respx_mock, background):
+    client, service, _, _ = knowledge
+    upload = respx_mock.post(f"{_REMOTE_KB}/knowledge/file").mock(return_value=httpx.Response(500))
+    assert _sync(client)["failed"] == 1
+
+    def pause_during_lookup(_request: httpx.Request) -> httpx.Response:
+        service.update_kb_sync_policy("root", "guides", backend_sync_policies={"remote": "paused"})
+        return _list_response(_remote_document("new-id")) if background else _list_response()
+
+    respx_mock.get(host="weknora.test", path="/api/v1/knowledge-bases/kb-remote/knowledge").mock(
+        side_effect=pause_during_lookup,
+    )
+    if background:
+        service.doc_sync_scheduler._run_status_reconciliation()
+    else:
+        assert _sync(client)["processed"] == 0
+    assert _document_status(client) == "sync_unconfirmed"
+    assert upload.call_count == 1
+    assert service.kb_status("root", "guides")["jobs"][0]["status"] == "failed"
+
+
+def test_confirmed_missing_remote_kb_can_be_rebuilt_after_ambiguous_upload(knowledge, respx_mock):
+    client, _, _, _ = knowledge
+    respx_mock.post(f"{_REMOTE_KB}/knowledge/file").mock(return_value=httpx.Response(500))
+    assert _sync(client)["failed"] == 1
+    respx_mock.get(host="weknora.test", path="/api/v1/knowledge-bases/kb-remote/knowledge").mock(
+        return_value=httpx.Response(404, json={"code": 1003, "message": "knowledge base not found"}),
+    )
+    recreate = respx_mock.post(f"{_BASE_URL}/api/v1/knowledge-bases").mock(
+        return_value=httpx.Response(201, json={"data": {"id": "rebuilt-kb"}}),
+    )
+    upload = respx_mock.post(f"{_BASE_URL}/api/v1/knowledge-bases/rebuilt-kb/knowledge/file").mock(
+        return_value=httpx.Response(201, json={"data": {"id": "rebuilt-file"}}),
+    )
+    assert _sync(client)["succeeded"] == 1
+    assert recreate.call_count == 2  # 初始建库和恢复建库
+    assert upload.call_count == 1
+    assert _document_status(client) == "parsing"

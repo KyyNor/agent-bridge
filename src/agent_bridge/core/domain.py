@@ -122,6 +122,10 @@ class DocumentStatusUncertain(RuntimeError):
     """远端可能已经接收了文件，重新上传前需要核对。"""
 
 
+class RemoteKnowledgeBaseMissing(RuntimeError):
+    """远端明确确认知识库不存在。"""
+
+
 @dataclass(frozen=True)
 class BackendCapabilities:
     supports_folders: bool
@@ -195,6 +199,8 @@ class DocumentReconciliationBackend(BackendAdapter, Protocol):
         file_path: Path,
         remote_path: str,
         before_upload: Callable[[DocumentUploadFingerprint], None],
+        *,
+        replace_backend_doc_id: str | None = None,
     ) -> str: ...
 
     def find_uploaded_document(

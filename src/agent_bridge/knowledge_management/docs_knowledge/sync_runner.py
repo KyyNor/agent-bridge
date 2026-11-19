@@ -17,8 +17,10 @@ from agent_bridge.core.domain import (
     BackendDocStatus,
     DocumentReconciliationBackend,
     DocumentStatusUncertain,
+    DocumentUploadFingerprint,
     NotFound,
     Operation,
+    RemoteKnowledgeBaseMissing,
     SyncJobStatus,
     SyncStateStatus,
     require_admin_user,
@@ -40,6 +42,11 @@ class _FacadeCallbacks(Protocol):
     def align_backends(
         self, kb_id: int | None = None, backend: str | None = None
     ) -> list[tuple[int, str]]: ...
+    def is_sync_target_enabled(self, kb_id: int, backend: str, remote_kb_id: str) -> bool: ...
+
+
+class SyncJobDeferred(Exception):
+    """目标或输入发生变化，保留任务待下一轮处理。"""
 
 
 class SyncJobRunner:
@@ -56,7 +63,7 @@ class SyncJobRunner:
         self.admins = admins
         self._facade = facade
         self._lock = Lock()
-        self._reconciler = DocumentStatusReconciler(store)
+        self._reconciler = DocumentStatusReconciler(store, facade.is_sync_target_enabled)
 
     def sync(
         self,
@@ -134,6 +141,8 @@ class SyncJobRunner:
                     "current_job": self._sync_job_progress_payload(job),
                 })
             ok = self._run_job(job, recovery_backend_kbs, recovered_job_keys)
+            if ok is None:
+                continue
             if job_key in recovered_job_keys:
                 # rebuild_backend_target replaces the whole runnable queue for
                 # this KB/backend.  Put the replacement jobs at the front so
@@ -182,6 +191,8 @@ class SyncJobRunner:
 
     @staticmethod
     def _is_kb_gone(exc: Exception) -> bool:
+        if isinstance(exc, RemoteKnowledgeBaseMissing):
+            return True
         msg = str(exc).lower()
         if "knowledge base not found" in msg:
             return True
@@ -191,18 +202,25 @@ class SyncJobRunner:
             return True
         return False
 
+    def _defer_job(self, job: dict[str, Any], reason: str) -> None:
+        status = SyncJobStatus(job.get("job_status") or job.get("status") or SyncJobStatus.pending.value)
+        self.store.update_job_status(job["id"], status, error=job.get("job_error") or job.get("error"))
+        logger.info("文档同步任务 #%s 已延期 backend=%s 原因=%s", job["id"], job["backend_slug"], reason)
+
     def _run_job(
         self,
         job: dict[str, Any],
         recovery_backend_kbs: dict[tuple[int, str], str] | None = None,
         recovered_job_keys: set[tuple[int, int, str]] | None = None,
-    ) -> bool:
+    ) -> bool | None:
         doc_title = job.get("doc_title", job.get("doc_slug", "?"))
         backend = job.get("backend_slug", "?")
         op = job.get("operation", "?")
         logger.info("文档同步任务 #%d: %s '%s' -> %s", job["id"], op, doc_title, backend)
-        self.store.update_job_status(job["id"], SyncJobStatus.running)
+        if not self.store.claim_document_sync_job(job["id"]):
+            return None
         adapter = None
+        backend_kb_id: str | None = None
         supports_folders = False
         placement: dict[str, Any] | None = None
         source: SyncUploadSource | None = None
@@ -222,6 +240,11 @@ class SyncJobRunner:
                 raise RuntimeError(
                     f"backend target '{job['backend_slug']}' has no remote knowledge-base ID"
                 )
+            def check_target() -> None:
+                if not self._facade.is_sync_target_enabled(job["kb_id"], backend, backend_kb_id):
+                    raise SyncJobDeferred("同步目标已暂停、移除或变更")
+
+            check_target()
             if job["operation"] == "delete":
                 backend_doc_id = previous_sync_state["backend_doc_id"] if previous_sync_state else None
                 if backend_doc_id:
@@ -241,16 +264,54 @@ class SyncJobRunner:
                 version = self.store.get_current_document_version(job["doc_id"])
                 if version is None:
                     raise NotFound("document archive not found")
+                key = (job["doc_id"], job["kb_id"], backend)
+                if op in {Operation.create.value, Operation.update.value} and job.get("version_id") != version["id"]:
+                    latest = self.store.get_latest_document_sync_job(*key)
+                    if (
+                        latest and latest["id"] > job["id"] and latest["version_id"] == version["id"]
+                        and latest["operation"] in {Operation.create.value, Operation.update.value}
+                    ):
+                        self.store.update_job_status(job["id"], SyncJobStatus.cancelled, error="已有当前版本的同步任务")
+                        return None
                 folder_path = placement.get("folder_path") or ""
                 source = SyncUploadSource.from_version(version, placement)
                 remote_path = source.remote_path if supports_folders else None
                 tracks_status = isinstance(adapter, DocumentReconciliationBackend)
                 observation = BackendDocStatus(status="pending") if tracks_status else None
                 matched = None
-                if job["operation"] == Operation.move.value:
-                    old_backend_doc_id = (
-                        previous_sync_state.get("backend_doc_id") if previous_sync_state else None
-                    )
+                old_backend_doc_id = (
+                    (previous_sync_state or {}).get("backend_doc_id") if op == Operation.move.value else None
+                )
+
+                def check_upload_source() -> None:
+                    check_target()
+                    if (
+                        self.store.get_current_document_version(job["doc_id"]) != version
+                        or self.store.get_document_placement(job["doc_id"], job["kb_id"]) != placement
+                    ):
+                        raise SyncJobDeferred("文档版本或目录已变更")
+
+                if tracks_status:
+                    if needs_upload_check(job, (previous_sync_state or {}).get("backend_status")):
+                        matched = self._reconciler.find_uploaded_document(adapter, job, backend_kb_id, source)
+                    if matched is not None:
+                        backend_doc_id = matched.id
+                        observation = matched.status
+                    else:
+                        check_upload_source()
+                        if op == Operation.move.value and not old_backend_doc_id:
+                            raise RuntimeError("cannot move document without an existing backend document")
+
+                        def before_upload(fingerprint: DocumentUploadFingerprint) -> None:
+                            with self.store.transaction():
+                                check_upload_source()
+                                self._reconciler.record_upload_attempt(job, source, fingerprint)
+
+                        backend_doc_id = adapter.upload_tracked(
+                            backend_kb_id, source.file_path, source.remote_path, before_upload,
+                            replace_backend_doc_id=old_backend_doc_id,
+                        )
+                elif job["operation"] == Operation.move.value:
                     if not old_backend_doc_id:
                         raise RuntimeError("cannot move document without an existing backend document")
                     move_method = getattr(adapter, "move", None) or getattr(adapter, "relocate", None)
@@ -263,19 +324,6 @@ class SyncJobRunner:
                         filename=source.filename,
                         remote_path=remote_path,
                     )
-                elif tracks_status:
-                    if needs_upload_check(job, (previous_sync_state or {}).get("backend_status")):
-                        matched = self._reconciler.find_uploaded_document(
-                            adapter, job, backend_kb_id, source,
-                        )
-                    if matched is not None:
-                        backend_doc_id = matched.id
-                        observation = matched.status
-                    else:
-                        backend_doc_id = adapter.upload_tracked(
-                            backend_kb_id, source.file_path, source.remote_path,
-                            lambda fingerprint: self._reconciler.record_upload_attempt(job, source, fingerprint),
-                        )
                 else:
                     upload_kwargs: dict[str, Any] = {
                         "backend_kb_id": backend_kb_id,
@@ -287,13 +335,9 @@ class SyncJobRunner:
                         upload_kwargs["remote_path"] = remote_path
                     backend_doc_id = adapter.upload(**upload_kwargs)
 
-                key = (job["doc_id"], job["kb_id"], job["backend_slug"])
                 with self.store.transaction():
-                    if matched is not None and (
-                        self.store.get_current_document_version(job["doc_id"]) != version
-                        or self.store.get_document_placement(job["doc_id"], job["kb_id"]) != placement
-                    ):
-                        raise DocumentStatusUncertain("核对期间文档版本或目录发生变化")
+                    if matched is not None:
+                        check_upload_source()
                     if supports_folders:
                         self.store.upsert_backend_folder_mapping(
                             job["kb_id"], job["backend_slug"], placement["folder_id"],
@@ -308,18 +352,26 @@ class SyncJobRunner:
                     if matched is not None:
                         logger.info("重试前已核对远端上传 job=%s backend=%s 状态=%s", job["id"], backend, observation.status)
                     self.store.update_job_status(job["id"], SyncJobStatus.succeeded)
+                    self.store.cancel_duplicate_document_uploads(*key, source.version_id, job["id"])
             if job["operation"] == "delete":
                 self.store.update_job_status(job["id"], SyncJobStatus.succeeded)
             logger.info("文档同步任务 #%d: 成功", job["id"])
             return True
+        except SyncJobDeferred as exc:
+            self._defer_job(job, str(exc))
+            return None
         except Exception as exc:
             if (
                 adapter is not None
-                and op != Operation.move.value
+                and backend_kb_id is not None
+                and (op != Operation.move.value or isinstance(exc, RemoteKnowledgeBaseMissing))
                 and self._is_kb_gone(exc)
                 and job.get("kb_name")
                 and job.get("kb_slug")
             ):
+                if not self._facade.is_sync_target_enabled(job["kb_id"], backend, backend_kb_id):
+                    self._defer_job(job, "同步目标已暂停、移除或变更")
+                    return None
                 logger.warning("文档同步任务 #%d: 后端 KB 已丢失，正在重建...", job["id"])
                 try:
                     recovery_key = (job["kb_id"], job["backend_slug"])
@@ -367,7 +419,7 @@ class SyncJobRunner:
                 except Exception:
                     logger.warning("保存后端目录映射失败: job=%s", job.get("id"), exc_info=True)
             upload_uncertain = isinstance(exc, DocumentStatusUncertain) and op in {
-                Operation.create.value, Operation.update.value,
+                Operation.create.value, Operation.update.value, Operation.move.value,
             }
             failed_backend_doc_id = (
                 previous_sync_state.get("backend_doc_id")
