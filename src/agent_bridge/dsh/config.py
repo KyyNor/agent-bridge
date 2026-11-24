@@ -277,19 +277,22 @@ class DshConfigService:
                 else int(current.get("max_tokens") or 0)
             )
             cleaned_models = normalize_models(available_models)
-            if model_vision is None:
-                model_vision = {
-                    model: enabled for model, enabled in current["model_vision"].items() if model in cleaned_models
-                }
-            elif model_vision.keys() - set(cleaned_models):
+            if model_vision is not None and model_vision.keys() - set(cleaned_models):
                 raise ValidationError("支持图片的设置只能用于当前可用模型列表中的模型 ID")
+            vision = current["model_vision"] if model_vision is None else model_vision
+            existing_models = set(current["available_models"])
+            cleaned_vision = {
+                model: vision.get(model, False)
+                for model in cleaned_models
+                if model in vision or model not in existing_models
+            }
             saved = self._repo.save_runtime_config(
                 web_command=cleaned_command,
                 pi_web_command=cleaned_pi_command,
                 idle_timeout_minutes=cleaned_timeout,
                 base_url=normalize_base_url(base_url),
                 available_models=cleaned_models,
-                model_vision=model_vision,
+                model_vision=cleaned_vision,
                 context_window=cleaned_context_window,
                 max_tokens=cleaned_max_tokens,
             )

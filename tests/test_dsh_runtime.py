@@ -470,7 +470,9 @@ def test_workspace_startup_writes_model_vision(service, home, monkeypatch, agent
     from agent_bridge.agent_workspace.launcher import LinuxIdentity
     from agent_bridge.dsh import injection
 
-    configure_runtime(service, available_models=["gpt-x", "gpt-y", "legacy"], model_vision={"gpt-x": True, "gpt-y": False})
+    models = ["gpt-x", "gpt-y", "legacy"]
+    configure_runtime(service, available_models=models)
+    configure_runtime(service, available_models=models, model_vision={"gpt-x": True, "gpt-y": False})
     own_model = {"id": "gpt-y", "input": ["text", "image"]}
     identity = LinuxIdentity(user="groupa", uid=os.getuid(), gid=os.getgid(), home=home)
     adapter = service.workspace_runtime(agent, mode=mode).adapter

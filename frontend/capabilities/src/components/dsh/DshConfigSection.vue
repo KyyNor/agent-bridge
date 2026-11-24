@@ -13,24 +13,17 @@ import PiVersionsList from './PiVersionsList.vue'
 
 const runtimeConfig = ref<DshRuntimeConfig | null>(null)
 
-interface ModelRow {
-  id: string
-  vision: boolean | undefined
-}
-
-function newModelRow(): ModelRow {
-  return { id: '', vision: false }
-}
-
 function runtimeConfigForm(config: DshRuntimeConfig) {
-  const vision = new Map(Object.entries(config.model_vision ?? {}))
-  const models = config.available_models.map(id => ({ id, vision: vision.get(id) }))
+  const models = config.available_models
+  const savedVision = new Map(Object.entries(config.model_vision ?? {}))
+  const vision = new Map<string, boolean | undefined>(models.map(id => [id, savedVision.get(id)]))
   return {
     web_command: config.web_command,
     pi_web_command: config.pi_web_command,
     idle_timeout_minutes: config.idle_timeout_minutes,
     base_url: config.base_url,
-    models: models.length ? models : [newModelRow()],
+    models: models.length ? [...models] : [''],
+    vision,
     context_window: config.context_window ?? 0,
     max_tokens: config.max_tokens ?? 0,
   }
@@ -42,7 +35,7 @@ function isTokenLimit(value: number) {
 }
 const runtimeForm = ref({
   web_command: '', pi_web_command: '', idle_timeout_minutes: 120, base_url: '',
-  models: [newModelRow()], context_window: 0, max_tokens: 0,
+  models: [''], vision: new Map<string, boolean | undefined>(), context_window: 0, max_tokens: 0,
 })
 const runtimeSaving = ref(false)
 const runtimeError = ref('')
@@ -75,7 +68,14 @@ const modelOptions = computed(() =>
 const idleTimeoutValid = computed(
   () => Number.isInteger(runtimeForm.value.idle_timeout_minutes) && runtimeForm.value.idle_timeout_minutes >= 1,
 )
-const modelIds = computed(() => runtimeForm.value.models.map(model => model.id.trim()))
+const modelRows = computed(() => {
+  const { models, vision } = runtimeForm.value
+  return models.map(id => {
+    const key = id.trim()
+    return { id, key, vision: vision.has(key) ? vision.get(key) : false }
+  })
+})
+const modelIds = computed(() => modelRows.value.map(model => model.key))
 const modelListError = computed(() => {
   const ids = modelIds.value
   if (ids.length > 1 && ids.includes('')) return '模型 ID 不能为空'
@@ -136,17 +136,12 @@ async function loadGroups() {
 }
 
 function addModelRow() {
-  runtimeForm.value.models.push(newModelRow())
-}
-
-function updateModelId(model: ModelRow, id: string) {
-  if (id.trim() !== model.id.trim()) model.vision = false
-  model.id = id
+  runtimeForm.value.models.push('')
 }
 
 function removeModelRow(index: number) {
   const remaining = runtimeForm.value.models.filter((_, itemIndex) => itemIndex !== index)
-  runtimeForm.value.models = remaining.length ? remaining : [newModelRow()]
+  runtimeForm.value.models = remaining.length ? remaining : ['']
 }
 
 async function saveRuntimeConfig() {
@@ -156,9 +151,8 @@ async function saveRuntimeConfig() {
   runtimeMessage.value = ''
   try {
     const visionEntries: [string, boolean][] = []
-    for (const model of runtimeForm.value.models) {
-      const id = model.id.trim()
-      if (id && model.vision !== undefined) visionEntries.push([id, model.vision])
+    for (const model of modelRows.value) {
+      if (model.key && model.vision !== undefined) visionEntries.push([model.key, model.vision])
     }
     const saved = await api.saveDshRuntimeConfig({
       web_command: runtimeForm.value.web_command,
@@ -289,12 +283,12 @@ async function saveGroupConfig() {
         <div class="grid grid-cols-[12rem_1fr] items-start gap-4">
           <div class="pt-1 text-sm">可用模型 <span class="text-xs text-muted-foreground">(公共)</span></div>
           <div class="space-y-2">
-            <div v-for="(model, index) in runtimeForm.models" :key="index" class="flex flex-wrap items-center gap-2">
+            <div v-for="(model, index) in modelRows" :key="index" class="flex flex-wrap items-center gap-2">
               <Input
                 :model-value="model.id"
                 placeholder="模型 ID，如 deepseek-flash"
                 class="min-w-32 flex-1 font-mono text-xs"
-                @update:model-value="updateModelId(model, String($event || ''))"
+                @update:model-value="runtimeForm.models[index] = String($event || '')"
               />
               <label class="flex items-center gap-1.5 whitespace-nowrap text-xs">
                 <input
@@ -302,9 +296,9 @@ async function saveGroupConfig() {
                   class="size-4 rounded"
                   :checked="model.vision === true"
                   :indeterminate.prop="model.vision === undefined"
-                  :disabled="!model.id.trim()"
+                  :disabled="!model.key"
                   :aria-label="model.id ? model.id + ' 支持图片' : '支持图片'"
-                  @change="model.vision = !model.vision"
+                  @change="runtimeForm.vision.set(model.key, !model.vision)"
                 />
                 支持图片<span v-if="model.vision === undefined" class="text-muted-foreground">（沿用上游）</span>
               </label>
