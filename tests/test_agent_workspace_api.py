@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -164,3 +166,55 @@ def test_runtime_config_keeps_pi_command_when_field_absent(client) -> None:
     )
     assert legacy.status_code == 200
     assert legacy.json()["pi_web_command"] == custom, "旧客户端保存配置不得清空 Pi 启动命令"
+
+
+def test_runtime_config_round_trips_model_vision_and_legacy_edits(client) -> None:
+    path = "/api/v1/agent-workspace/runtime-config"
+    headers = {"X-Agent-Bridge-User": "root"}
+    initial = client.get(path, headers=headers).json()
+    assert initial["model_vision"] == {}
+    payload = {"idle_timeout_minutes": 120, "available_models": ["vision", "text", "legacy"]}
+    saved = client.put(path, headers=headers, json={
+        **payload, "model_vision": {"vision": True, "text": False}, "expected_edit_token": initial["edit_token"],
+    })
+    assert saved.status_code == 200, saved.text
+    config = client.get("/api/v1/dsh/runtime-config", headers=headers).json()
+    assert config["model_vision"] == {"vision": True, "text": False}
+
+    legacy = client.put(path, headers=headers, json={
+        **payload, "available_models": ["vision", "legacy"], "expected_edit_token": config["edit_token"],
+    })
+    assert legacy.status_code == 200, legacy.text
+    assert legacy.json()["model_vision"] == {"vision": True}
+
+    for vision_map, status in [({"unknown": True}, 400), ({"vision": "true"}, 422)]:
+        rejected = client.put(path, headers=headers, json={
+            **payload, "model_vision": vision_map, "expected_edit_token": legacy.json()["edit_token"],
+        })
+        assert rejected.status_code == status, rejected.text
+    assert client.get(path, headers=headers).json()["model_vision"] == {"vision": True}
+
+    cleared = client.put(path, headers=headers, json={
+        **payload, "model_vision": {}, "expected_edit_token": legacy.json()["edit_token"],
+    })
+    assert cleared.status_code == 200, cleared.text
+    assert client.get(path, headers=headers).json()["model_vision"] == {}
+
+
+def test_runtime_config_rejects_competing_model_vision_edits(client) -> None:
+    path = "/api/v1/agent-workspace/runtime-config"
+    headers = {"X-Agent-Bridge-User": "root"}
+    payload = {"idle_timeout_minutes": 120, "available_models": ["model"]}
+    assert client.put(path, headers=headers, json=payload).status_code == 200
+    token = client.get(path, headers=headers).json()["edit_token"]
+
+    def save(vision: bool):
+        return client.put(path, headers=headers, json={
+            **payload, "model_vision": {"model": vision}, "expected_edit_token": token,
+        })
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(save, [True, False]))
+    assert sorted(response.status_code for response in results) == [200, 409]
+    winner = next(response.json() for response in results if response.status_code == 200)
+    assert client.get(path, headers=headers).json()["model_vision"] == winner["model_vision"]

@@ -13,11 +13,37 @@ import PiVersionsList from './PiVersionsList.vue'
 
 const runtimeConfig = ref<DshRuntimeConfig | null>(null)
 
+interface ModelRow {
+  id: string
+  vision: boolean | undefined
+}
+
+function newModelRow(): ModelRow {
+  return { id: '', vision: false }
+}
+
+function runtimeConfigForm(config: DshRuntimeConfig) {
+  const vision = new Map(Object.entries(config.model_vision ?? {}))
+  const models = config.available_models.map(id => ({ id, vision: vision.get(id) }))
+  return {
+    web_command: config.web_command,
+    pi_web_command: config.pi_web_command,
+    idle_timeout_minutes: config.idle_timeout_minutes,
+    base_url: config.base_url,
+    models: models.length ? models : [newModelRow()],
+    context_window: config.context_window ?? 0,
+    max_tokens: config.max_tokens ?? 0,
+  }
+}
+
 // 上限 10M 只为挡住误输入（如把字节数当 token 数填），与服务端校验保持一致。
 function isTokenLimit(value: number) {
   return Number.isInteger(value) && value >= 0 && value <= 10_000_000
 }
-const runtimeForm = ref({ web_command: '', pi_web_command: '', idle_timeout_minutes: 120, base_url: '', models: [''], context_window: 0, max_tokens: 0 })
+const runtimeForm = ref({
+  web_command: '', pi_web_command: '', idle_timeout_minutes: 120, base_url: '',
+  models: [newModelRow()], context_window: 0, max_tokens: 0,
+})
 const runtimeSaving = ref(false)
 const runtimeError = ref('')
 const runtimeMessage = ref('')
@@ -49,7 +75,13 @@ const modelOptions = computed(() =>
 const idleTimeoutValid = computed(
   () => Number.isInteger(runtimeForm.value.idle_timeout_minutes) && runtimeForm.value.idle_timeout_minutes >= 1,
 )
-const modelsValid = computed(() => runtimeForm.value.models.every(item => item.trim().length > 0))
+const modelIds = computed(() => runtimeForm.value.models.map(model => model.id.trim()))
+const modelListError = computed(() => {
+  const ids = modelIds.value
+  if (ids.length > 1 && ids.includes('')) return '模型 ID 不能为空'
+  if (new Set(ids).size !== ids.length) return '模型 ID 不能重复'
+  return ''
+})
 // 0 表示不声明，由 DSH / Pi 沿用各自默认（DSH 262144、Pi 128000）。
 const contextWindowValid = computed(() =>
   isTokenLimit(runtimeForm.value.context_window) &&
@@ -69,15 +101,7 @@ async function loadRuntimeConfig() {
   try {
     const config = await api.getDshRuntimeConfig()
     runtimeConfig.value = config
-    runtimeForm.value = {
-      web_command: config.web_command,
-      pi_web_command: config.pi_web_command,
-      idle_timeout_minutes: config.idle_timeout_minutes,
-      base_url: config.base_url,
-      models: config.available_models.length ? [...config.available_models] : [''],
-      context_window: config.context_window ?? 0,
-      max_tokens: config.max_tokens ?? 0,
-    }
+    runtimeForm.value = runtimeConfigForm(config)
     runtimeError.value = ''
   } catch (e: any) {
     runtimeConfig.value = null
@@ -112,40 +136,43 @@ async function loadGroups() {
 }
 
 function addModelRow() {
-  runtimeForm.value.models = [...runtimeForm.value.models, '']
+  runtimeForm.value.models.push(newModelRow())
+}
+
+function updateModelId(model: ModelRow, id: string) {
+  if (id.trim() !== model.id.trim()) model.vision = false
+  model.id = id
 }
 
 function removeModelRow(index: number) {
   const remaining = runtimeForm.value.models.filter((_, itemIndex) => itemIndex !== index)
-  runtimeForm.value.models = remaining.length ? remaining : ['']
+  runtimeForm.value.models = remaining.length ? remaining : [newModelRow()]
 }
 
 async function saveRuntimeConfig() {
-  if (!runtimeConfig.value || !idleTimeoutValid.value || !modelsValid.value || !contextWindowValid.value || !maxTokensValid.value) return
+  if (!runtimeConfig.value || !idleTimeoutValid.value || modelListError.value || !contextWindowValid.value || !maxTokensValid.value) return
   runtimeSaving.value = true
   runtimeError.value = ''
   runtimeMessage.value = ''
   try {
+    const visionEntries: [string, boolean][] = []
+    for (const model of runtimeForm.value.models) {
+      const id = model.id.trim()
+      if (id && model.vision !== undefined) visionEntries.push([id, model.vision])
+    }
     const saved = await api.saveDshRuntimeConfig({
       web_command: runtimeForm.value.web_command,
       pi_web_command: runtimeForm.value.pi_web_command,
       idle_timeout_minutes: runtimeForm.value.idle_timeout_minutes,
       base_url: runtimeForm.value.base_url.trim(),
-      available_models: runtimeForm.value.models.map(item => item.trim()).filter(Boolean),
+      available_models: modelIds.value.filter(Boolean),
+      model_vision: Object.fromEntries(visionEntries),
       context_window: runtimeForm.value.context_window,
       max_tokens: runtimeForm.value.max_tokens,
       expected_edit_token: runtimeConfig.value.edit_token,
     })
     runtimeConfig.value = saved
-    runtimeForm.value = {
-      web_command: saved.web_command,
-      pi_web_command: saved.pi_web_command,
-      idle_timeout_minutes: saved.idle_timeout_minutes,
-      base_url: saved.base_url,
-      models: saved.available_models.length ? [...saved.available_models] : [''],
-      context_window: saved.context_window ?? 0,
-      max_tokens: saved.max_tokens ?? 0,
-    }
+    runtimeForm.value = runtimeConfigForm(saved)
     runtimeMessage.value = '运行配置已保存，下次启动工作台时生效'
   } catch (e: any) {
     runtimeError.value = e.message || '保存失败'
@@ -262,14 +289,26 @@ async function saveGroupConfig() {
         <div class="grid grid-cols-[12rem_1fr] items-start gap-4">
           <div class="pt-1 text-sm">可用模型 <span class="text-xs text-muted-foreground">(公共)</span></div>
           <div class="space-y-2">
-            <div v-for="(_, index) in runtimeForm.models" :key="index" class="flex items-center gap-2">
+            <div v-for="(model, index) in runtimeForm.models" :key="index" class="flex flex-wrap items-center gap-2">
               <Input
-                :model-value="runtimeForm.models[index]"
+                :model-value="model.id"
                 placeholder="模型 ID，如 deepseek-flash"
-                class="font-mono text-xs"
-                @update:model-value="runtimeForm.models[index] = String($event || '')"
+                class="min-w-32 flex-1 font-mono text-xs"
+                @update:model-value="updateModelId(model, String($event || ''))"
               />
-              <Button variant="outline" size="sm" :disabled="runtimeForm.models.length === 1 && !runtimeForm.models[0]" @click="removeModelRow(index)">
+              <label class="flex items-center gap-1.5 whitespace-nowrap text-xs">
+                <input
+                  type="checkbox"
+                  class="size-4 rounded"
+                  :checked="model.vision === true"
+                  :indeterminate.prop="model.vision === undefined"
+                  :disabled="!model.id.trim()"
+                  :aria-label="model.id ? model.id + ' 支持图片' : '支持图片'"
+                  @change="model.vision = !model.vision"
+                />
+                支持图片<span v-if="model.vision === undefined" class="text-muted-foreground">（沿用上游）</span>
+              </label>
+              <Button variant="outline" size="sm" aria-label="删除模型" :disabled="runtimeForm.models.length === 1 && !model.id" @click="removeModelRow(index)">
                 <Trash2 :size="14" />
               </Button>
             </div>
@@ -277,7 +316,7 @@ async function saveGroupConfig() {
               <Button variant="outline" size="sm" @click="addModelRow()">
                 <Plus :size="14" class="mr-1" />添加模型
               </Button>
-              <span v-if="!modelsValid" class="text-xs text-destructive">模型 ID 不能为空</span>
+              <span v-if="modelListError" class="text-xs text-destructive">{{ modelListError }}</span>
             </div>
           </div>
         </div>
@@ -324,7 +363,7 @@ async function saveGroupConfig() {
           </div>
         </div>
         <div class="flex items-center gap-3">
-          <Button size="sm" :disabled="runtimeSaving || !idleTimeoutValid || !modelsValid || !contextWindowValid || !maxTokensValid" @click="saveRuntimeConfig()">
+          <Button size="sm" :disabled="runtimeSaving || !idleTimeoutValid || !!modelListError || !contextWindowValid || !maxTokensValid" @click="saveRuntimeConfig()">
             {{ runtimeSaving ? '保存中...' : '保存运行配置' }}
           </Button>
           <span v-if="runtimeError" class="text-xs text-destructive">{{ runtimeError }}</span>

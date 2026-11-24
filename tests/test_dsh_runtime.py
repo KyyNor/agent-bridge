@@ -461,6 +461,49 @@ def test_model_overlay_declares_token_limits_per_model(service, home, monkeypatc
     assert "defaultContextWindow" not in entries["llm-pi-ai"]
 
 
+@pytest.mark.parametrize(
+    ("agent", "mode", "scope"),
+    [("dsh", "web", "personal"), ("dsh", "web", "shared"), ("dsh", "terminal", "personal"),
+     ("pi", "web", "personal"), ("pi", "web", "shared"), ("pi", "terminal", "personal")],
+)
+def test_workspace_startup_writes_model_vision(service, home, monkeypatch, agent, mode, scope) -> None:
+    from agent_bridge.agent_workspace.launcher import LinuxIdentity
+    from agent_bridge.dsh import injection
+
+    configure_runtime(service, available_models=["gpt-x", "gpt-y", "legacy"], model_vision={"gpt-x": True, "gpt-y": False})
+    own_model = {"id": "gpt-y", "input": ["text", "image"]}
+    identity = LinuxIdentity(user="groupa", uid=os.getuid(), gid=os.getgid(), home=home)
+    adapter = service.workspace_runtime(agent, mode=mode).adapter
+    monkeypatch.setattr(adapter, "_launcher", FakeLauncher())
+    owner = "groupa" if scope == "shared" else "user1"
+    config_dir = adapter.config_dir(identity, owner)
+    if agent == "dsh":
+        monkeypatch.setattr(injection, "read_profile_entries", lambda **kwargs: [
+            {"id": "llm-pi-ai", "config": {"providers": {"own": {"models": [own_model]}}}},
+        ])
+    else:
+        monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/" + name)
+        (config_dir / "models.json").write_text(json.dumps({"providers": {"own": {"models": [own_model]}}}))
+
+    plan = adapter.build_launch_plan(
+        identity=identity, runtime_owner=owner, scope=scope, runtime_key=owner, port=48601,
+        workspace=None, model_binding=service.dsh_configs.model_binding_for("groupa"), log_path=home / "runtime.log",
+    )
+    if agent == "dsh":
+        path = injection.model_overlay_path(Path(plan.env["DSH_HOME"]))
+        assert str(path) in plan.command
+        entries = injection.load_entry_list(path.read_text())
+        providers = next(entry["config"]["providers"] for entry in entries if entry["id"] == "llm-pi-ai")
+    else:
+        path = Path(plan.env["PI_CODING_AGENT_DIR"]) / "models.json"
+        providers = json.loads(path.read_text())["providers"]
+    assert providers["own"]["models"] == [own_model]
+    models = {model["id"]: model for model in providers["agent-bridge"]["models"]}
+    assert models["gpt-x"]["input"] == ["text", "image"]
+    assert models["gpt-y"]["input"] == ["text"]
+    assert "input" not in models["legacy"]
+
+
 def test_config_endpoints_require_admin(service) -> None:
     from fastapi.testclient import TestClient
     from agent_bridge.api.app import create_app
@@ -1675,6 +1718,29 @@ def _dsh_public_config(store) -> tuple[str, list[str]]:
             "SELECT base_url, available_models_json FROM dsh_runtime_config WHERE id = 1"
         ).fetchone()
     return (row[0], json.loads(row[1])) if row else ("", [])
+
+
+def test_model_vision_migration_preserves_existing_model_catalog(tmp_path) -> None:
+    from agent_bridge.storage.sqlite import SQLiteStore
+
+    store = SQLiteStore(tmp_path / "legacy.db")
+    store.init_schema()
+    with store.connect() as conn:
+        conn.execute("ALTER TABLE dsh_runtime_config DROP COLUMN model_vision_json")
+        conn.execute(
+            "INSERT INTO dsh_runtime_config (id, available_models_json) VALUES (1, ?)",
+            ('["legacy"]',),
+        )
+
+    store.migrate_phase2()
+    config = store.dsh_config.get_runtime_config()
+    assert config["available_models"] == ["legacy"]
+    assert config["model_vision"] == {}
+    store.dsh_config.save_runtime_config(
+        web_command="", idle_timeout_minutes=120, base_url="", available_models=["legacy"], model_vision={"legacy": True},
+    )
+    store.migrate_phase2()
+    assert store.dsh_config.get_runtime_config()["model_vision"] == {"legacy": True}
 
 
 def test_dsh_public_llm_config_backfilled_from_legacy_group_columns(tmp_path: Path) -> None:

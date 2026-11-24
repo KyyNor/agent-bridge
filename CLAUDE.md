@@ -368,6 +368,11 @@ DSH 专属语义（`dsh/`）：
   该字段前完全一致（上下文回落 DSH 262144 / Pi 128000，输出上限回落
   DSH 32768 / Pi 16384）。两个字段各自独立，且沿用 `pi_web_command` 的
   「未携带保留、显式 0 清空」语义。
+- **图片输入按模型 ID 配置**。全局工作台配置的 `model_vision` 保存到
+  `dsh_runtime_config.model_vision_json`。DSH 和 Pi 在 Web 与终端启动时分别往
+  托管 YAML patch 与 `models.json` 写每模型 `input`。`true` 声明文本和图片，
+  `false` 声明纯文本，未设置的模型省略 `input`。旧客户端省略该字段时保留仍在
+  可用模型列表内的设置。该字段参与编辑快照，保存后下次启动生效。
 - `dsh_group_configs`/`dsh_runtime_config` 分层迁移必须先回填再删列：早期版本的
   组级 `base_url`/`available_models_json` 由 `_backfill_dsh_public_llm_config`
   合并进全局行（只填全局为空的字段），否则升级会静默丢失已保存的模型接入。
