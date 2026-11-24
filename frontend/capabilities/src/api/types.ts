@@ -1465,6 +1465,8 @@ export interface DshRuntimeConfig {
   resolved_base_url: string
   base_url_source: 'global' | 'public_model_config' | ''
   available_models: string[]
+  /** 按模型 ID 声明图片输入。缺少的模型沿用上游能力。 */
+  model_vision: Record<string, boolean>
   /** 托管模型条目的上下文长度（token）；0 = 不声明，沿用 CLI 各自默认。 */
   context_window: number
   /** 托管模型条目的单次输出上限（token）；0 = 不声明，沿用 CLI 各自默认。 */
@@ -1479,6 +1481,7 @@ export interface DshRuntimeConfigUpdate {
   idle_timeout_minutes: number
   base_url: string
   available_models: string[]
+  model_vision?: DshRuntimeConfig['model_vision']
   context_window?: number
   max_tokens?: number
   expected_edit_token?: string | null

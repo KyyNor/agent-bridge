@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from agent_bridge.core.timeutil import utc_iso
+
+logger = logging.getLogger(__name__)
 
 
 def _decode_models(raw: str | None) -> list[str]:
@@ -16,6 +19,17 @@ def _decode_models(raw: str | None) -> list[str]:
     if not isinstance(payload, list):
         return []
     return [str(item) for item in payload]
+
+
+def _decode_model_vision(raw: str) -> dict[str, bool]:
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        payload = None
+    if isinstance(payload, dict) and all(isinstance(value, bool) for value in payload.values()):
+        return payload
+    logger.warning("工作台图片输入配置读取失败，沿用上游模型能力 config=global")
+    return {}
 
 
 class DshConfigRepository:
@@ -89,7 +103,7 @@ class DshConfigRepository:
             row = conn.execute(
                 """
                 SELECT web_command, pi_web_command, idle_timeout_minutes, base_url,
-                       available_models_json, context_window, max_tokens, updated_at
+                       available_models_json, model_vision_json, context_window, max_tokens, updated_at
                 FROM dsh_runtime_config WHERE id = 1
                 """
             ).fetchone()
@@ -100,12 +114,14 @@ class DshConfigRepository:
                 "idle_timeout_minutes": 0,
                 "base_url": "",
                 "available_models": [],
+                "model_vision": {},
                 "context_window": 0,
                 "max_tokens": 0,
                 "updated_at": None,
             }
         config = dict(row)
         config["available_models"] = _decode_models(config.pop("available_models_json", None))
+        config["model_vision"] = _decode_model_vision(config.pop("model_vision_json"))
         return config
 
     def save_runtime_config(
@@ -115,6 +131,7 @@ class DshConfigRepository:
         idle_timeout_minutes: int,
         base_url: str,
         available_models: list[str],
+        model_vision: dict[str, bool],
         pi_web_command: str | None = None,
         context_window: int = 0,
         max_tokens: int = 0,
@@ -125,15 +142,16 @@ class DshConfigRepository:
                 """
                 INSERT INTO dsh_runtime_config (
                   id, web_command, pi_web_command, idle_timeout_minutes, base_url,
-                  available_models_json, context_window, max_tokens, updated_at
+                  available_models_json, model_vision_json, context_window, max_tokens, updated_at
                 )
-                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                   web_command = excluded.web_command,
                   pi_web_command = excluded.pi_web_command,
                   idle_timeout_minutes = excluded.idle_timeout_minutes,
                   base_url = excluded.base_url,
                   available_models_json = excluded.available_models_json,
+                  model_vision_json = excluded.model_vision_json,
                   context_window = excluded.context_window,
                   max_tokens = excluded.max_tokens,
                   updated_at = excluded.updated_at
@@ -144,6 +162,7 @@ class DshConfigRepository:
                     idle_timeout_minutes,
                     base_url,
                     json.dumps(available_models, ensure_ascii=False),
+                    json.dumps(model_vision, ensure_ascii=False, sort_keys=True),
                     context_window,
                     max_tokens,
                     updated_at,

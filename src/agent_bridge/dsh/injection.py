@@ -119,13 +119,17 @@ def model_overlay_path(dsh_home: Path) -> Path:
     return Path(dsh_home) / MODEL_OVERLAY_FILENAME
 
 
-def _model_entry(model: str, *, context_window: int, max_tokens: int) -> dict[str, Any]:
+def _model_entry(
+    model: str, *, context_window: int, max_tokens: int, supports_vision: bool | None
+) -> dict[str, Any]:
     """构造一条托管模型目录项；两个上限字段都是「0 = 不声明」，故省略而非写 0。
 
     两个字段都不能写 0：DSH 的 zod 是 ``step(1).min(1)``，Pi 在合成期对
     ``<= 0`` 直接抛错（且会让整份 ``models.json`` 校验失败）。
     """
     entry: dict[str, Any] = {"id": model, "name": model}
+    if supports_vision is not None:
+        entry["input"] = ["text", "image"] if supports_vision else ["text"]
     if context_window > 0:
         entry["contextWindow"] = context_window
     if max_tokens > 0:
@@ -137,6 +141,7 @@ def build_provider_entry(
     *,
     base_url: str,
     models: list[str],
+    model_vision: dict[str, bool] | None = None,
     context_window: int = 0,
     max_tokens: int = 0,
 ) -> dict[str, Any]:
@@ -149,12 +154,15 @@ def build_provider_entry(
     ``base`` 是内置目录的同名模型条目——像 ``deepseek-flash`` 这种 shipped 模型
     名会被内置值抢先，落不到管理员配置的值。
     """
+    vision = model_vision or {}
     return {
         "displayName": MANAGED_PROVIDER_DISPLAY_NAME,
         "api": MANAGED_WIRE_PROTOCOL,
         "baseURL": base_url,
         "models": [
-            _model_entry(model, context_window=context_window, max_tokens=max_tokens)
+            _model_entry(
+                model, context_window=context_window, max_tokens=max_tokens, supports_vision=vision.get(model)
+            )
             for model in models
         ],
         "apiKeyEnv": MANAGED_API_KEY_ENV,
@@ -207,6 +215,7 @@ def build_model_overlay(
     base_url: str,
     models: list[str],
     default_model: str,
+    model_vision: dict[str, bool] | None = None,
     llm_config: Any = None,
     legacy_llm_config: Any = None,
     context_window: int = 0,
@@ -229,6 +238,7 @@ def build_model_overlay(
     providers[MANAGED_PROVIDER_KEY] = build_provider_entry(
         base_url=base_url,
         models=models,
+        model_vision=model_vision,
         context_window=context_window,
         max_tokens=max_tokens,
     )
@@ -255,6 +265,7 @@ def resolve_model_overlay(
     env: dict[str, str],
     cwd: Path,
     identity: LinuxIdentity,
+    model_vision: dict[str, bool] | None = None,
     context_window: int = 0,
     max_tokens: int = 0,
     config_reader: Any = None,
@@ -290,6 +301,7 @@ def resolve_model_overlay(
         base_url=base_url,
         models=models,
         default_model=default_model,
+        model_vision=model_vision,
         llm_config=llm_config,
         legacy_llm_config=_legacy_llm_config(dsh_home),
         context_window=context_window,

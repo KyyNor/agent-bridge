@@ -159,6 +159,7 @@ class PiWorkspaceAdapter:
             gid=identity.gid,
             base_url=base_url,
             models=models,
+            model_vision=model_binding.get("model_vision"),
             context_window=int(model_binding.get("context_window") or 0),
             max_tokens=int(model_binding.get("max_tokens") or 0),
         )

@@ -238,51 +238,64 @@ class DshConfigService:
         idle_timeout_minutes: int,
         base_url: str = "",
         available_models: list[str] | None = None,
+        model_vision: dict[str, bool] | None = None,
         pi_web_command: str | None = None,
         context_window: int | None = None,
         max_tokens: int | None = None,
         expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
-        current = self._resolve_runtime_config()
-        require_edit_token(
-            expected_edit_token,
-            self._runtime_config_snapshot(current),
-            resource_type="DSH 运行配置",
-            resource_key="global",
-            actor=actor,
-        )
-        cleaned_command = normalize_web_command(web_command)
-        cleaned_timeout = normalize_idle_timeout_minutes(idle_timeout_minutes)
-        # ``None`` 表示"本次请求未携带"（旧客户端不认识该字段）：保留已保存值，
-        # 不能回落到默认值——否则任何旧客户端保存一次配置就会静默清掉管理员
-        # 自定义的 Pi 启动命令。显式传空串表示"恢复默认"。
-        cleaned_pi_command = (
-            normalize_pi_web_command(pi_web_command)
-            if pi_web_command is not None
-            else str(current.get("pi_web_command") or "") or normalize_pi_web_command("")
-        )
-        # 上下文长度沿用同一条「未携带 / 显式清空」语义：旧客户端不认识该字段时
-        # 不能把管理员配置的窗口静默清掉，显式传 0 表示恢复为不声明。
-        cleaned_context_window = (
-            normalize_context_window(context_window)
-            if context_window is not None
-            else int(current.get("context_window") or 0)
-        )
-        cleaned_max_tokens = (
-            normalize_max_tokens(max_tokens)
-            if max_tokens is not None
-            else int(current.get("max_tokens") or 0)
-        )
-        saved = self._repo.save_runtime_config(
-            web_command=cleaned_command,
-            pi_web_command=cleaned_pi_command,
-            idle_timeout_minutes=cleaned_timeout,
-            base_url=normalize_base_url(base_url),
-            available_models=normalize_models(available_models),
-            context_window=cleaned_context_window,
-            max_tokens=cleaned_max_tokens,
-        )
+        with self._store.transaction():
+            current = self._resolve_runtime_config()
+            require_edit_token(
+                expected_edit_token,
+                self._runtime_config_snapshot(current),
+                resource_type="DSH 运行配置",
+                resource_key="global",
+                actor=actor,
+            )
+            cleaned_command = normalize_web_command(web_command)
+            cleaned_timeout = normalize_idle_timeout_minutes(idle_timeout_minutes)
+            # ``None`` 表示"本次请求未携带"（旧客户端不认识该字段）：保留已保存值，
+            # 不能回落到默认值——否则任何旧客户端保存一次配置就会静默清掉管理员
+            # 自定义的 Pi 启动命令。显式传空串表示"恢复默认"。
+            cleaned_pi_command = (
+                normalize_pi_web_command(pi_web_command)
+                if pi_web_command is not None
+                else str(current.get("pi_web_command") or "") or normalize_pi_web_command("")
+            )
+            # 上下文长度沿用同一条「未携带 / 显式清空」语义：旧客户端不认识该字段时
+            # 不能把管理员配置的窗口静默清掉，显式传 0 表示恢复为不声明。
+            cleaned_context_window = (
+                normalize_context_window(context_window)
+                if context_window is not None
+                else int(current.get("context_window") or 0)
+            )
+            cleaned_max_tokens = (
+                normalize_max_tokens(max_tokens)
+                if max_tokens is not None
+                else int(current.get("max_tokens") or 0)
+            )
+            cleaned_models = normalize_models(available_models)
+            if model_vision is not None and model_vision.keys() - set(cleaned_models):
+                raise ValidationError("支持图片的设置只能用于当前可用模型列表中的模型 ID")
+            vision = current["model_vision"] if model_vision is None else model_vision
+            existing_models = set(current["available_models"])
+            cleaned_vision = {
+                model: vision.get(model, False)
+                for model in cleaned_models
+                if model in vision or model not in existing_models
+            }
+            saved = self._repo.save_runtime_config(
+                web_command=cleaned_command,
+                pi_web_command=cleaned_pi_command,
+                idle_timeout_minutes=cleaned_timeout,
+                base_url=normalize_base_url(base_url),
+                available_models=cleaned_models,
+                model_vision=cleaned_vision,
+                context_window=cleaned_context_window,
+                max_tokens=cleaned_max_tokens,
+            )
         resolved = self._resolve_runtime_config_from(saved)
         logger.info(
             "DSH 运行配置已保存 web_command=%s idle_timeout_minutes=%s models=%d actor=%s",
@@ -304,6 +317,7 @@ class DshConfigService:
             "base_url": runtime["base_url"],
             "base_url_source": runtime["base_url_source"],
             "available_models": runtime["available_models"],
+            "model_vision": runtime["model_vision"],
             "context_window": runtime["context_window"],
             "max_tokens": runtime["max_tokens"],
             "default_model": str(group.get("default_model") or ""),
@@ -347,6 +361,7 @@ class DshConfigService:
             "base_url": resolved_base_url,
             "base_url_source": source,
             "available_models": normalize_models(raw.get("available_models") or []),
+            "model_vision": raw["model_vision"],
             "context_window": normalize_context_window(raw.get("context_window")),
             "max_tokens": normalize_max_tokens(raw.get("max_tokens")),
             "updated_at": raw.get("updated_at"),
@@ -362,6 +377,7 @@ class DshConfigService:
             "resolved_base_url": str(config.get("base_url") or ""),
             "base_url_source": str(config.get("base_url_source") or ""),
             "available_models": list(config.get("available_models") or []),
+            "model_vision": dict(config["model_vision"]),
             "context_window": int(config.get("context_window") or 0),
             "max_tokens": int(config.get("max_tokens") or 0),
             "updated_at": config.get("updated_at"),
@@ -376,6 +392,7 @@ class DshConfigService:
             "idle_timeout_minutes": int(config.get("idle_timeout_minutes") or 0),
             "base_url": str(config.get("saved_base_url") or ""),
             "available_models": list(config.get("available_models") or []),
+            "model_vision": dict(config["model_vision"]),
             "context_window": int(config.get("context_window") or 0),
             "max_tokens": int(config.get("max_tokens") or 0),
         }

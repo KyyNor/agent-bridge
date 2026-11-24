@@ -469,6 +469,7 @@ def apply_followup_schema(store: Any, conn: sqlite3.Connection) -> None:
         {
             "base_url": "TEXT NOT NULL DEFAULT ''",
             "available_models_json": "TEXT NOT NULL DEFAULT '[]'",
+            "model_vision_json": "TEXT NOT NULL DEFAULT '{}'",
             # Pi 工作台的启动命令模板（与 DSH 的 web_command 并列，组级配置共享）。
             "pi_web_command": "TEXT NOT NULL DEFAULT ''",
             # 托管模型条目的上下文长度（0 = 不声明，沿用 CLI 自身默认）。

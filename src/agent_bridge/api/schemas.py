@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, StrictBool, model_validator
 
 from agent_bridge.knowledge_management.docs_knowledge.sync_policy import SyncPolicy
 
@@ -49,6 +49,8 @@ class DshRuntimeConfigUpdateRequest(BaseModel):
     idle_timeout_minutes: int = Field(ge=1, le=43200)
     base_url: str = Field(default="", max_length=2048)
     available_models: list[str] = Field(default_factory=list, max_length=200)
+    # 缺省保留现有设置。对象内缺少的模型沿用上游的图片输入能力。
+    model_vision: dict[str, StrictBool] | None = Field(default=None, max_length=200)
     # 托管模型条目的上下文长度（token）。0 表示不声明，由 DSH / Pi 沿用各自
     # 默认（DSH 262144、Pi 128000）。语义同 pi_web_command：None = 未携带，
     # 保留已保存值；显式 0 = 恢复为不声明。

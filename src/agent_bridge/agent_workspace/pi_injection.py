@@ -51,13 +51,17 @@ MCP_FILENAME = "mcp.json"
 # -- models.json --
 
 
-def _model_entry(name: str, *, context_window: int, max_tokens: int) -> dict[str, Any]:
+def _model_entry(
+    name: str, *, context_window: int, max_tokens: int, supports_vision: bool | None
+) -> dict[str, Any]:
     """构造一条托管模型条目；两个上限字段都是「0 = 不声明」，故省略而非写 0。
 
     ``models.json`` 是整份 schema 校验，``contextWindow`` / ``maxTokens``
     ``<= 0`` 会让整个文件失效（连用户自有的 provider 一起丢失）。
     """
     entry: dict[str, Any] = {"id": name, "name": name}
+    if supports_vision is not None:
+        entry["input"] = ["text", "image"] if supports_vision else ["text"]
     if context_window > 0:
         entry["contextWindow"] = context_window
     if max_tokens > 0:
@@ -71,6 +75,7 @@ def build_models_payload(
     base_url: str,
     models: list[str],
     api_key_env: str,
+    model_vision: dict[str, bool] | None = None,
     context_window: int = 0,
     max_tokens: int = 0,
 ) -> dict[str, Any]:
@@ -86,13 +91,16 @@ def build_models_payload(
         # 未配置接入时移除托管条目，避免留下指向空地址的死 provider。
         providers.pop(MANAGED_PROVIDER_KEY, None)
     else:
+        vision = model_vision or {}
         providers[MANAGED_PROVIDER_KEY] = {
             "baseUrl": base_url,
             "api": "openai-completions",
             # API Key 只经环境变量展开，不写入文件。
             "apiKey": "${" + api_key_env + "}",
             "models": [
-                _model_entry(name, context_window=context_window, max_tokens=max_tokens)
+                _model_entry(
+                    name, context_window=context_window, max_tokens=max_tokens, supports_vision=vision.get(name)
+                )
                 for name in models
             ],
         }
@@ -107,6 +115,7 @@ def write_models(
     gid: int,
     base_url: str,
     models: list[str],
+    model_vision: dict[str, bool] | None = None,
     context_window: int = 0,
     max_tokens: int = 0,
 ) -> Path:
@@ -117,6 +126,7 @@ def write_models(
         base_url=base_url,
         models=models,
         api_key_env=PI_API_KEY_ENV,
+        model_vision=model_vision,
         context_window=context_window,
         max_tokens=max_tokens,
     )
